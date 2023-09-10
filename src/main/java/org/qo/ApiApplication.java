@@ -4,11 +4,16 @@ import com.mysql.cj.log.Log;
 import com.mysql.cj.protocol.a.authentication.Sha256PasswordPlugin;
 import com.sun.source.tree.ReturnTree;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.websocket.OnError;
+import org.apache.catalina.User;
+import org.jetbrains.annotations.NotNull;
 import org.json.HTTP;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import org.json.JSONException;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.bind.annotation.RequestMapping;
 
@@ -47,24 +52,69 @@ public class ApiApplication {
     public static String noticeData = "data/notice.json";
     public ApiApplication() throws IOException {
     }
-    @GetMapping("/about")
-    public String about(){
-        return "Quantum Original Api Version 06 developed by glowingstone124 original code by Minecreeper2086";
-        //return "about";
-    }
     @RequestMapping("/")
     public String root(){
         return "QAPI PROJECT ROOT DIRECTIONARY, this is NOT an api for JCSUF or anything else.";
     }
+    @RequestMapping("/introduction")
+    public String introductionMenu(){
+        try {
+            if ((Files.readString(Path.of("forum/introduction/main.json"), StandardCharsets.UTF_8)!= null)){
+                return Files.readString(Path.of("forum/introduction/main.json"));
+            }
+        } catch (IOException e){
+            return ReturnInterface.failed("ERROR:CONFIGURATION NOT FOUND");
+        }
+        return ReturnInterface.failed("ERROR");
+    }
+    @RequestMapping("/introduction/server")
+    public String serverIntros(@NotNull int articleID) throws Exception{
+        if (articleID == -1){
+            return Files.readString(Path.of("forum/introduction/server/menu.json"), StandardCharsets.UTF_8);
+        } else {
+            if (UserProcess.queryArticles(articleID, 0) != null) {
+                return ReturnInterface.success(Files.readString(Path.of("forum/introduction/server/" + UserProcess.queryArticles(articleID, 0) + ".html")));
+            }
+            return ReturnInterface.failed("NOT FOUND");
+        }
+    }
+    @RequestMapping("/introduction/attractions")
+    public String attractionIntros(@NotNull int articleID) throws Exception{
+        if (articleID == -1){
+            return Files.readString(Path.of("forum/introduction/attractions/menu.json"), StandardCharsets.UTF_8);
+        } else {
+            if (UserProcess.queryArticles(articleID, 2) != null) {
+                return ReturnInterface.success(Files.readString(Path.of("forum/introduction/attractions/" + UserProcess.queryArticles(articleID, 2) + ".html")));
+            }
+            return ReturnInterface.failed("NOT FOUND");
+        }
+    }
+    @RequestMapping("/introduction/commands")
+    public String commandIntros(@NotNull int articleID) throws Exception{
+        if (articleID == -1){
+            return Files.readString(Path.of("forum/introduction/commands/menu.json"), StandardCharsets.UTF_8);
+        } else {
+            if (UserProcess.queryArticles(articleID, 1) != null) {
+                return ReturnInterface.success(Files.readString(Path.of("forum/introduction/commands/" + UserProcess.queryArticles(articleID, 1) + ".html")));
+            }
+            return ReturnInterface.failed("NOT FOUND");
+        }
+    }
+    @RequestMapping("/introduction/notice")
+    public String notice(@NotNull int articleID) throws Exception{
+        if (articleID == -1){
+            return Files.readString(Path.of("forum/introduction/notices/menu.json"), StandardCharsets.UTF_8);
+        } else {
+            if (UserProcess.queryArticles(articleID, 3) != null) {
+                return ReturnInterface.success(Files.readString(Path.of("forum/introduction/notices/" + UserProcess.queryArticles(articleID, 3) + ".html")));
+            }
+            return ReturnInterface.failed("NOT FOUND");
+        }
+    }
     @RequestMapping("/api/notice")
-    public String JCSUF1(HttpServletRequest request){
-        JSONObject noticeObj = new JSONObject();
-        noticeObj.put("title", "QForum正式上线啦！");
-        noticeObj.put("article", "欢迎加入QOForum！此forum功能暂不完善，请等待后续开发");
-        noticeObj.put("author", "admin");
-        noticeObj.put("time", "2023/8/7");
-        Logger.Log(IPUtil.getIpAddr(request)+" Queried NOTICE api.", 0);
-        return noticeObj.toString();
+    public String JCSUF1(HttpServletRequest request) throws IOException {
+        String noticedata = "data/notice.json";
+        return Files.readString(Path.of(noticedata));
     }
     @GetMapping("/forum/login")
     public String userLogin(String username, String password , HttpServletRequest request) {
@@ -237,7 +287,7 @@ public class ApiApplication {
     @RequestMapping("/app/latest")
     public String update(){
         JSONObject returnObj = new JSONObject();
-        returnObj.put("version", 1);
+        returnObj.put("version", 2);
         returnObj.put("die", false);
         return returnObj.toString();
     }
@@ -310,7 +360,7 @@ public class ApiApplication {
         return null;
     }
     @RequestMapping("/forum/register")
-    public String register(String username, String password, String token, HttpServletRequest request) throws Exception{
+    public String register(@NotNull String username, @NotNull String password, @NotNull String token, HttpServletRequest request) throws Exception{
         if(Objects.equals(token, token(username,1700435)) && !UserProcess.queryForum(username)){
             try {
                 regforum(username, password);
@@ -455,33 +505,40 @@ public class ApiApplication {
         }
     }
     @RequestMapping("/qo/upload/registry")
-    public static String InsertData(String name, Long uid, HttpServletRequest request) throws Exception {
-        if (!UserProcess.dumplicateUID(uid)) {
-            try {
-                // 连接到数据库
-                Connection connection = DriverManager.getConnection(jdbcUrl, sqlusername, sqlpassword);
+    public static String InsertData(@NotNull String name, @NotNull Long uid, HttpServletRequest request) throws Exception {
+        if (!UserProcess.dumplicateUID(uid) && !name.equals(null) && !uid.equals(null)) {
+            if (!UserProcess.hasIp(IPUtil.getIpAddr(request))) {
+                try {
+                    // 连接到数据库
+                    Connection connection = DriverManager.getConnection(jdbcUrl, sqlusername, sqlpassword);
 
-                // 准备插入语句
-                String insertQuery = "INSERT INTO users (username, uid,frozen, remain) VALUES (?, ?, ?, ?)";
-                PreparedStatement preparedStatement = connection.prepareStatement(insertQuery);
+                    // 准备插入语句
+                    String insertQuery = "INSERT INTO users (username, uid,frozen, remain) VALUES (?, ?, ?, ?)";
+                    PreparedStatement preparedStatement = connection.prepareStatement(insertQuery);
 
-                // 设置参数值
-                preparedStatement.setString(1, name);
-                preparedStatement.setLong(2, uid);
-                preparedStatement.setBoolean(3, false);
-                preparedStatement.setInt(4, 3);
-                // 执行插入操作
-                int rowsAffected = preparedStatement.executeUpdate();
-                System.out.println(rowsAffected + " row(s) inserted." + "from " + IPUtil.getIpAddr(request));
-                System.out.println(preparedStatement.toString());
-                // 关闭资源
-                preparedStatement.close();
-                connection.close();
-                return "Success!";
-            } catch (Exception e) {
-                e.printStackTrace();
+                    // 设置参数值
+                    preparedStatement.setString(1, name);
+                    preparedStatement.setLong(2, uid);
+                    preparedStatement.setBoolean(3, false);
+                    preparedStatement.setInt(4, 3);
+                    // 执行插入操作
+                    int rowsAffected = preparedStatement.executeUpdate();
+                    System.out.println(rowsAffected + " row(s) inserted." + "from " + IPUtil.getIpAddr(request));
+                    System.out.println(preparedStatement.toString());
+                    // 关闭资源
+                    preparedStatement.close();
+                    connection.close();
+                    UserProcess.insertIp(IPUtil.getIpAddr(request));
+                    return "Success!";
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+                return "FAILED";
+            } else {
+                return  ReturnInterface.failed("Used IP");
             }
-            return "FAILED";
+        } else if(name.equals(null) || uid.equals(null)){
+            Logger.Log("Register ERROR: username or uid null", 2);
         }
         return "FAILED";
     }
