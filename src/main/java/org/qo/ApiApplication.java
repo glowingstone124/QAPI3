@@ -55,7 +55,7 @@ public class ApiApplication {
     }
     @RequestMapping("/")
     public String root(){
-        return "QAPI PROJECT ROOT DIRECTIONARY, this is NOT an api for JCSUF or anything else.";
+        return ReturnInterface.success("QOAPI Project Root Dictionary");
     }
     @RequestMapping("/introduction")
     public String introductionMenu(){
@@ -675,39 +675,5 @@ public class ApiApplication {
         responseJson.put("code", 1);
         responseJson.put("qq", -1);
         return responseJson.toString();
-    }
-    public static void updateHash() {
-
-        try {
-            // 连接到数据库
-            Connection connection = DriverManager.getConnection(jdbcUrl, sqlusername, sqlpassword);
-
-            // 查询所有记录
-            String query = "SELECT * FROM forum";
-            PreparedStatement preparedStatement = connection.prepareStatement(query);
-            ResultSet resultSet = preparedStatement.executeQuery();
-
-            // 准备更新密码的语句
-            String updateQuery = "UPDATE forum SET password = ? WHERE username = ?";
-            PreparedStatement updateStatement = connection.prepareStatement(updateQuery);
-
-            while (resultSet.next()) {
-                String username = resultSet.getString("username");
-                String plainPassword = resultSet.getString("password");
-
-                // 将密码进行SHA-256哈希处理
-                String hashedPassword = hashSHA256(plainPassword);
-
-                // 更新数据库中的密码
-                updateStatement.setString(1, hashedPassword);
-                updateStatement.setString(2, username);
-                updateStatement.executeUpdate();
-            }
-
-            System.out.println("Passwords hashed and updated successfully.");
-
-        } catch (SQLException e) {
-            e.printStackTrace();
-        }
     }
 }
