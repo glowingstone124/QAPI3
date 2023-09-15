@@ -11,8 +11,12 @@ import org.springframework.web.filter.CorsFilter;
 @SpringBootApplication
 public class Main {
     public static void main(String[] args) throws Exception {
+        Logger.Log("API Started.", 0);
         SpringApplication.run(ApiApplication.class, args);
         Logger.startLogWriter("log.log", 3000);
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            Logger.Log("API shutdown.", 2);
+        }));
     }
 
     @Bean
