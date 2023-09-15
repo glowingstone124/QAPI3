@@ -79,7 +79,6 @@ public class UserProcess{
 
         try (Connection connection = DriverManager.getConnection(jdbcUrl, sqlusername, sqlpassword)) {
             String selectQuery = "SELECT * FROM " + ArticleSheet +" WHERE id = ?";
-            Logger.Log(selectQuery, 0);
 
             try (PreparedStatement preparedStatement = connection.prepareStatement(selectQuery)) {
                 preparedStatement.setInt(1, ArticleID);

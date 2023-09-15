@@ -12,7 +12,7 @@ import org.springframework.web.filter.CorsFilter;
 public class Main {
     public static void main(String[] args) throws Exception {
         SpringApplication.run(ApiApplication.class, args);
-        //ApiApplication.updateHash();
+        Logger.startLogWriter("log.log", 3000);
     }
 
     @Bean
@@ -22,7 +22,7 @@ public class Main {
             public void addCorsMappings(CorsRegistry registry) {
                 registry.addMapping("/**")
                         .allowedOrigins("http://127.0.0.1:5500") // 允许的来源
-                        .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS") // 允许的HTTP方法
+                        .allowedMethods("GET", "POST") // 允许的HTTP方法
                         .allowedHeaders("*") // 允许的请求头信息
                         .allowCredentials(true); // 允许发送凭据（例如，cookies）
             }

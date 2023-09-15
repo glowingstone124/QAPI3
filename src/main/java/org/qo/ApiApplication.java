@@ -16,6 +16,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.servlet.ModelAndView;
 
 import java.io.*;
 import java.lang.management.ManagementFactory;
@@ -115,6 +116,11 @@ public class ApiApplication {
     public String JCSUF1(HttpServletRequest request) throws IOException {
         String noticedata = "data/notice.json";
         return Files.readString(Path.of(noticedata));
+    }
+    @RequestMapping("/qo/app")
+    public String returnContent() throws IOException {
+        String index = Files.readString(Path.of("webs/index.html"));
+        return index;
     }
     @GetMapping("/forum/login")
     public String userLogin(String username, String password , HttpServletRequest request) {
@@ -287,7 +293,7 @@ public class ApiApplication {
     @RequestMapping("/app/latest")
     public String update(){
         JSONObject returnObj = new JSONObject();
-        returnObj.put("version", 2);
+        returnObj.put("version", 3);
         returnObj.put("die", false);
         return returnObj.toString();
     }
