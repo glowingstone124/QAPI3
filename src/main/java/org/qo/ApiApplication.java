@@ -292,7 +292,7 @@ public class ApiApplication {
     }
     @RequestMapping("/qo/query/resetpassword")
     public String resetPassword(String username, String hash, int deviceid, String newPassword, HttpServletRequest request) throws Exception {
-        if (deviceid == 77560 && Objects.equals(UserProcess.queryHash(hash), username)) {
+        if (deviceid == 77560 && Objects.equals(UserProcess.queryHash(hash), username) && !Objects.equals(UserProcess.queryHash(hash), null)) {
             if (UserProcess.changeHash(username, hashSHA256(newPassword))) {
                 Logger.Log("[PASSWORD] ip " + IPUtil.getIpAddr(request) + " queried resetPassword and changed username " + username + "'s password.",0);
                 return ReturnInterface.success("SUCCESS");
