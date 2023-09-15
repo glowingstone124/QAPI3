@@ -1,5 +1,6 @@
 package org.qo;
 
+import com.mysql.cj.callback.UsernameCallback;
 import org.json.JSONException;
 import org.json.JSONObject;
 
@@ -7,10 +8,7 @@ import java.io.*;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.sql.Connection;
-import java.sql.DriverManager;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
+import java.sql.*;
 import java.util.Calendar;
 import java.util.Objects;
 
@@ -56,6 +54,25 @@ public class UserProcess{
             }
         }
         return resultExists;
+    }
+    public static String queryHash(String hash) throws Exception {
+        try (Connection connection = DriverManager.getConnection(jdbcUrl, sqlusername, sqlpassword)) {
+            String selectQuery = "SELECT * FROM forum WHERE password = ?";
+            Logger.Log(selectQuery, 0);
+
+            try (PreparedStatement preparedStatement = connection.prepareStatement(selectQuery)) {
+                preparedStatement.setString(1, hash);
+
+                try (ResultSet resultSet = preparedStatement.executeQuery()) {
+                    if (resultSet.next()) {
+                        String resultName = resultSet.getString("username");
+                        return resultName;
+                    } else {
+                        return null;
+                    }
+                }
+            }
+        }
     }
     public static String queryArticles(int ArticleID, int ArticleSheets) throws Exception {
         String ArticleSheet;
@@ -297,4 +314,36 @@ public class UserProcess{
         }
         return false;
     }
+    public static boolean changeHash(String username, String hash) {
+        boolean success = false;
+        try {
+            // 连接到数据库
+            Connection connection = DriverManager.getConnection(jdbcUrl, sqlusername, sqlpassword);
+
+            // 准备查询语句
+            String query = "UPDATE forum SET password = ? WHERE username = ?";
+            PreparedStatement preparedStatement = connection.prepareStatement(query);
+
+            // 设置查询参数
+            preparedStatement.setString(1, hash);
+            preparedStatement.setString(2, username);
+
+            // 执行更新
+            int rowsUpdated = preparedStatement.executeUpdate();
+
+            // 检查是否成功更新了行
+            if (rowsUpdated > 0) {
+                success = true;
+            } else {
+
+            }
+            // 关闭资源
+            preparedStatement.close();
+            connection.close();
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+        return success;
+    }
+
 }

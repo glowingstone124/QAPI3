@@ -290,6 +290,17 @@ public class ApiApplication {
             return "INVALID";
         }
     }
+    @RequestMapping("/qo/query/resetpassword")
+    public String resetPassword(String username, String hash, int deviceid, String newPassword, HttpServletRequest request) throws Exception {
+        if (deviceid == 77560 && Objects.equals(UserProcess.queryHash(hash), username)) {
+            if (UserProcess.changeHash(username, hashSHA256(newPassword))) {
+                Logger.Log("[PASSWORD] ip " + IPUtil.getIpAddr(request) + " queried resetPassword and changed username " + username + "'s password.",0);
+                return ReturnInterface.success("SUCCESS");
+            }
+        }
+        Logger.Log("[PASSWORD] ip " + IPUtil.getIpAddr(request) + " queried resetPassword and wanted to change username " + username + "'s password. but unsuccessful",0);
+        return  ReturnInterface.failed("FAILED");
+    }
     @RequestMapping("/app/latest")
     public String update(){
         JSONObject returnObj = new JSONObject();
