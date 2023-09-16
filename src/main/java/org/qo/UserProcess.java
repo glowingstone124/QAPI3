@@ -321,27 +321,20 @@ public class UserProcess{
     public static boolean changeHash(String username, String hash) {
         boolean success = false;
         try {
-            // 连接到数据库
             Connection connection = DriverManager.getConnection(jdbcUrl, sqlusername, sqlpassword);
 
-            // 准备查询语句
             String query = "UPDATE forum SET password = ? WHERE username = ?";
             PreparedStatement preparedStatement = connection.prepareStatement(query);
 
-            // 设置查询参数
             preparedStatement.setString(1, hash);
             preparedStatement.setString(2, username);
-
-            // 执行更新
             int rowsUpdated = preparedStatement.executeUpdate();
 
-            // 检查是否成功更新了行
             if (rowsUpdated > 0) {
                 success = true;
             } else {
 
             }
-            // 关闭资源
             preparedStatement.close();
             connection.close();
         } catch (SQLException e) {
