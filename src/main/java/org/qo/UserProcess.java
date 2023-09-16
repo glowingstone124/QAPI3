@@ -5,6 +5,7 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.io.*;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -63,23 +64,19 @@ public class UserProcess{
         return resultExists;
     }
     public static String queryHash(String hash) throws Exception {
-        try (Connection connection = DriverManager.getConnection(jdbcUrl, sqlusername, sqlpassword)) {
-            String selectQuery = "SELECT * FROM forum WHERE password = ?";
-            Logger.Log(selectQuery, 0);
+        String CODE = "users/recoverycode/index.json";
+        String jsonContent = new String(Files.readAllBytes(Path.of(CODE)), StandardCharsets.UTF_8);
+        JSONObject codeObject = new JSONObject(jsonContent);
 
-            try (PreparedStatement preparedStatement = connection.prepareStatement(selectQuery)) {
-                preparedStatement.setString(1, hash);
-
-                try (ResultSet resultSet = preparedStatement.executeQuery()) {
-                    if (resultSet.next()) {
-                        String resultName = resultSet.getString("username");
-                        return resultName;
-                    } else {
-                        return null;
-                    }
-                }
-            }
+        if (codeObject.has(hash)) {
+            String username = codeObject.getString(hash);
+            codeObject.remove(hash); // 从 JSON 对象中删除匹配的键值对
+            // 保存更新后的 JSON 文件，如果需要的话
+            Files.write(Path.of(CODE), codeObject.toString().getBytes(StandardCharsets.UTF_8));
+            return username; // 返回关联的用户名
         }
+
+        return null; // 如果没有找到匹配的哈希值，返回 null 或适当的默认值
     }
     public static String queryArticles(int ArticleID, int ArticleSheets) throws Exception {
         String ArticleSheet;
