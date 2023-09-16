@@ -17,7 +17,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.servlet.ModelAndView;
-
+import org.springframework.web.ErrorResponse;
 import java.io.*;
 import java.lang.management.ManagementFactory;
 import java.net.HttpURLConnection;
@@ -358,9 +358,9 @@ public class ApiApplication {
         return diskUsageJson;
     }
     @RequestMapping("/qo/time")
-    public long timedate() {
+    public String timedate() {
         long timeStamp = System.currentTimeMillis();
-        return timeStamp;
+        return ReturnInterface.success(String.valueOf(timeStamp));
     }
     @PostMapping("/qo/upload/status")
     public String handlePost(@RequestBody String data, HttpServletRequest request) {
@@ -370,8 +370,8 @@ public class ApiApplication {
         return null;
     }
     @PostMapping("/qo/upload/CrStatus")
-    public String handleCrUpload(@RequestBody String data){
-        if (data != null) {
+    public String handleCrUpload(@RequestBody String data, HttpServletRequest request){
+        if (data != null && IPUtil.getIpAddr(request).equals("127.0.0.1")) {
            CreativeStatus = data;
         }
         return null;
@@ -404,17 +404,6 @@ public class ApiApplication {
         serverStatus = "[]";
         serverStatus = CreativeStatus;
         return serverStatus;
-    }
-    @PostMapping("/qo/upload/rebind")
-    public String handleRebind(String player_name, String uid, String token) throws IOException {
-        String unusedToken = token(player_name, Long.parseLong(uid));
-        if(Objects.equals(token,unusedToken)) {
-            reBind(player_name, uid);
-            Logger.Log("[rebind]" + player_name + " rebinded.", 0);
-            return "Success!";
-        }
-        Logger.Log("[rebind]" + player_name + " rebinded but failed.", 0);
-        return "FAILED";
     }
     private static String token(String player_name, long qq) {
         String charset = "qazxswedcvfrtgbnhyujmkiolp0129384756_POILKJMNBUYTHGFVCXREWQDSAZ";
@@ -492,22 +481,6 @@ public class ApiApplication {
             e.printStackTrace();
             return null;
         }
-    }
-    public boolean reBind(String name, String uid) throws IOException {
-        JSONArray jsonArray;
-        jsonArray = new JSONArray(jsonData);
-        for (int i = 0; i < jsonArray.length(); i++) {
-            JSONObject user = jsonArray.optJSONObject(i);
-            if (user.optString("username", "").equals(name)) {
-                // 用户已存在，更新uid和remain
-                user.put("uid", uid);
-                int remain = user.optInt("remain", 3);
-                user.put("remain", Math.max(0, remain - 1));
-                Files.write(Paths.get(jsonData), jsonArray.toString(4).getBytes());
-                return true;
-            }
-        }
-        return false;
     }
 
     public static class UserInfo {

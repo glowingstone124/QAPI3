@@ -20,17 +20,10 @@ public class Logger {
         String logEntry;
 
         switch (level) {
-            case 0:
-                logEntry = "[" + timestamp + "] [INFO] " + message;
-                break;
-            case 1:
-                logEntry = "[" + timestamp + "] [WARNING] " + message;
-                break;
-            case 2:
-                logEntry = "[" + timestamp + "] [ERROR] " + message;
-                break;
-            default:
-                logEntry = "[" + timestamp + "] [UNKNOWN] " + message;
+            case 0 -> logEntry = "[" + timestamp + "] [INFO] " + message;
+            case 1 -> logEntry = "[" + timestamp + "] [WARNING] " + message;
+            case 2 -> logEntry = "[" + timestamp + "] [ERROR] " + message;
+            default -> logEntry = "[" + timestamp + "] [UNKNOWN] " + message;
         }
 
         synchronized (lock) {

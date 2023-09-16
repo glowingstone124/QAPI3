@@ -37,7 +37,14 @@ public class UserProcess{
                 return null;
         }
     }
-
+    public static boolean SQLAvliable() {
+        boolean success = true;
+        try (Connection connection = DriverManager.getConnection(jdbcUrl, sqlusername, sqlpassword)){
+        } catch (SQLException e){
+            success = false;
+        }
+        return success;
+    }
     public static boolean queryForum(String username) throws Exception {
         boolean resultExists = false;
 
@@ -345,5 +352,4 @@ public class UserProcess{
         }
         return success;
     }
-
 }
