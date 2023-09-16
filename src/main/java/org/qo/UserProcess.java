@@ -70,13 +70,12 @@ public class UserProcess{
 
         if (codeObject.has(hash)) {
             String username = codeObject.getString(hash);
-            codeObject.remove(hash); // 从 JSON 对象中删除匹配的键值对
-            // 保存更新后的 JSON 文件，如果需要的话
+            codeObject.remove(hash);
             Files.write(Path.of(CODE), codeObject.toString().getBytes(StandardCharsets.UTF_8));
-            return username; // 返回关联的用户名
+            return username;
         }
 
-        return null; // 如果没有找到匹配的哈希值，返回 null 或适当的默认值
+        return null;
     }
     public static String queryArticles(int ArticleID, int ArticleSheets) throws Exception {
         String ArticleSheet;
@@ -114,22 +113,6 @@ public class UserProcess{
                 }
             }
         }
-    }
-    public static boolean forumUserExist(String username) throws IOException {
-        // 读取现有的usermap.json文件内容
-        String content = readFile(FILE_PATH);
-        JSONObject usermapJson = new JSONObject(content);
-
-        // 检查用户是否存在于JSON对象的键集合中
-        return usermapJson.has(username);
-    }
-    public static boolean serverUserExist(String username) throws IOException {
-        // 读取现有的usermap.json文件内容
-        String content = readFile(SERVER_FILE_PATH);
-        JSONObject usermapJson = new JSONObject(content);
-
-        // 检查用户是否存在于JSON对象的键集合中
-        return usermapJson.has(username);
     }
     public static boolean VerifyPSWD(String username, String inputPassword) throws IOException {
         try {
