@@ -18,9 +18,6 @@ public class Main {
         Logger.Log("API Started.", 0);
         SpringApplication.run(ApiApplication.class, args);
         Logger.startLogWriter("log.log", 3000);
-        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-            Logger.Log("API shutdown.", 2);
-        }));
         Scanner scanner = new Scanner(System.in);
         String input = scanner.nextLine();
         switch (input){

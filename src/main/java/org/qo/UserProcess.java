@@ -1,6 +1,7 @@
 package org.qo;
 
 import com.mysql.cj.callback.UsernameCallback;
+import io.micrometer.observation.Observation;
 import org.json.JSONException;
 import org.json.JSONObject;
 

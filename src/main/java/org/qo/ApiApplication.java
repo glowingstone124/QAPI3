@@ -160,10 +160,13 @@ public class ApiApplication {
     }
     @JsonProperty("myinfo")
     @RequestMapping("/forum/fetch/myself")
-    public String myinfo(String name, HttpServletRequest request) throws Exception {
+    public String myinfo(@NotNull String name, HttpServletRequest request) throws Exception {
         String date;
         Boolean premium;
         Boolean donate;
+        if (name.isEmpty()){
+
+        }
         try {
             // 连接到数据库
             Connection connection = DriverManager.getConnection(jdbcUrl, sqlusername, sqlpassword);
