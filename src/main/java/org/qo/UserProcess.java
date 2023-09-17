@@ -245,34 +245,33 @@ public class UserProcess{
         }
         return false;
     }
-    public static boolean insertIp(String ip){
+    public static boolean insertIp(String ip) {
         try {
-            // 连接到数据库
+            // Connect to the database
             Connection connection = DriverManager.getConnection(jdbcUrl, sqlusername, sqlpassword);
 
-            // 准备查询语句
+            // Prepare the INSERT statement
             String query = "INSERT INTO iptable (ip) VALUES (?)";
             PreparedStatement preparedStatement = connection.prepareStatement(query);
 
-            // 设置查询参数
+            // Set the parameter
             preparedStatement.setString(1, ip);
 
-            // 执行查询
-            ResultSet resultSet = preparedStatement.executeQuery();
+            // Execute the INSERT statement
+            int rowsAffected = preparedStatement.executeUpdate();
 
-            // 处理查询结果
-            if (resultSet.next()) {
-                return true;
-            }
-            // 关闭资源
-            resultSet.close();
+            // Close resources
             preparedStatement.close();
             connection.close();
+
+            // Check if the INSERT was successful
+            return rowsAffected > 0;
         } catch (Exception e) {
             e.printStackTrace();
         }
         return false;
     }
+
     public static boolean dumplicateUID(long uid){
         try {
             // 连接到数据库
