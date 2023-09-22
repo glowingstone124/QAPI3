@@ -1,23 +1,22 @@
 package org.qo;
 
-import com.mysql.cj.callback.UsernameCallback;
-import io.micrometer.observation.Observation;
 import org.json.JSONException;
 import org.json.JSONObject;
 
-import java.io.*;
+import java.io.BufferedReader;
+import java.io.FileReader;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.sql.*;
-import java.util.Calendar;
 import java.util.Objects;
 
 public class UserProcess{
+    public static final String CODE = "users/recoverycode/index.json";
     private static final String FILE_PATH = "usermap.json";
     private static final String SERVER_FILE_PATH = "playermap.json";
-    private static final String SQL_CONFIGURATION = "data/sql/info.json";
+    public static final String SQL_CONFIGURATION = "data/sql/info.json";
     public static String jdbcUrl = getDatabaseInfo("url");
     public static String sqlusername = getDatabaseInfo("username");
     public static String sqlpassword = getDatabaseInfo("password");
@@ -65,18 +64,20 @@ public class UserProcess{
         return resultExists;
     }
     public static String queryHash(String hash) throws Exception {
-        String CODE = "users/recoverycode/index.json";
         String jsonContent = new String(Files.readAllBytes(Path.of(CODE)), StandardCharsets.UTF_8);
         JSONObject codeObject = new JSONObject(jsonContent);
 
         if (codeObject.has(hash)) {
             String username = codeObject.getString(hash);
-            codeObject.remove(hash);
+            String finalOutput = username;
+           // codeObject.remove(hash);
             Files.write(Path.of(CODE), codeObject.toString().getBytes(StandardCharsets.UTF_8));
-            return username;
+            System.out.println(username);
+            return finalOutput;
+        } else {
+            System.out.println("mismatched");
+            return null;
         }
-
-        return null;
     }
     public static String queryArticles(int ArticleID, int ArticleSheets) throws Exception {
         String ArticleSheet;

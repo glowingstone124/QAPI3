@@ -1,15 +1,19 @@
 package org.qo;
+
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Scope;
-import org.springframework.web.servlet.config.annotation.CorsRegistry;
-import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 import org.springframework.web.filter.CorsFilter;
+import org.springframework.web.servlet.config.annotation.CorsRegistry;
+import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
 import java.util.Scanner;
+import java.util.Timer;
+import java.util.TimerTask;
+
+import static org.qo.server.Updater.executeCommand;
 
 @SpringBootApplication
 public class Main {
@@ -18,11 +22,24 @@ public class Main {
         Logger.Log("API Started.", 0);
         SpringApplication.run(ApiApplication.class, args);
         Logger.startLogWriter("log.log", 3000);
+        Timer timer = new Timer();
+        TimerTask task = new TimerTask() {
+            @Override
+            public void run() {
+                executeCommand();
+            }
+        };
+        long initialDelay = 0;
+        long period = 12 * 60 * 60 * 1000;
+        timer.scheduleAtFixedRate(task, initialDelay, period);
         Scanner scanner = new Scanner(System.in);
         String input = scanner.nextLine();
         switch (input){
             case "exit":
                 System.exit(0);
+            case "showdic":
+                Funcs.ShowDic();
+                break;
             default:
                 System.out.println("NO COMMAND AVAILABLE");
         }

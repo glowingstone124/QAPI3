@@ -1,31 +1,20 @@
 package org.qo;
+
 import com.fasterxml.jackson.annotation.JsonProperty;
-import com.mysql.cj.log.Log;
-import com.mysql.cj.protocol.a.authentication.Sha256PasswordPlugin;
-import com.sun.source.tree.ReturnTree;
 import jakarta.servlet.http.HttpServletRequest;
-import jakarta.websocket.OnError;
-import org.apache.catalina.User;
 import org.jetbrains.annotations.NotNull;
-import org.json.HTTP;
-import org.json.JSONArray;
 import org.json.JSONObject;
-import org.json.JSONException;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.servlet.ModelAndView;
-import org.springframework.web.ErrorResponse;
+
 import java.io.*;
 import java.lang.management.ManagementFactory;
+import java.lang.management.OperatingSystemMXBean;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.sql.*;
@@ -33,7 +22,6 @@ import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.List;
 import java.util.Objects;
-import java.lang.management.OperatingSystemMXBean;
 
 
 @RestController
@@ -295,11 +283,15 @@ public class ApiApplication {
     }
     @RequestMapping("/qo/query/resetpassword")
     public String resetPassword(String username, String hash, int deviceid, String newPassword, HttpServletRequest request) throws Exception {
-        if (deviceid == 77560 && Objects.equals(UserProcess.queryHash(hash), username) && !Objects.equals(UserProcess.queryHash(hash), null)) {
+        if (deviceid == 77560 && UserProcess.queryHash(hash).equals(username) && !Objects.equals(UserProcess.queryHash(hash), null)) {
             if (UserProcess.changeHash(username, hashSHA256(newPassword))) {
                 Logger.Log("[PASSWORD] ip " + IPUtil.getIpAddr(request) + " queried resetPassword and changed username " + username + "'s password.",0);
                 return ReturnInterface.success("SUCCESS");
             }
+        } else if(deviceid != 77560) {
+            return ReturnInterface.failed("deviceid mismatched!");
+        } else if(!Objects.equals(UserProcess.queryHash(hash), username)){
+            return ReturnInterface.failed("Network Err");
         }
         Logger.Log("[PASSWORD] ip " + IPUtil.getIpAddr(request) + " queried resetPassword and wanted to change username " + username + "'s password. but unsuccessful",0);
         return  ReturnInterface.failed("FAILED");
