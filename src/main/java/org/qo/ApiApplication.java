@@ -61,8 +61,9 @@ public class ApiApplication {
         if (articleID == -1){
             return Files.readString(Path.of("forum/introduction/server/menu.json"), StandardCharsets.UTF_8);
         } else {
-            if (UserProcess.queryArticles(articleID, 0) != null) {
-                return ReturnInterface.success(Files.readString(Path.of("forum/introduction/server/" + UserProcess.queryArticles(articleID, 0) + ".html")));
+            String returnFile = Files.readString(Path.of("forum/introduction/server/" + articleID + ".html"));
+            if (returnFile != null) {
+                return ReturnInterface.success(Files.readString(Path.of("forum/introduction/server/" + articleID + ".html")));
             }
             return ReturnInterface.failed("NOT FOUND");
         }
@@ -72,8 +73,9 @@ public class ApiApplication {
         if (articleID == -1){
             return Files.readString(Path.of("forum/introduction/attractions/menu.json"), StandardCharsets.UTF_8);
         } else {
-            if (UserProcess.queryArticles(articleID, 2) != null) {
-                return ReturnInterface.success(Files.readString(Path.of("forum/introduction/attractions/" + UserProcess.queryArticles(articleID, 2) + ".html")));
+            String returnFile = Files.readString(Path.of("forum/introduction/attractions/" + articleID + ".html"));
+            if (returnFile != null) {
+                return ReturnInterface.success(Files.readString(Path.of("forum/introduction/attractions/" + articleID + ".html")));
             }
             return ReturnInterface.failed("NOT FOUND");
         }
@@ -83,8 +85,9 @@ public class ApiApplication {
         if (articleID == -1){
             return Files.readString(Path.of("forum/introduction/commands/menu.json"), StandardCharsets.UTF_8);
         } else {
-            if (UserProcess.queryArticles(articleID, 1) != null) {
-                return ReturnInterface.success(Files.readString(Path.of("forum/introduction/commands/" + UserProcess.queryArticles(articleID, 1) + ".html")));
+            String returnFile = Files.readString(Path.of("forum/introduction/commands/" + articleID + ".html"));
+            if (returnFile != null) {
+                return ReturnInterface.success(Files.readString(Path.of("forum/introduction/commands/" + articleID + ".html")));
             }
             return ReturnInterface.failed("NOT FOUND");
         }
@@ -94,8 +97,9 @@ public class ApiApplication {
         if (articleID == -1){
             return Files.readString(Path.of("forum/introduction/notices/menu.json"), StandardCharsets.UTF_8);
         } else {
-            if (UserProcess.queryArticles(articleID, 3) != null) {
-                return ReturnInterface.success(Files.readString(Path.of("forum/introduction/notices/" + UserProcess.queryArticles(articleID, 3) + ".html")));
+            String returnFile = Files.readString(Path.of("forum/introduction/notices/" + articleID + ".html"));
+            if (returnFile != null) {
+                return ReturnInterface.success(Files.readString(Path.of("forum/introduction/notices/" + articleID + ".html")));
             }
             return ReturnInterface.failed("NOT FOUND");
         }
@@ -606,23 +610,14 @@ public class ApiApplication {
             return ReturnInterface.failed("NOT FOUND");
         }
     }
-        @RequestMapping("/qo/download/registry")
+    @RequestMapping("/qo/download/registry")
     public static String GetData(String name) throws Exception{
         try {
-            // 连接到数据库
             Connection connection = DriverManager.getConnection(jdbcUrl, sqlusername, sqlpassword);
-
-            // 准备查询语句
             String query = "SELECT * FROM users WHERE username = ?";
             PreparedStatement preparedStatement = connection.prepareStatement(query);
-
-            // 设置查询参数
             preparedStatement.setString(1, name);
-
-            // 执行查询
             ResultSet resultSet = preparedStatement.executeQuery();
-
-            // 处理查询结果
             if (resultSet.next()) {
                 Long uid = resultSet.getLong("uid");
                 Boolean frozen = resultSet.getBoolean("frozen");
@@ -632,7 +627,6 @@ public class ApiApplication {
                     responseJson.put("qq", uid);
                     return responseJson.toString();
                 }
-            // 关闭资源
             resultSet.close();
             preparedStatement.close();
             connection.close();
