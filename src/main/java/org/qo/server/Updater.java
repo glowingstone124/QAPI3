@@ -50,7 +50,7 @@ public class Updater {
                 }
                 File file = new File(Dirdic);
                 file.mkdir();
-                downloadFile("https://api.purpurmc.org/v2/purpur" + "/1.20.1/" + latestBuildValue + "/" + "download", "/home/root1/srv/srv/srv/purpur" + "-" + minecraftVersion + "-" + latestBuild + ".jar");
+                downloadFile("https://api.purpurmc.org/v2/purpur/" + minecraftVersion + "/" + latestBuildValue + "/" + "download", "/home/root1/srv/srv/srv/purpur" + "-" + minecraftVersion + "-" + latestBuild + ".jar");
                 Logger.Log("Downloaded Purpur Server Version 1.20.1-" + latestBuildValue, 0);
                 System.out.println("Purpur Server Version " + latestBuild + " download complete.");
             }
