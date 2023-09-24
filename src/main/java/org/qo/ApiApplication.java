@@ -305,7 +305,7 @@ public class ApiApplication {
         } else if(!Objects.equals(UserProcess.queryHash(hash), username)){
             return ReturnInterface.failed("Network Err");
         }
-        Logger.Log("[PASSWORD] ip " + IPUtil.getIpAddr(request) + " queried resetPassword and wanted to change username " + username + "'s password. but unsuccessful",0);
+        Logger.Log("ip " + IPUtil.getIpAddr(request) + " queried resetPassword and wanted to change username " + username + "'s password. but unsuccessful",0);
         return  ReturnInterface.failed("FAILED");
     }
     @RequestMapping("/app/latest")
