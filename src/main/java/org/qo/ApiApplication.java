@@ -210,6 +210,14 @@ public class ApiApplication {
         survivalMsg = data;
         return null;
     }
+    @PostMapping("/qo/sponsor")
+    public String getSponsor(@RequestBody String data){
+        JSONObject SponsorObj = new JSONObject(data);
+        System.out.println(data);
+        JSONObject returnObj = new JSONObject();
+        returnObj.put("ec", 200);
+        return returnObj.toString();
+    }
     @RequestMapping("/api/isFirstLogin")
     public String firstLoginSearch(@RequestParam String name, HttpServletRequest request) {
         try {
@@ -293,7 +301,7 @@ public class ApiApplication {
                 return ReturnInterface.success("SUCCESS");
             }
         } else if(deviceid != 77560) {
-            return ReturnInterface.failed("deviceid mismatched!");
+            return ReturnInterface.failed("Deviceid Mismatched");
         } else if(!Objects.equals(UserProcess.queryHash(hash), username)){
             return ReturnInterface.failed("Network Err");
         }
