@@ -323,8 +323,6 @@ public class ApiApplication {
         OperatingSystemMXBean operatingSystemMXBean = ManagementFactory.getOperatingSystemMXBean();
         String cpuUsage = String.valueOf(operatingSystemMXBean.getSystemLoadAverage());
         systemInfoJson.put("cpu_usage", cpuUsage);
-
-        // Get memory usage
         JSONObject memoryUsageJson = getMemoryUsage();
         systemInfoJson.put("memory_usage", memoryUsageJson);
 
