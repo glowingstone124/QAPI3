@@ -22,7 +22,7 @@ public class Updater {
 
     public static void executeCommand(){
         String project = "purpur";
-        String minecraftVersion = "1.20.1";
+        String minecraftVersion = "1.20.2";
 
         try {
             String apiUrl = "https://api.purpurmc.org/v2/" + project + "/" + minecraftVersion;
@@ -51,7 +51,7 @@ public class Updater {
                 File file = new File(Dirdic);
                 file.mkdir();
                 downloadFile("https://api.purpurmc.org/v2/purpur/" + minecraftVersion + "/" + latestBuildValue + "/" + "download", "/home/root1/srv/srv/srv/purpur" + "-" + minecraftVersion + "-" + latestBuild + ".jar");
-                Logger.Log("Downloaded Purpur Server Version 1.20.1-" + latestBuildValue, 0);
+                Logger.Log("Downloaded Purpur Server Version 1.20.2-" + latestBuildValue, 0);
                 System.out.println("Purpur Server Version " + latestBuild + " download complete.");
             }
         } catch (IOException e) {
