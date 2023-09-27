@@ -25,7 +25,7 @@ public class Updater {
         String minecraftVersion = "1.20.2";
 
         try {
-            String apiUrl = "https://api.purpurmc.org/v2/" + project + "/" + minecraftVersion;
+            String apiUrl = "https://api.purpurmc.org/v2/" + project + "/" + minecraftVersion + "/";
             String response = sendGETRequest(apiUrl);
             String latestBuild = extractLatestBuild(response);
             System.out.println("Latest Build: " + latestBuild);

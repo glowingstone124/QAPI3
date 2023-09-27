@@ -18,10 +18,7 @@ import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.sql.*;
-import java.util.ArrayList;
-import java.util.Calendar;
-import java.util.List;
-import java.util.Objects;
+import java.util.*;
 
 
 @RestController
@@ -36,7 +33,8 @@ public class ApiApplication {
     public static String sqlusername = "root";
     public static String sqlpassword = "05b028772401827c";
 
-    private static final List<UserInfo> status = new ArrayList<>();
+    public static Map<String, Integer> SurvivalMsgList = new HashMap<String, Integer>();
+    public static Map<String, Integer> CreativeMsgList = new HashMap<String, Integer>();
     String jsonData = "data/playermap.json";
     public static String noticeData = "data/notice.json";
     public ApiApplication() throws IOException {
@@ -207,7 +205,9 @@ public class ApiApplication {
 
     @PostMapping("/qo/survival/msgupload")
     public String survivalUpload(@RequestBody String data){
-        survivalMsg = data;
+        StringBuilder sb = new StringBuilder();
+        sb.append("[SURVIVAL]").append(data);
+        SurvivalMsgList.put(sb.toString(), 0);
         return null;
     }
     @PostMapping("/qo/sponsor")
@@ -274,24 +274,42 @@ public class ApiApplication {
     @PostMapping("/qo/creative/msgupload")
     public String creativeUpload(@RequestBody String data){
         Logger.Log("[CreativeCHAT]" + data, 0);
-        creativeMsg = data;
+        CreativeMsgList.put(data, 0);
         return null;
     }
     @GetMapping("/qo/survival/msgdownload")
     public String survivalDownload(){
-        if(creativeMsg != null) {
-            return creativeMsg;
+        if(CreativeMsgList != null) {
+            for (Map.Entry<String, Integer> entry : CreativeMsgList.entrySet()) {
+                String latestMessage = null;
+                if (entry.getValue() == 0) {
+                    latestMessage = entry.getKey();
+                    // Set the associated integer value to 1
+                    entry.setValue(1);
+                    break; // Exit the loop after finding the latest message
+                }
+            }
         } else {
-            return "INVALID";
+            return ReturnInterface.failed("INVALID");
         }
+        return null;
     }
     @GetMapping("/qo/creative/msgdownload")
     public String creativeDownload(){
-        if (survivalMsg != null) {
-            return survivalMsg;
+        if (SurvivalMsgList != null) {
+            for (Map.Entry<String, Integer> entry : SurvivalMsgList.entrySet()) {
+                String latestMessage = null;
+                if (entry.getValue() == 0) {
+                    latestMessage = entry.getKey();
+                    // Set the associated integer value to 1
+                    entry.setValue(1);
+                    return ReturnInterface.success(latestMessage);
+                }
+            }
         } else {
-            return "INVALID";
+            return ReturnInterface.success("INVALID");
         }
+        return null;
     }
     @RequestMapping("/qo/query/resetpassword")
     public String resetPassword(String username, String hash, int deviceid, String newPassword, HttpServletRequest request) throws Exception {
