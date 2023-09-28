@@ -68,6 +68,12 @@ public class ApiApplication {
             return ReturnInterface.failed("NOT FOUND");
         }
     }
+    @PostMapping("/qo/apihook")
+    public String webhook(@RequestBody String data){
+        System.out.println(data);
+        return null;
+
+    }
     @RequestMapping("/introduction/attractions")
     public String attractionIntros(@RequestParam(name = "articleID", required = true) int articleID) throws Exception{
         if (articleID == -1){
