@@ -20,6 +20,8 @@ import java.security.NoSuchAlgorithmException;
 import java.sql.*;
 import java.util.*;
 
+import static org.qo.UserProcess.getDatabaseInfo;
+
 
 @RestController
 @SpringBootApplication
@@ -29,9 +31,9 @@ public class ApiApplication {
     public static String survivalMsg;
     public static String creativeMsg;
     public static String CreativeStatus;
-    public static String jdbcUrl = "jdbc:mysql://localhost:3306/qouser";
-    public static String sqlusername = "root";
-    public static String sqlpassword = "05b028772401827c";
+    public static String jdbcUrl = getDatabaseInfo("url");
+    public static String sqlusername = getDatabaseInfo("username");
+    public static String sqlpassword = getDatabaseInfo("password");
 
     public static Map<String, Integer> SurvivalMsgList = new HashMap<String, Integer>();
     public static Map<String, Integer> CreativeMsgList = new HashMap<String, Integer>();
@@ -55,7 +57,7 @@ public class ApiApplication {
         return ReturnInterface.failed("ERROR");
     }
     @RequestMapping("/introduction/server")
-    public String serverIntros(@NotNull int articleID) throws Exception{
+    public String serverIntros(@RequestParam(name = "articleID", required = true)int articleID) throws Exception{
         if (articleID == -1){
             return Files.readString(Path.of("forum/introduction/server/menu.json"), StandardCharsets.UTF_8);
         } else {
@@ -67,7 +69,7 @@ public class ApiApplication {
         }
     }
     @RequestMapping("/introduction/attractions")
-    public String attractionIntros(@NotNull int articleID) throws Exception{
+    public String attractionIntros(@RequestParam(name = "articleID", required = true) int articleID) throws Exception{
         if (articleID == -1){
             return Files.readString(Path.of("forum/introduction/attractions/menu.json"), StandardCharsets.UTF_8);
         } else {
@@ -79,7 +81,7 @@ public class ApiApplication {
         }
     }
     @RequestMapping("/introduction/commands")
-    public String commandIntros(@NotNull int articleID) throws Exception{
+    public String commandIntros(@RequestParam(name = "articleID", required = true)int articleID) throws Exception{
         if (articleID == -1){
             return Files.readString(Path.of("forum/introduction/commands/menu.json"), StandardCharsets.UTF_8);
         } else {
@@ -91,7 +93,7 @@ public class ApiApplication {
         }
     }
     @RequestMapping("/introduction/notice")
-    public String notice(@NotNull int articleID) throws Exception{
+    public String notice(@RequestParam(name = "articleID", required = true)int articleID) throws Exception{
         if (articleID == -1){
             return Files.readString(Path.of("forum/introduction/notices/menu.json"), StandardCharsets.UTF_8);
         } else {
@@ -113,7 +115,7 @@ public class ApiApplication {
         return index;
     }
     @GetMapping("/forum/login")
-    public String userLogin(String username, String password , HttpServletRequest request) {
+    public String userLogin(@RequestParam(name="username", required = true)String username, @RequestParam(name = "password", required = true)String password , HttpServletRequest request) {
         try {
             // 连接到数据库
             Connection connection = DriverManager.getConnection(jdbcUrl, sqlusername, sqlpassword);
@@ -204,10 +206,12 @@ public class ApiApplication {
     }
 
     @PostMapping("/qo/survival/msgupload")
-    public String survivalUpload(@RequestBody String data){
-        StringBuilder sb = new StringBuilder();
-        sb.append("[SURVIVAL]").append(data);
-        SurvivalMsgList.put(sb.toString(), 0);
+    public String survivalUpload(@RequestBody String data, HttpServletRequest request){
+        if (IPUtil.getIpAddr(request).equals("127.0.0.1")) {
+            StringBuilder sb = new StringBuilder();
+            sb.append("[SURVIVAL]").append(data);
+            SurvivalMsgList.put(sb.toString(), 0);
+        }
         return null;
     }
     @PostMapping("/qo/sponsor")
@@ -219,7 +223,7 @@ public class ApiApplication {
         return returnObj.toString();
     }
     @RequestMapping("/api/isFirstLogin")
-    public String firstLoginSearch(@RequestParam String name, HttpServletRequest request) {
+    public String firstLoginSearch(@RequestParam(name = "name", required = true) String name, HttpServletRequest request) {
         try {
             // 连接到数据库
             Connection connection = DriverManager.getConnection(jdbcUrl, sqlusername,sqlpassword);
