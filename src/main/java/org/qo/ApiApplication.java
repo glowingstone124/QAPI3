@@ -139,7 +139,7 @@ public class ApiApplication {
                 String storedHashedPassword = resultSet.getString("password");
                 String encryptPswd = hashSHA256(password);
                 if (Objects.equals(encryptPswd, storedHashedPassword)) {
-                    Logger.Log(IPUtil.getIpAddr(request) + username + " login successful.", 0);
+                    Logger.Log(IPUtil.getIpAddr(request) + " "  + username + " login successful.", 0);
                     return ReturnInterface.success("成功");
                 }
             } else {
@@ -482,7 +482,6 @@ public class ApiApplication {
         Connection connection = DriverManager.getConnection(jdbcUrl, sqlusername, sqlpassword);
         // 准备插入语句
         String insertQuery = "INSERT INTO forum (username, date, password, premium, donate, firstLogin, linkto) VALUES (?, ?, ?, ?, ?, ?, ?)";
-        Logger.Log(insertQuery, 0);
         PreparedStatement preparedStatement = connection.prepareStatement(insertQuery);
         // 设置参数值
         preparedStatement.setString(1, username);
@@ -547,7 +546,7 @@ public class ApiApplication {
                     // 执行插入操作
                     int rowsAffected = preparedStatement.executeUpdate();
                     System.out.println(rowsAffected + " row(s) inserted." + "from " + IPUtil.getIpAddr(request));
-                    System.out.println(preparedStatement.toString());
+                    System.out.println(name + " Registered.");
                     // 关闭资源
                     preparedStatement.close();
                     connection.close();
