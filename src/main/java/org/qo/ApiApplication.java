@@ -2,12 +2,15 @@ package org.qo;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import org.jetbrains.annotations.NotNull;
 import org.json.JSONObject;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.boot.web.servlet.error.ErrorController;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.UrlResource;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -19,6 +22,7 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.sql.*;
@@ -29,12 +33,14 @@ import static org.qo.UserProcess.getDatabaseInfo;
 
 @RestController
 @SpringBootApplication
-public class ApiApplication {
+public class ApiApplication implements ErrorController {
     public static String status111;
     public static String serverStatus;
     public static String survivalMsg;
     public static String creativeMsg;
     public static String CreativeStatus;
+    Path filePath = Paths.get("app/latest/QCommunity-3.0.3-Setup.exe");
+    Path webdlPath = Paths.get("webs/download.html");
     public static String jdbcUrl = getDatabaseInfo("url");
     public static String sqlusername = getDatabaseInfo("username");
     public static String sqlpassword = getDatabaseInfo("password");
@@ -43,26 +49,38 @@ public class ApiApplication {
     public static Map<String, Integer> CreativeMsgList = new HashMap<String, Integer>();
     String jsonData = "data/playermap.json";
     public static String noticeData = "data/notice.json";
+
     public ApiApplication() throws IOException {
     }
+
     @RequestMapping("/")
-    public String root(){
+    public String root() {
         return ReturnInterface.success("QOAPI Project Root Dictionary");
     }
+    @RequestMapping("/error")
+    public String error(HttpServletRequest request, HttpServletResponse response){
+        JSONObject returnObj = new JSONObject();
+        long timeStamp = System.currentTimeMillis();
+        returnObj.put("timestamp", timeStamp);
+        returnObj.put("error", response.getStatus());
+        returnObj.put("code", -1);
+        return returnObj.toString();
+    }
     @RequestMapping("/introduction")
-    public String introductionMenu(){
+    public String introductionMenu() {
         try {
-            if ((Files.readString(Path.of("forum/introduction/main.json"), StandardCharsets.UTF_8)!= null)){
+            if ((Files.readString(Path.of("forum/introduction/main.json"), StandardCharsets.UTF_8) != null)) {
                 return Files.readString(Path.of("forum/introduction/main.json"));
             }
-        } catch (IOException e){
+        } catch (IOException e) {
             return ReturnInterface.failed("ERROR:CONFIGURATION NOT FOUND");
         }
         return ReturnInterface.failed("ERROR");
     }
+
     @RequestMapping("/introduction/server")
-    public String serverIntros(@RequestParam(name = "articleID", required = true)int articleID) throws Exception{
-        if (articleID == -1){
+    public String serverIntros(@RequestParam(name = "articleID", required = true) int articleID) throws Exception {
+        if (articleID == -1) {
             return Files.readString(Path.of("forum/introduction/server/menu.json"), StandardCharsets.UTF_8);
         } else {
             String returnFile = Files.readString(Path.of("forum/introduction/server/" + articleID + ".html"));
@@ -72,40 +90,40 @@ public class ApiApplication {
             return ReturnInterface.failed("NOT FOUND");
         }
     }
+
     @PostMapping("/qo/apihook")
-    public String webhook(@RequestBody String data){
+    public String webhook(@RequestBody String data) {
         System.out.println(data);
         return null;
 
     }
+
     @GetMapping("/qo/app/download/latest")
-    public ResponseEntity<Resource> downloadFile() {
+    public ResponseEntity<Object> downloadFileAndDisplayHTML() {
         try {
-            File folder = new File("app/latest/", "QCommunity-3.0.3-Setup.exe");
-            if (folder.exists() && folder.isDirectory()) {
-                File[] files = folder.listFiles();
+            // 获取文件资源
+            Resource fileResource = new UrlResource(filePath.toUri());
+            // HTML内容
+            String htmlContent = Files.readString(webdlPath);
 
-                if (files != null) {
-                    for (File file : files) {
-                        folder = file;
-                    }
-                } else {
-                    return ResponseEntity.notFound().build();
-                }
-            }
+            // 设置响应头
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.MULTIPART_MIXED);
 
-            Resource resource = new UrlResource(folder.toPath().toUri());
+            // 构建响应体，包含HTML内容和文件资源
+            String response = "<!--StartFragment-->\n" + htmlContent + "\n<!--EndFragment-->";
+            ResponseEntity.BodyBuilder responseBuilder = ResponseEntity.ok()
+                    .headers(headers)
+                    .contentLength(response.getBytes().length)
+                    .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + fileResource.getFilename() + "\"");
 
-            if (resource.exists() && resource.isReadable()) {
-                return ResponseEntity.ok().header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + resource.getFilename() + "\"").body(resource);
-            } else {
-                return ResponseEntity.notFound().build();
-            }
+            return responseBuilder.body(response.getBytes());
         } catch (Exception e) {
             return ResponseEntity.notFound().build();
         }
     }
-    @RequestMapping("/introduction/attractions")
+
+@RequestMapping("/introduction/attractions")
     public String attractionIntros(@RequestParam(name = "articleID", required = true) int articleID) throws Exception{
         if (articleID == -1){
             return Files.readString(Path.of("forum/introduction/attractions/menu.json"), StandardCharsets.UTF_8);
