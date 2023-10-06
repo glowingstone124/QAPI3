@@ -5,6 +5,10 @@ import jakarta.servlet.http.HttpServletRequest;
 import org.jetbrains.annotations.NotNull;
 import org.json.JSONObject;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.core.io.Resource;
+import org.springframework.core.io.UrlResource;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.io.*;
@@ -73,6 +77,33 @@ public class ApiApplication {
         System.out.println(data);
         return null;
 
+    }
+    @GetMapping("/qo/app/download/latest")
+    public ResponseEntity<Resource> downloadFile() {
+        try {
+            File folder = new File("app/latest/", "QCommunity-3.0.3-Setup.exe");
+            if (folder.exists() && folder.isDirectory()) {
+                File[] files = folder.listFiles();
+
+                if (files != null) {
+                    for (File file : files) {
+                        folder = file;
+                    }
+                } else {
+                    return ResponseEntity.notFound().build();
+                }
+            }
+
+            Resource resource = new UrlResource(folder.toPath().toUri());
+
+            if (resource.exists() && resource.isReadable()) {
+                return ResponseEntity.ok().header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + resource.getFilename() + "\"").body(resource);
+            } else {
+                return ResponseEntity.notFound().build();
+            }
+        } catch (Exception e) {
+            return ResponseEntity.notFound().build();
+        }
     }
     @RequestMapping("/introduction/attractions")
     public String attractionIntros(@RequestParam(name = "articleID", required = true) int articleID) throws Exception{
