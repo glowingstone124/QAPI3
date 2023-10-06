@@ -1,20 +1,31 @@
 package org.qo;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import jakarta.servlet.ServletOutputStream;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import org.jetbrains.annotations.NotNull;
 import org.json.JSONObject;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.core.io.Resource;
+import org.springframework.core.io.UrlResource;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
 
 import java.io.*;
 import java.lang.management.ManagementFactory;
 import java.lang.management.OperatingSystemMXBean;
 import java.net.HttpURLConnection;
+import java.net.MalformedURLException;
 import java.net.URL;
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.sql.*;
@@ -115,46 +126,32 @@ public class ApiApplication {
         String noticedata = "data/notice.json";
         return Files.readString(Path.of(noticedata));
     }
-    @RequestMapping("/qo/app")
-    public String returnContent() throws IOException {
-        String index = Files.readString(Path.of("webs/index.html"));
-        return index;
+    @RequestMapping("/qo/app/download")
+    public ResponseEntity<Resource> downloadFile() {
+        String FILE_DIRECTORY = "app/latest/";
+        String fileName = "QCommunity-3.0.3-Setup.exe";
+        try {
+            Path filePath = Paths.get(FILE_DIRECTORY).resolve(fileName).normalize();
+            Resource resource = new UrlResource(filePath.toUri());
+
+            if (resource.exists()) {
+                HttpHeaders headers = new HttpHeaders();
+                headers.setContentType(MediaType.APPLICATION_OCTET_STREAM);
+                headers.setContentDispositionFormData("attachment", fileName);
+                return ResponseEntity.ok()
+                        .headers(headers)
+                        .body(resource);
+            } else {
+                // 文件不存在的处理
+                return ResponseEntity.notFound().build();
+            }
+        } catch (MalformedURLException e) {
+            throw new RuntimeException(e);
+        }
     }
     @GetMapping("/forum/login")
     public String userLogin(@RequestParam(name="username", required = true)String username, @RequestParam(name = "password", required = true)String password , HttpServletRequest request) {
-        try {
-            // 连接到数据库
-            Connection connection = DriverManager.getConnection(jdbcUrl, sqlusername, sqlpassword);
-
-            // 准备查询语句
-            String query = "SELECT * FROM forum WHERE username = ?";
-            PreparedStatement preparedStatement = connection.prepareStatement(query);
-
-            // 设置查询参数
-            preparedStatement.setString(1, username);
-
-            // 执行查询
-            ResultSet resultSet = preparedStatement.executeQuery();
-            if (resultSet.next()) {
-                String storedHashedPassword = resultSet.getString("password");
-                String encryptPswd = hashSHA256(password);
-                if (Objects.equals(encryptPswd, storedHashedPassword)) {
-                    Logger.Log(IPUtil.getIpAddr(request) + " "  + username + " login successful.", 0);
-                    return ReturnInterface.success("成功");
-                }
-            } else {
-                Logger.Log("username " + username + " login failed.", 0);
-                return ReturnInterface.failed("登录失败");
-            }
-            connection.close();
-            preparedStatement.close();
-        } catch (SQLException e) {
-            e.printStackTrace();
-            JSONObject responseJson = new JSONObject();
-            responseJson.put("code", -1);
-            return responseJson.toString();
-        }
-        return ReturnInterface.failed("NULL");
+        return UserProcess.userLogin(username,password,request);
     }
     @JsonProperty("myinfo")
     @RequestMapping("/forum/fetch/myself")
@@ -168,17 +165,13 @@ public class ApiApplication {
         try {
             // 连接到数据库
             Connection connection = DriverManager.getConnection(jdbcUrl, sqlusername, sqlpassword);
-
             // 准备查询语句
             String query = "SELECT * FROM forum WHERE username = ?";
             PreparedStatement preparedStatement = connection.prepareStatement(query);
-
             // 设置查询参数
             preparedStatement.setString(1, name);
-
             // 执行查询
             ResultSet resultSet = preparedStatement.executeQuery();
-
             if (resultSet.next()) {
                 // Move the cursor to the first row and retrieve data
                 date = resultSet.getString("date");
@@ -321,6 +314,7 @@ public class ApiApplication {
         }
         return null;
     }
+
     @RequestMapping("/qo/query/resetpassword")
     public String resetPassword(String username, String hash, int deviceid, String newPassword, HttpServletRequest request) throws Exception {
         if (deviceid == 77560 && UserProcess.queryHash(hash).equals(username) && !Objects.equals(UserProcess.queryHash(hash), null)) {
@@ -339,7 +333,7 @@ public class ApiApplication {
     @RequestMapping("/app/latest")
     public String update(){
         JSONObject returnObj = new JSONObject();
-        returnObj.put("version", 3);
+        returnObj.put("version", 4);
         returnObj.put("die", false);
         return returnObj.toString();
     }

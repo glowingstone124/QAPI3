@@ -1,5 +1,6 @@
 package org.qo;
 
+import jakarta.servlet.http.HttpServletRequest;
 import org.json.JSONException;
 import org.json.JSONObject;
 
@@ -11,6 +12,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.*;
 import java.util.Objects;
+
+import static org.qo.ApiApplication.hashSHA256;
 
 public class UserProcess{
     public static final String CODE = "users/recoverycode/index.json";
@@ -325,5 +328,36 @@ public class UserProcess{
             e.printStackTrace();
         }
         return success;
+    }
+    public static String userLogin(String username, String password, HttpServletRequest request){
+        try {
+            // 连接到数据库
+            Connection connection = DriverManager.getConnection(jdbcUrl, sqlusername, sqlpassword);
+            String query = "SELECT * FROM forum WHERE username = ?";
+            PreparedStatement preparedStatement = connection.prepareStatement(query);
+            preparedStatement.setString(1, username);
+
+            // 执行查询
+            ResultSet resultSet = preparedStatement.executeQuery();
+            if (resultSet.next()) {
+                String storedHashedPassword = resultSet.getString("password");
+                String encryptPswd = hashSHA256(password);
+                if (Objects.equals(encryptPswd, storedHashedPassword)) {
+                    Logger.Log(IPUtil.getIpAddr(request) + " "  + username + " login successful.", 0);
+                    return ReturnInterface.success("成功");
+                }
+            } else {
+                Logger.Log("username " + username + " login failed.", 0);
+                return ReturnInterface.failed("登录失败");
+            }
+            connection.close();
+            preparedStatement.close();
+        } catch (SQLException e) {
+            e.printStackTrace();
+            JSONObject responseJson = new JSONObject();
+            responseJson.put("code", -1);
+            return responseJson.toString();
+        }
+        return ReturnInterface.failed("NULL");
     }
 }
