@@ -1,27 +1,24 @@
 package org.qo;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
-import jakarta.servlet.ServletOutputStream;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.jetbrains.annotations.NotNull;
 import org.json.JSONObject;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.boot.web.servlet.error.ErrorController;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.UrlResource;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
 
 import java.io.*;
 import java.lang.management.ManagementFactory;
 import java.lang.management.OperatingSystemMXBean;
 import java.net.HttpURLConnection;
-import java.net.MalformedURLException;
 import java.net.URL;
-import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -36,12 +33,14 @@ import static org.qo.UserProcess.getDatabaseInfo;
 
 @RestController
 @SpringBootApplication
-public class ApiApplication {
+public class ApiApplication implements ErrorController {
     public static String status111;
     public static String serverStatus;
     public static String survivalMsg;
     public static String creativeMsg;
     public static String CreativeStatus;
+    Path filePath = Paths.get("app/latest/QCommunity-3.0.3-Setup.exe");
+    Path webdlPath = Paths.get("webs/download.html");
     public static String jdbcUrl = getDatabaseInfo("url");
     public static String sqlusername = getDatabaseInfo("username");
     public static String sqlpassword = getDatabaseInfo("password");
@@ -50,26 +49,38 @@ public class ApiApplication {
     public static Map<String, Integer> CreativeMsgList = new HashMap<String, Integer>();
     String jsonData = "data/playermap.json";
     public static String noticeData = "data/notice.json";
+
     public ApiApplication() throws IOException {
     }
+
     @RequestMapping("/")
-    public String root(){
+    public String root() {
         return ReturnInterface.success("QOAPI Project Root Dictionary");
     }
+    @RequestMapping("/error")
+    public String error(HttpServletRequest request, HttpServletResponse response){
+        JSONObject returnObj = new JSONObject();
+        long timeStamp = System.currentTimeMillis();
+        returnObj.put("timestamp", timeStamp);
+        returnObj.put("error", response.getStatus());
+        returnObj.put("code", -1);
+        return returnObj.toString();
+    }
     @RequestMapping("/introduction")
-    public String introductionMenu(){
+    public String introductionMenu() {
         try {
-            if ((Files.readString(Path.of("forum/introduction/main.json"), StandardCharsets.UTF_8)!= null)){
+            if ((Files.readString(Path.of("forum/introduction/main.json"), StandardCharsets.UTF_8) != null)) {
                 return Files.readString(Path.of("forum/introduction/main.json"));
             }
-        } catch (IOException e){
+        } catch (IOException e) {
             return ReturnInterface.failed("ERROR:CONFIGURATION NOT FOUND");
         }
         return ReturnInterface.failed("ERROR");
     }
+
     @RequestMapping("/introduction/server")
-    public String serverIntros(@RequestParam(name = "articleID", required = true)int articleID) throws Exception{
-        if (articleID == -1){
+    public String serverIntros(@RequestParam(name = "articleID", required = true) int articleID) throws Exception {
+        if (articleID == -1) {
             return Files.readString(Path.of("forum/introduction/server/menu.json"), StandardCharsets.UTF_8);
         } else {
             String returnFile = Files.readString(Path.of("forum/introduction/server/" + articleID + ".html"));
@@ -79,13 +90,40 @@ public class ApiApplication {
             return ReturnInterface.failed("NOT FOUND");
         }
     }
+
     @PostMapping("/qo/apihook")
-    public String webhook(@RequestBody String data){
+    public String webhook(@RequestBody String data) {
         System.out.println(data);
         return null;
 
     }
-    @RequestMapping("/introduction/attractions")
+
+    @GetMapping("/qo/app/download/latest")
+    public ResponseEntity<Object> downloadFileAndDisplayHTML() {
+        try {
+            // 获取文件资源
+            Resource fileResource = new UrlResource(filePath.toUri());
+            // HTML内容
+            String htmlContent = Files.readString(webdlPath);
+
+            // 设置响应头
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.MULTIPART_MIXED);
+
+            // 构建响应体，包含HTML内容和文件资源
+            String response = "<!--StartFragment-->\n" + htmlContent + "\n<!--EndFragment-->";
+            ResponseEntity.BodyBuilder responseBuilder = ResponseEntity.ok()
+                    .headers(headers)
+                    .contentLength(response.getBytes().length)
+                    .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + fileResource.getFilename() + "\"");
+
+            return responseBuilder.body(response.getBytes());
+        } catch (Exception e) {
+            return ResponseEntity.notFound().build();
+        }
+    }
+
+@RequestMapping("/introduction/attractions")
     public String attractionIntros(@RequestParam(name = "articleID", required = true) int articleID) throws Exception{
         if (articleID == -1){
             return Files.readString(Path.of("forum/introduction/attractions/menu.json"), StandardCharsets.UTF_8);
@@ -126,32 +164,46 @@ public class ApiApplication {
         String noticedata = "data/notice.json";
         return Files.readString(Path.of(noticedata));
     }
-    @RequestMapping("/qo/app/download")
-    public ResponseEntity<Resource> downloadFile() {
-        String FILE_DIRECTORY = "app/latest/";
-        String fileName = "QCommunity-3.0.3-Setup.exe";
-        try {
-            Path filePath = Paths.get(FILE_DIRECTORY).resolve(fileName).normalize();
-            Resource resource = new UrlResource(filePath.toUri());
-
-            if (resource.exists()) {
-                HttpHeaders headers = new HttpHeaders();
-                headers.setContentType(MediaType.APPLICATION_OCTET_STREAM);
-                headers.setContentDispositionFormData("attachment", fileName);
-                return ResponseEntity.ok()
-                        .headers(headers)
-                        .body(resource);
-            } else {
-                // 文件不存在的处理
-                return ResponseEntity.notFound().build();
-            }
-        } catch (MalformedURLException e) {
-            throw new RuntimeException(e);
-        }
+    @RequestMapping("/qo/app")
+    public String returnContent() throws IOException {
+        String index = Files.readString(Path.of("webs/index.html"));
+        return index;
     }
     @GetMapping("/forum/login")
     public String userLogin(@RequestParam(name="username", required = true)String username, @RequestParam(name = "password", required = true)String password , HttpServletRequest request) {
-        return UserProcess.userLogin(username,password,request);
+        try {
+            // 连接到数据库
+            Connection connection = DriverManager.getConnection(jdbcUrl, sqlusername, sqlpassword);
+
+            // 准备查询语句
+            String query = "SELECT * FROM forum WHERE username = ?";
+            PreparedStatement preparedStatement = connection.prepareStatement(query);
+
+            // 设置查询参数
+            preparedStatement.setString(1, username);
+
+            // 执行查询
+            ResultSet resultSet = preparedStatement.executeQuery();
+            if (resultSet.next()) {
+                String storedHashedPassword = resultSet.getString("password");
+                String encryptPswd = hashSHA256(password);
+                if (Objects.equals(encryptPswd, storedHashedPassword)) {
+                    Logger.Log(IPUtil.getIpAddr(request) + " "  + username + " login successful.", 0);
+                    return ReturnInterface.success("成功");
+                }
+            } else {
+                Logger.Log("username " + username + " login failed.", 0);
+                return ReturnInterface.failed("登录失败");
+            }
+            connection.close();
+            preparedStatement.close();
+        } catch (SQLException e) {
+            e.printStackTrace();
+            JSONObject responseJson = new JSONObject();
+            responseJson.put("code", -1);
+            return responseJson.toString();
+        }
+        return ReturnInterface.failed("NULL");
     }
     @JsonProperty("myinfo")
     @RequestMapping("/forum/fetch/myself")
@@ -165,13 +217,17 @@ public class ApiApplication {
         try {
             // 连接到数据库
             Connection connection = DriverManager.getConnection(jdbcUrl, sqlusername, sqlpassword);
+
             // 准备查询语句
             String query = "SELECT * FROM forum WHERE username = ?";
             PreparedStatement preparedStatement = connection.prepareStatement(query);
+
             // 设置查询参数
             preparedStatement.setString(1, name);
+
             // 执行查询
             ResultSet resultSet = preparedStatement.executeQuery();
+
             if (resultSet.next()) {
                 // Move the cursor to the first row and retrieve data
                 date = resultSet.getString("date");
@@ -314,7 +370,6 @@ public class ApiApplication {
         }
         return null;
     }
-
     @RequestMapping("/qo/query/resetpassword")
     public String resetPassword(String username, String hash, int deviceid, String newPassword, HttpServletRequest request) throws Exception {
         if (deviceid == 77560 && UserProcess.queryHash(hash).equals(username) && !Objects.equals(UserProcess.queryHash(hash), null)) {
@@ -333,7 +388,7 @@ public class ApiApplication {
     @RequestMapping("/app/latest")
     public String update(){
         JSONObject returnObj = new JSONObject();
-        returnObj.put("version", 4);
+        returnObj.put("version", 3);
         returnObj.put("die", false);
         return returnObj.toString();
     }
