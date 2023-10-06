@@ -171,39 +171,7 @@ public class ApiApplication implements ErrorController {
     }
     @GetMapping("/forum/login")
     public String userLogin(@RequestParam(name="username", required = true)String username, @RequestParam(name = "password", required = true)String password , HttpServletRequest request) {
-        try {
-            // 连接到数据库
-            Connection connection = DriverManager.getConnection(jdbcUrl, sqlusername, sqlpassword);
-
-            // 准备查询语句
-            String query = "SELECT * FROM forum WHERE username = ?";
-            PreparedStatement preparedStatement = connection.prepareStatement(query);
-
-            // 设置查询参数
-            preparedStatement.setString(1, username);
-
-            // 执行查询
-            ResultSet resultSet = preparedStatement.executeQuery();
-            if (resultSet.next()) {
-                String storedHashedPassword = resultSet.getString("password");
-                String encryptPswd = hashSHA256(password);
-                if (Objects.equals(encryptPswd, storedHashedPassword)) {
-                    Logger.Log(IPUtil.getIpAddr(request) + " "  + username + " login successful.", 0);
-                    return ReturnInterface.success("成功");
-                }
-            } else {
-                Logger.Log("username " + username + " login failed.", 0);
-                return ReturnInterface.failed("登录失败");
-            }
-            connection.close();
-            preparedStatement.close();
-        } catch (SQLException e) {
-            e.printStackTrace();
-            JSONObject responseJson = new JSONObject();
-            responseJson.put("code", -1);
-            return responseJson.toString();
-        }
-        return ReturnInterface.failed("NULL");
+        return UserProcess.userLogin(username,password,request);
     }
     @JsonProperty("myinfo")
     @RequestMapping("/forum/fetch/myself")
