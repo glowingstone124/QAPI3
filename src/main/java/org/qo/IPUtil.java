@@ -19,7 +19,6 @@ public class IPUtil {
             if (ipAddress == null || ipAddress.length() == 0 || "unknown".equalsIgnoreCase(ipAddress)) {
                 ipAddress = request.getRemoteAddr();
                 if (ipAddress.equals("127.0.0.1")) {
-                    // 根据网卡取本机配置的IP
                     InetAddress inet = null;
                     try {
                         inet = InetAddress.getLocalHost();
@@ -39,8 +38,6 @@ public class IPUtil {
         } catch (Exception e) {
             ipAddress="";
         }
-        // ipAddress = this.getRequest().getRemoteAddr();
-
         return ipAddress;
     }
 }

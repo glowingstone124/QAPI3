@@ -30,7 +30,7 @@ public class Updater {
             String latestBuild = extractLatestBuild(response);
             System.out.println("Latest Build: " + latestBuild);
 
-            String latestFilePath = "/home/root1/srv/srv/srv/latest.txt";
+            String latestFilePath = "D:\\proj\\qo2\\latest.txt";
             int latestValue = readLatestValue(latestFilePath);
 
             int latestBuildValue = Integer.parseInt(latestBuild);
@@ -46,7 +46,7 @@ public class Updater {
                 System.out.println("Purpur Server has an update. Automatically download latest file.");
                 String osv = System.getProperty("os.name");
                 if (Objects.equals(osv, "Linux")) {
-                    Dirdic = "/home/root1/srv/srv/srv/";
+                    Dirdic = "D:\\proj\\qo2";
                 }
                 File file = new File(Dirdic);
                 file.mkdir();

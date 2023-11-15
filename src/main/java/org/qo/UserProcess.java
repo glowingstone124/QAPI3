@@ -1,21 +1,28 @@
 package org.qo;
 
 import jakarta.servlet.http.HttpServletRequest;
+import org.jetbrains.annotations.NotNull;
 import org.json.JSONException;
 import org.json.JSONObject;
+import org.springframework.web.bind.annotation.RequestParam;
 
 import java.io.BufferedReader;
 import java.io.FileReader;
 import java.io.IOException;
+import java.io.InputStreamReader;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.*;
+import java.util.Calendar;
 import java.util.Objects;
 
-import static org.qo.ApiApplication.hashSHA256;
+import static org.qo.Algorithm.hashSHA256;
 
-public class UserProcess{
+
+public class UserProcess {
     public static final String CODE = "users/recoverycode/index.json";
     private static final String FILE_PATH = "usermap.json";
     private static final String SERVER_FILE_PATH = "playermap.json";
@@ -23,6 +30,111 @@ public class UserProcess{
     public static String jdbcUrl = getDatabaseInfo("url");
     public static String sqlusername = getDatabaseInfo("username");
     public static String sqlpassword = getDatabaseInfo("password");
+
+    public static String firstLoginSearch(String name, HttpServletRequest request) {
+        try {
+            // 连接到数据库
+            Connection connection = DriverManager.getConnection(jdbcUrl, sqlusername, sqlpassword);
+
+            // 准备查询语句
+            String query = "SELECT * FROM forum WHERE username = ?";
+            PreparedStatement preparedStatement = connection.prepareStatement(query);
+
+            // 设置查询参数
+            preparedStatement.setString(1, name);
+
+            // 执行查询
+            ResultSet resultSet = preparedStatement.executeQuery();
+
+            // 处理查询结果
+            if (resultSet.next()) {
+                Boolean first = resultSet.getBoolean("firstLogin");
+                JSONObject responseJson = new JSONObject();
+                responseJson.put("code", 0);
+                responseJson.put("first", first);
+                // 关闭资源
+                resultSet.close();
+                preparedStatement.close();
+
+                return responseJson.toString();
+            }
+            String updateQuery = "UPDATE forum SET firstLogin = ? WHERE username = ?";
+            PreparedStatement apreparedStatement = connection.prepareStatement(updateQuery);
+            // 设置更新参数值
+            apreparedStatement.setBoolean(1, false);
+            apreparedStatement.setString(2, name);
+
+            // 执行更新操作
+            Logger.Log(IPUtil.getIpAddr(request) + " username " + name + " qureied firstlogin.", 0);
+            int rowsAffected = apreparedStatement.executeUpdate();
+            apreparedStatement.close();
+            connection.close();
+            resultSet.close();
+            preparedStatement.close();
+            connection.close();
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+
+// 处理错误的情况
+        JSONObject responseJson = new JSONObject();
+        responseJson.put("code", 1);
+        responseJson.put("first", -1);
+        Logger.Log(IPUtil.getIpAddr(request) + " username " + name + " qureied firstlogin but unsuccessful.", 0);
+        return responseJson.toString();
+    }
+        public static String fetchMyinfo(String name, HttpServletRequest request) throws Exception {
+            String date;
+            Boolean premium;
+            Boolean donate;
+            if (name.isEmpty()) {
+
+            }
+            try {
+                // 连接到数据库
+                Connection connection = DriverManager.getConnection(jdbcUrl, sqlusername, sqlpassword);
+
+                // 准备查询语句
+                String query = "SELECT * FROM forum WHERE username = ?";
+                PreparedStatement preparedStatement = connection.prepareStatement(query);
+
+                // 设置查询参数
+                preparedStatement.setString(1, name);
+
+                // 执行查询
+                ResultSet resultSet = preparedStatement.executeQuery();
+
+                if (resultSet.next()) {
+                    // Move the cursor to the first row and retrieve data
+                    date = resultSet.getString("date");
+                    premium = resultSet.getBoolean("premium");
+                    donate = resultSet.getBoolean("donate");
+                    String linkto = resultSet.getString("linkto");
+                    JSONObject responseJson = new JSONObject();
+                    responseJson.put("date", date);
+                    responseJson.put("premium", premium);
+                    responseJson.put("donate", donate);
+                    responseJson.put("code", 0);
+                    responseJson.put("linkto", linkto);
+                    responseJson.put("username", name);
+                    Logger.Log(IPUtil.getIpAddr(request) + "username " + name + " qureied myinfo.", 0);
+                    return responseJson.toString();
+                } else {
+                    // No rows found for the given username
+                    JSONObject responseJson = new JSONObject();
+                    responseJson.put("code", -1);
+                    Logger.Log(IPUtil.getIpAddr(request) + "username " + name + " qureied myinfo, but unsuccessful.", 0);
+                    return responseJson.toString();
+                }
+
+            } catch (SQLException e) {
+                e.printStackTrace();
+                JSONObject responseJson = new JSONObject();
+                Logger.Log("username " + name + " qureied myinfo, but unsuccessful.", 0);
+                responseJson.put("code", -1);
+                return responseJson.toString();
+            }
+        }
     public static String getDatabaseInfo(String type) {
         JSONObject sqlObject = null;
         try {
@@ -40,6 +152,50 @@ public class UserProcess{
             default:
                 return null;
         }
+    }
+    public static void handleTime(String name, int time){
+        try {
+            Connection connection = DriverManager.getConnection(jdbcUrl, sqlusername, sqlpassword);
+
+            String query = "INSERT INTO timeTables (name, time) VALUES (?, ?)";
+            PreparedStatement preparedStatement = connection.prepareStatement(query);
+
+            preparedStatement.setString(1, name);
+            preparedStatement.setInt(2, time);
+            preparedStatement.executeUpdate();
+            preparedStatement.close();
+            connection.close();
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+    }
+    public static JSONObject getTime(String username) {
+        JSONObject result = null;
+        try (Connection connection = DriverManager.getConnection(jdbcUrl, sqlusername, sqlpassword)) {
+            result = new JSONObject();
+            String query = "SELECT * FROM timeTables WHERE name = ?";
+            PreparedStatement preparedStatement = connection.prepareStatement(query);
+
+            preparedStatement.setString(1, username);
+
+            ResultSet resultSet = preparedStatement.executeQuery();
+
+            if (resultSet.next()) {
+                int time = resultSet.getInt("time");
+                result.put("name", username);
+                result.put("time", time);
+            } else {
+                result.put("error", -1);
+            }
+
+            resultSet.close();
+            preparedStatement.close();
+        } catch (SQLException e) {
+            e.printStackTrace();
+            result.put("error", e.getMessage());
+        }
+
+        return result;
     }
     public static boolean SQLAvliable() {
         boolean success = true;
@@ -119,6 +275,142 @@ public class UserProcess{
             }
         }
     }
+    public static String queryReg(String name) throws Exception{
+        try {
+            Connection connection = DriverManager.getConnection(jdbcUrl, sqlusername, sqlpassword);
+            String query = "SELECT * FROM users WHERE username = ?";
+            PreparedStatement preparedStatement = connection.prepareStatement(query);
+            preparedStatement.setString(1, name);
+            ResultSet resultSet = preparedStatement.executeQuery();
+            if (resultSet.next()) {
+                Long uid = resultSet.getLong("uid");
+                Boolean frozen = resultSet.getBoolean("frozen");
+                JSONObject responseJson = new JSONObject();
+                responseJson.put("code", 0);
+                responseJson.put("frozen", frozen);
+                responseJson.put("qq", uid);
+                return responseJson.toString();
+            }
+            resultSet.close();
+            preparedStatement.close();
+            connection.close();
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        JSONObject responseJson = new JSONObject();
+        responseJson.put("code", 1);
+        responseJson.put("qq", -1);
+        return responseJson.toString();
+    }
+    public static void regforum(String username, String password) throws Exception{
+        // 解析JSON数据为JSONArray
+        Calendar calendar = Calendar.getInstance();
+        int year = calendar.get(Calendar.YEAR);
+        int month = calendar.get(Calendar.MONTH) + 1; // 注意月份是从0开始计数的
+        int day = calendar.get(Calendar.DAY_OF_MONTH);
+        String date = year + "-" + month + "-" + day;
+        String EncryptedPswd = hashSHA256(password);
+        Connection connection = DriverManager.getConnection(jdbcUrl, sqlusername, sqlpassword);
+        // 准备插入语句
+        String insertQuery = "INSERT INTO forum (username, date, password, premium, donate, firstLogin, linkto) VALUES (?, ?, ?, ?, ?, ?, ?)";
+        PreparedStatement preparedStatement = connection.prepareStatement(insertQuery);
+        // 设置参数值
+        preparedStatement.setString(1, username);
+        preparedStatement.setString(2, date);
+        preparedStatement.setString(3, EncryptedPswd);
+        preparedStatement.setBoolean(4, false);
+        preparedStatement.setBoolean(5, false);
+        preparedStatement.setBoolean(6, true);
+        preparedStatement.setString(7, "EMPTY");
+        preparedStatement.executeUpdate();
+        // 关闭资源
+        preparedStatement.close();
+        connection.close();
+    }
+    public static String regMinecraftUser(String name, Long uid, HttpServletRequest request){
+        if (!UserProcess.dumplicateUID(uid) && name != null && uid != null) {
+            if (!UserProcess.hasIp(IPUtil.getIpAddr(request))) {
+                try {
+                    // 连接到数据库
+                    Connection connection = DriverManager.getConnection(jdbcUrl, sqlusername, sqlpassword);
+
+                    // 准备插入语句
+                    String insertQuery = "INSERT INTO users (username, uid,frozen, remain) VALUES (?, ?, ?, ?)";
+                    PreparedStatement preparedStatement = connection.prepareStatement(insertQuery);
+
+                    // 设置参数值
+                    preparedStatement.setString(1, name);
+                    preparedStatement.setLong(2, uid);
+                    preparedStatement.setBoolean(3, false);
+                    preparedStatement.setInt(4, 3);
+                    // 执行插入操作
+                    int rowsAffected = preparedStatement.executeUpdate();
+                    System.out.println(rowsAffected + " row(s) inserted." + "from " + IPUtil.getIpAddr(request));
+                    System.out.println(name + " Registered.");
+                    // 关闭资源
+                    preparedStatement.close();
+                    connection.close();
+                    UserProcess.insertIp(IPUtil.getIpAddr(request));
+                    return "Success!";
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+                return "FAILED";
+            } else {
+                return  ReturnInterface.failed("Used IP");
+            }
+        } else if(name.equals(null) || uid.equals(null)){
+            Logger.Log("Register ERROR: username or uid null", 2);
+        }
+        return "FAILED";
+    }
+    public static String AvatarTrans(String name) throws Exception{
+        String apiURL = "https://api.mojang.com/users/profiles/minecraft/" + name;
+        String avartarURL = "https://crafatar.com/avatars/";
+        URL url = new URL(apiURL);
+        HttpURLConnection con = (HttpURLConnection) url.openConnection();
+        con.setRequestMethod("GET");
+
+        int responseCode = con.getResponseCode();
+        if (responseCode == HttpURLConnection.HTTP_OK) {
+            BufferedReader in = new BufferedReader(new InputStreamReader(con.getInputStream()));
+            String inputLine;
+            StringBuilder response = new StringBuilder();
+
+            while ((inputLine = in.readLine()) != null) {
+                response.append(inputLine);
+            }
+            in.close();
+            JSONObject playerUUIDobj = new JSONObject(response.toString());
+            String useruuid = playerUUIDobj.getString("id");
+            String username = playerUUIDobj.getString("name");
+            JSONObject returnObject = new JSONObject();
+            returnObject.put("url", avartarURL + useruuid);
+            returnObject.put("name", name);
+            return returnObject.toString();
+        } else {
+            JSONObject returnObject = new JSONObject();
+            returnObject.put("url", avartarURL + "8667ba71b85a4004af54457a9734eed7");
+            returnObject.put("name", name);
+            return returnObject.toString();
+        }
+    }
+    public static String downloadMemorial() throws IOException {
+        String filePath = "data/memorial.json";
+
+        // Read the content of the file and return it as the response
+        try (BufferedReader br = new BufferedReader(new FileReader(filePath))) {
+            StringBuilder content = new StringBuilder();
+            String line;
+            while ((line = br.readLine()) != null) {
+                content.append(line);
+            }
+            return content.toString();
+        } catch (IOException e) {
+            e.printStackTrace();
+            throw e;
+        }
+    }
     public static boolean VerifyPSWD(String username, String inputPassword) throws IOException {
         try {
             String userContent = readFile(FILE_PATH);
@@ -156,36 +448,25 @@ public class UserProcess{
     }
     public static String Link(String forum, String name){
         try {
-            // 连接到数据库
             Connection connection = DriverManager.getConnection(jdbcUrl, sqlusername, sqlpassword);
-
-            // 准备查询语句
             String query = "SELECT linkto FROM forum WHERE username = ?";
             PreparedStatement preparedStatement = connection.prepareStatement(query);
-
-            // 设置查询参数
             preparedStatement.setString(1, forum);
-
-            // 执行查询
             ResultSet resultSet = preparedStatement.executeQuery();
             if (resultSet.next()) {
                 String resultname = resultSet.getString("linkto");
                 if (Objects.equals(resultname, "EMPTY")) {
                     String updateQuery = "UPDATE forum SET linkto = ? WHERE username = ?";
                     PreparedStatement updateStatement = connection.prepareStatement(updateQuery);
-
                     while (resultSet.next()) {
                         String username = forum;
                         String linkAccount = name;
-
-                        // 更新数据库中的密码
                         updateStatement.setString(1, linkAccount);
                         updateStatement.setString(2, username);
                         updateStatement.executeUpdate();
                     }
                     return "DONE";
                 } else {
-                    // Value is not NULL, return the linkto value
                     return "ERROR: Already Linked";
                 }
             }
@@ -195,25 +476,15 @@ public class UserProcess{
         return "failed";
     }
     public static String queryLink(String forum){
-        try {
-            // 连接到数据库
+        try{
             Connection connection = DriverManager.getConnection(jdbcUrl, sqlusername, sqlpassword);
-
-            // 准备查询语句
             String query = "SELECT * FROM forum WHERE username = ?";
             PreparedStatement preparedStatement = connection.prepareStatement(query);
-
-            // 设置查询参数
             preparedStatement.setString(1, forum);
-
-            // 执行查询
             ResultSet resultSet = preparedStatement.executeQuery();
-
-            // 处理查询结果
             if (resultSet.next()) {
                 return resultSet.getString("linkto");
             }
-            // 关闭资源
             resultSet.close();
             preparedStatement.close();
             connection.close();
@@ -224,24 +495,14 @@ public class UserProcess{
     }
     public static boolean hasIp(String ip){
         try {
-            // 连接到数据库
             Connection connection = DriverManager.getConnection(jdbcUrl, sqlusername, sqlpassword);
-
-            // 准备查询语句
             String query = "SELECT * FROM iptable WHERE ip = ?";
             PreparedStatement preparedStatement = connection.prepareStatement(query);
-
-            // 设置查询参数
             preparedStatement.setString(1, ip);
-
-            // 执行查询
             ResultSet resultSet = preparedStatement.executeQuery();
-
-            // 处理查询结果
             if (resultSet.next()) {
                 return true;
             }
-            // 关闭资源
             resultSet.close();
             preparedStatement.close();
             connection.close();
@@ -252,24 +513,13 @@ public class UserProcess{
     }
     public static boolean insertIp(String ip) {
         try {
-            // Connect to the database
             Connection connection = DriverManager.getConnection(jdbcUrl, sqlusername, sqlpassword);
-
-            // Prepare the INSERT statement
             String query = "INSERT INTO iptable (ip) VALUES (?)";
             PreparedStatement preparedStatement = connection.prepareStatement(query);
-
-            // Set the parameter
             preparedStatement.setString(1, ip);
-
-            // Execute the INSERT statement
             int rowsAffected = preparedStatement.executeUpdate();
-
-            // Close resources
             preparedStatement.close();
             connection.close();
-
-            // Check if the INSERT was successful
             return rowsAffected > 0;
         } catch (Exception e) {
             e.printStackTrace();
@@ -279,24 +529,14 @@ public class UserProcess{
 
     public static boolean dumplicateUID(long uid){
         try {
-            // 连接到数据库
             Connection connection = DriverManager.getConnection(jdbcUrl, sqlusername, sqlpassword);
-
-            // 准备查询语句
             String query = "SELECT * FROM users WHERE uid = ?";
             PreparedStatement preparedStatement = connection.prepareStatement(query);
-
-            // 设置查询参数
             preparedStatement.setLong(1, uid);
-
-            // 执行查询
             ResultSet resultSet = preparedStatement.executeQuery();
-
-            // 处理查询结果
             if (resultSet.next()) {
                 return true;
             }
-            // 关闭资源
             resultSet.close();
             preparedStatement.close();
             connection.close();
@@ -309,14 +549,11 @@ public class UserProcess{
         boolean success = false;
         try {
             Connection connection = DriverManager.getConnection(jdbcUrl, sqlusername, sqlpassword);
-
             String query = "UPDATE forum SET password = ? WHERE username = ?";
             PreparedStatement preparedStatement = connection.prepareStatement(query);
-
             preparedStatement.setString(1, hash);
             preparedStatement.setString(2, username);
             int rowsUpdated = preparedStatement.executeUpdate();
-
             if (rowsUpdated > 0) {
                 success = true;
             } else {
