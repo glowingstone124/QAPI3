@@ -329,7 +329,6 @@ public class UserProcess {
     }
     public static String regMinecraftUser(String name, Long uid, HttpServletRequest request){
         if (!UserProcess.dumplicateUID(uid) && name != null && uid != null) {
-            if (!UserProcess.hasIp(IPUtil.getIpAddr(request))) {
                 try {
                     // 连接到数据库
                     Connection connection = DriverManager.getConnection(jdbcUrl, sqlusername, sqlpassword);
@@ -356,10 +355,7 @@ public class UserProcess {
                     e.printStackTrace();
                 }
                 return "FAILED";
-            } else {
-                return  ReturnInterface.failed("Used IP");
-            }
-        } else if(name.equals(null) || uid.equals(null)){
+            } else if(name.equals(null) || uid.equals(null)){
             Logger.Log("Register ERROR: username or uid null", 2);
         }
         return "FAILED";
