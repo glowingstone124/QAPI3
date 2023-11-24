@@ -91,21 +91,12 @@ public class UserProcess {
 
             }
             try {
-                // 连接到数据库
                 Connection connection = DriverManager.getConnection(jdbcUrl, sqlusername, sqlpassword);
-
-                // 准备查询语句
                 String query = "SELECT * FROM forum WHERE username = ?";
                 PreparedStatement preparedStatement = connection.prepareStatement(query);
-
-                // 设置查询参数
                 preparedStatement.setString(1, name);
-
-                // 执行查询
                 ResultSet resultSet = preparedStatement.executeQuery();
-
                 if (resultSet.next()) {
-                    // Move the cursor to the first row and retrieve data
                     date = resultSet.getString("date");
                     premium = resultSet.getBoolean("premium");
                     donate = resultSet.getBoolean("donate");
@@ -330,14 +321,9 @@ public class UserProcess {
     public static String regMinecraftUser(String name, Long uid, HttpServletRequest request){
         if (!UserProcess.dumplicateUID(uid) && name != null && uid != null) {
                 try {
-                    // 连接到数据库
                     Connection connection = DriverManager.getConnection(jdbcUrl, sqlusername, sqlpassword);
-
-                    // 准备插入语句
                     String insertQuery = "INSERT INTO users (username, uid,frozen, remain) VALUES (?, ?, ?, ?)";
                     PreparedStatement preparedStatement = connection.prepareStatement(insertQuery);
-
-                    // 设置参数值
                     preparedStatement.setString(1, name);
                     preparedStatement.setLong(2, uid);
                     preparedStatement.setBoolean(3, false);
@@ -350,15 +336,15 @@ public class UserProcess {
                     preparedStatement.close();
                     connection.close();
                     UserProcess.insertIp(IPUtil.getIpAddr(request));
-                    return "Success!";
+                    return ReturnInterface.success("Success!");
                 } catch (Exception e) {
                     e.printStackTrace();
                 }
-                return "FAILED";
+                return ReturnInterface.failed("FAILED");
             } else if(name.equals(null) || uid.equals(null)){
             Logger.Log("Register ERROR: username or uid null", 2);
         }
-        return "FAILED";
+        return ReturnInterface.failed("FAILED");
     }
     public static String AvatarTrans(String name) throws Exception{
         String apiURL = "https://api.mojang.com/users/profiles/minecraft/" + name;

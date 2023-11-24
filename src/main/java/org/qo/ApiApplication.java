@@ -3,7 +3,6 @@ package org.qo;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
-import org.apache.catalina.User;
 import org.jetbrains.annotations.NotNull;
 import org.json.JSONObject;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
@@ -18,15 +17,11 @@ import org.springframework.web.bind.annotation.*;
 import java.io.*;
 import java.lang.management.ManagementFactory;
 import java.lang.management.OperatingSystemMXBean;
-import java.net.HttpURLConnection;
-import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
-import java.sql.*;
+import java.util.Date;
 import java.util.*;
 
 import static org.qo.Algorithm.*;
@@ -36,8 +31,10 @@ import static org.qo.UserProcess.*;
 @RestController
 @SpringBootApplication
 public class ApiApplication implements ErrorController {
-    public static String status111;
+    public static String status;
     public static String serverStatus;
+    public static int serverAlive;
+    public static long PackTime;
     public static String survivalMsg;
     public static String creativeMsg;
     public static String CreativeStatus;
@@ -198,6 +195,32 @@ public class ApiApplication implements ErrorController {
         returnObj.put("ec", 200);
         return returnObj.toString();
     }
+    @PostMapping("/qo/alive/upload")
+    public void getAlive(@RequestBody String data){
+        JSONObject Heartbeat = new JSONObject(data);
+        PackTime = Heartbeat.getLong("timestamp");
+        long currentTime = new Date().getTime();
+        if (currentTime - PackTime > 3000){
+            serverAlive = -1;
+        }
+        switch (Heartbeat.getInt("stat")){
+            case 0 -> serverAlive = 0;
+            //Ready
+            case 1 -> {
+                serverAlive = 1;
+                Logger.Log("Server Stopped at"+ PackTime, 1);
+                //Closed
+            }
+            default -> serverAlive = -1;
+            //Unexpected status
+        }
+    }
+    @GetMapping("/qo/alive/download")
+    public String queryAlive(){
+        JSONObject aliveJSON = new JSONObject();
+        aliveJSON.put("stat", serverAlive);
+        return aliveJSON.toString();
+    }
     @RequestMapping("/api/isFirstLogin")
     public String firstLogin(@RequestParam(name = "name", required = true) String name, HttpServletRequest request){
         return UserProcess.firstLoginSearch(name,request);
@@ -328,7 +351,7 @@ public class ApiApplication implements ErrorController {
     @PostMapping("/qo/upload/status")
     public String handlePost(@RequestBody String data, HttpServletRequest request) {
         if (data != null) {
-            status111 = data;
+            status = data;
         }
         return null;
     }
@@ -359,7 +382,7 @@ public class ApiApplication implements ErrorController {
     @GetMapping("/qo/download/status")
     public String returnStatus() {
         serverStatus = "[]";
-        serverStatus = status111;
+        serverStatus = status;
         return serverStatus;
     }
     @GetMapping("/qo/download/CrStatus")
@@ -383,10 +406,10 @@ public class ApiApplication implements ErrorController {
     public static String InsertData(@RequestParam @NotNull String name,@RequestParam @NotNull Long uid, HttpServletRequest request) throws Exception {
         return UserProcess.regMinecraftUser(name, uid, request);
     }
-        @RequestMapping("/qo/download/memorial")
-        public static String downloadMemorial() throws IOException {
-            return UserProcess.downloadMemorial();
-        }
+    @RequestMapping("/qo/download/memorial")
+    public static String downloadMemorial() throws IOException {
+        return UserProcess.downloadMemorial();
+    }
     @RequestMapping("/qo/download/avatar")
     public String avartarTrans(@RequestParam() String name) throws Exception {
         return UserProcess.AvatarTrans(name);

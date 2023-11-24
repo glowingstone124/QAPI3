@@ -10,7 +10,7 @@ public class Funcs {
             Logger.Log("API shutdown.", 2);
         }));
         System.out.println("""
-                Quantum Original Api Project
+                QApi Opensource Project
                 启动中...
                 Based On Springboot                             
                 """);
