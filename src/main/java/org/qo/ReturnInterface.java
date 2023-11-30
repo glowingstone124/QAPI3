@@ -1,17 +1,26 @@
 package org.qo;
 
-import org.json.JSONObject;
+import com.google.gson.JsonObject;
+
 public class ReturnInterface {
-    public static String failed(String input){
-        JSONObject returnObject = new JSONObject();
-        returnObject.put("code", -1);
-        returnObject.put("message", input);
+    public static String failed(String input) {
+        JsonObject returnObject = new JsonObject();
+        returnObject.addProperty("code", -1);
+        returnObject.addProperty("message", input);
         return returnObject.toString();
     }
-    public static String success(String input){
-        JSONObject returnObject = new JSONObject();
-        returnObject.put("code", 0);
-        returnObject.put("message", input);
+
+    public static String success(String input) {
+        JsonObject returnObject = new JsonObject();
+        returnObject.addProperty("code", 0);
+        returnObject.addProperty("message", input);
+        return returnObject.toString();
+    }
+
+    public static String denied(String input) {
+        JsonObject returnObject = new JsonObject();
+        returnObject.addProperty("code", 1);
+        returnObject.addProperty("message", input);
         return returnObject.toString();
     }
 }

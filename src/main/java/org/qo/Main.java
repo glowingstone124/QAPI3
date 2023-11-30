@@ -12,11 +12,13 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 import java.util.Scanner;
 import java.util.Timer;
 
+import static org.qo.Logger.LogLevel.*;
+
 @SpringBootApplication
 public class Main {
     public static void main(String[] args) throws Exception {
         Funcs.Start();
-        Logger.Log("API Started.", 0);
+        Logger.log("API Started.", INFO);
         SpringApplication.run(ApiApplication.class, args);
         Logger.startLogWriter("log.log", 3000);
         Timer timer = new Timer();
@@ -30,7 +32,7 @@ public class Main {
         long period = 12 * 60 * 60 * 1000;
         //timer.scheduleAtFixedRate(task, initialDelay, period);
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-            Logger.Log("API shutdown.", 0);
+            Logger.log("API shutdown.", INFO);
         }));
     }
 
