@@ -1,10 +1,8 @@
 package org.qo;
 
 import jakarta.servlet.http.HttpServletRequest;
-import org.jetbrains.annotations.NotNull;
 import org.json.JSONException;
 import org.json.JSONObject;
-import org.springframework.web.bind.annotation.RequestParam;
 
 import java.io.BufferedReader;
 import java.io.FileReader;
@@ -276,10 +274,13 @@ public class UserProcess {
             if (resultSet.next()) {
                 Long uid = resultSet.getLong("uid");
                 Boolean frozen = resultSet.getBoolean("frozen");
+                int eco = resultSet.getInt("economy");
+
                 JSONObject responseJson = new JSONObject();
                 responseJson.put("code", 0);
                 responseJson.put("frozen", frozen);
                 responseJson.put("qq", uid);
+                responseJson.put("economy", eco);
                 return responseJson.toString();
             }
             resultSet.close();
@@ -322,12 +323,13 @@ public class UserProcess {
         if (!UserProcess.dumplicateUID(uid) && name != null && uid != null) {
                 try {
                     Connection connection = DriverManager.getConnection(jdbcUrl, sqlusername, sqlpassword);
-                    String insertQuery = "INSERT INTO users (username, uid,frozen, remain) VALUES (?, ?, ?, ?)";
+                    String insertQuery = "INSERT INTO users (username, uid,frozen, remain, economy) VALUES (?, ?, ?, ?, ?)";
                     PreparedStatement preparedStatement = connection.prepareStatement(insertQuery);
                     preparedStatement.setString(1, name);
                     preparedStatement.setLong(2, uid);
                     preparedStatement.setBoolean(3, false);
                     preparedStatement.setInt(4, 3);
+                    preparedStatement.setInt(5,0);
                     // 执行插入操作
                     int rowsAffected = preparedStatement.executeUpdate();
                     System.out.println(rowsAffected + " row(s) inserted." + "from " + IPUtil.getIpAddr(request));
@@ -578,5 +580,32 @@ public class UserProcess {
             return responseJson.toString();
         }
         return ReturnInterface.failed("NULL");
+    }
+    public static String operateEco(String username, int value, opEco operation){
+        String updateSql = "UPDATE users SET economy = economy - ? WHERE username = ?";
+        try {
+            Connection connection = DriverManager.getConnection(jdbcUrl, sqlusername, sqlpassword);
+            if (operation == opEco.ADD) {
+                updateSql = "UPDATE users SET economy = economy + ? WHERE username = ?";
+            }
+            try (PreparedStatement preparedStatement = connection.prepareStatement(updateSql)) {
+                preparedStatement.setInt(1, value);
+                preparedStatement.setString(2, username);
+                int rowsUpdated = preparedStatement.executeUpdate();
+                if (rowsUpdated > 0) {
+                    return "success";
+                } else {
+                    return "failed";
+                }
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        return "failed";
+    }
+    public enum opEco{
+        ADD,
+        REMOVE,
+        MINUS
     }
 }

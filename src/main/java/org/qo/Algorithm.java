@@ -57,5 +57,4 @@ public class Algorithm {
             return null;
         }
     }
-
 }

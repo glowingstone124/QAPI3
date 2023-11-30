@@ -1,8 +1,11 @@
 package org.qo;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonObject;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import org.apache.catalina.User;
 import org.jetbrains.annotations.NotNull;
 import org.json.JSONObject;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
@@ -35,8 +38,6 @@ public class ApiApplication implements ErrorController {
     public static String serverStatus;
     public static int serverAlive;
     public static long PackTime;
-    public static String survivalMsg;
-    public static String creativeMsg;
     public static String CreativeStatus;
     Path filePath = Paths.get("app/latest/QCommunity-3.0.3-Setup.exe");
     Path webdlPath = Paths.get("webs/download.html");
@@ -97,31 +98,6 @@ public class ApiApplication implements ErrorController {
 
     }
 
-    @GetMapping("/qo/app/download/latest")
-    public ResponseEntity<Object> downloadFileAndDisplayHTML() {
-        try {
-            // 获取文件资源
-            Resource fileResource = new UrlResource(filePath.toUri());
-            // HTML内容
-            String htmlContent = Files.readString(webdlPath);
-
-            // 设置响应头
-            HttpHeaders headers = new HttpHeaders();
-            headers.setContentType(MediaType.MULTIPART_MIXED);
-
-            // 构建响应体，包含HTML内容和文件资源
-            String response = "<!--StartFragment-->\n" + htmlContent + "\n<!--EndFragment-->";
-            ResponseEntity.BodyBuilder responseBuilder = ResponseEntity.ok()
-                    .headers(headers)
-                    .contentLength(response.getBytes().length)
-                    .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + fileResource.getFilename() + "\"");
-
-            return responseBuilder.body(response.getBytes());
-        } catch (Exception e) {
-            return ResponseEntity.notFound().build();
-        }
-    }
-
 @RequestMapping("/introduction/attractions")
     public String attractionIntros(@RequestParam(name = "articleID", required = true) int articleID) throws Exception{
         if (articleID == -1){
@@ -157,16 +133,6 @@ public class ApiApplication implements ErrorController {
             }
             return ReturnInterface.failed("NOT FOUND");
         }
-    }
-    @RequestMapping("/api/notice")
-    public String JCSUF1(HttpServletRequest request) throws IOException {
-        String noticedata = "data/notice.json";
-        return Files.readString(Path.of(noticedata));
-    }
-    @RequestMapping("/qo/app")
-    public String returnContent() throws IOException {
-        String index = Files.readString(Path.of("webs/index.html"));
-        return index;
     }
     @GetMapping("/forum/login")
     public String userLogin(@RequestParam(name="username", required = true)String username, @RequestParam(name = "password", required = true)String password , HttpServletRequest request) {
@@ -292,7 +258,7 @@ public class ApiApplication implements ErrorController {
     @RequestMapping("/app/latest")
     public String update(){
         JSONObject returnObj = new JSONObject();
-        returnObj.put("version", 3);
+        returnObj.put("version", 4);
         returnObj.put("die", false);
         return returnObj.toString();
     }
@@ -447,5 +413,21 @@ public class ApiApplication implements ErrorController {
     @RequestMapping("/qo/download/registry")
     public static String GetData(String name) throws Exception {
         return UserProcess.queryReg(name);
+    }
+    @PostMapping("/qo/economy/minus")
+    public String minus(String username, int value){
+        return ReturnInterface.success(operateEco(username,value, opEco.MINUS));
+    }
+    @PostMapping("/qo/economy/plus")
+    public String add(String username, int value){
+        return ReturnInterface.success(operateEco(username,value, opEco.ADD));
+    }
+    @PostMapping("/qo/msglist/upload")
+    public void handleMsg(@RequestBody String data){
+        Msg.put(data);
+    }
+    @GetMapping("/qo/msglist/download")
+    public String returnMsg(){
+        return Msg.get().toString();
     }
 }

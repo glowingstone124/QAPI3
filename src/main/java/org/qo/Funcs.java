@@ -14,6 +14,7 @@ public class Funcs {
                 启动中...
                 Based On Springboot                             
                 """);
+
         if (!UserProcess.SQLAvliable()) {
             System.out.println("SQL Misconfigured!");
         }

@@ -11,10 +11,6 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
 import java.util.Scanner;
 import java.util.Timer;
-import java.util.TimerTask;
-import java.util.concurrent.ThreadPoolExecutor;
-
-import static org.qo.server.Updater.executeCommand;
 
 @SpringBootApplication
 public class Main {
@@ -24,26 +20,18 @@ public class Main {
         SpringApplication.run(ApiApplication.class, args);
         Logger.startLogWriter("log.log", 3000);
         Timer timer = new Timer();
-        TimerTask task = new TimerTask() {
+        /*TimerTask task = new TimerTask() {
             @Override
             public void run() {
                 executeCommand();
             }
-        };
+        }; */
         long initialDelay = 0;
         long period = 12 * 60 * 60 * 1000;
-        timer.scheduleAtFixedRate(task, initialDelay, period);
-        Scanner scanner = new Scanner(System.in);
-        String input = scanner.nextLine();
-        switch (input){
-            case "exit":
-                System.exit(0);
-            case "showdic":
-                Funcs.ShowDic();
-                break;
-            default:
-                System.out.println("NO COMMAND AVAILABLE");
-        }
+        //timer.scheduleAtFixedRate(task, initialDelay, period);
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            Logger.Log("API shutdown.", 0);
+        }));
     }
 
     @Bean
