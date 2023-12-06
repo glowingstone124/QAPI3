@@ -55,7 +55,10 @@ public class ApiApplication implements ErrorController {
 
     @RequestMapping("/")
     public String root() {
-        return ReturnInterface.success("QOAPI Project Root Dictionary");
+        JSONObject returnObj = new JSONObject();
+        returnObj.put("code",0);
+        returnObj.put("build", "202312062337");
+        return returnObj.toString();
     }
     @RequestMapping("/error")
     public String error(HttpServletRequest request, HttpServletResponse response){
