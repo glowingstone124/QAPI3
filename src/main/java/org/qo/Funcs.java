@@ -7,7 +7,7 @@ public class Funcs {
     }
     public static void Start(){
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-            Logger.Log("API shutdown.", 2);
+            Logger.log("API shutdown.", Logger.LogLevel.ERROR);
         }));
         System.out.println("""
                 QApi Opensource Project

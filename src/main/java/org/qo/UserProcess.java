@@ -16,7 +16,7 @@ import java.nio.file.Path;
 import java.sql.*;
 import java.util.Calendar;
 import java.util.Objects;
-
+import static org.qo.Logger.LogLevel.*;
 import static org.qo.Algorithm.hashSHA256;
 
 
@@ -63,7 +63,7 @@ public class UserProcess {
             apreparedStatement.setString(2, name);
 
             // 执行更新操作
-            Logger.Log(IPUtil.getIpAddr(request) + " username " + name + " qureied firstlogin.", 0);
+            Logger.log(IPUtil.getIpAddr(request) + " username " + name + " qureied firstlogin.", INFO);
             int rowsAffected = apreparedStatement.executeUpdate();
             apreparedStatement.close();
             connection.close();
@@ -78,7 +78,7 @@ public class UserProcess {
         JSONObject responseJson = new JSONObject();
         responseJson.put("code", 1);
         responseJson.put("first", -1);
-        Logger.Log(IPUtil.getIpAddr(request) + " username " + name + " qureied firstlogin but unsuccessful.", 0);
+        Logger.log(IPUtil.getIpAddr(request) + " username " + name + " qureied firstlogin but unsuccessful.", INFO);
         return responseJson.toString();
     }
         public static String fetchMyinfo(String name, HttpServletRequest request) throws Exception {
@@ -106,20 +106,20 @@ public class UserProcess {
                     responseJson.put("code", 0);
                     responseJson.put("linkto", linkto);
                     responseJson.put("username", name);
-                    Logger.Log(IPUtil.getIpAddr(request) + "username " + name + " qureied myinfo.", 0);
+                    Logger.log(IPUtil.getIpAddr(request) + "username " + name + " qureied myinfo.", INFO);
                     return responseJson.toString();
                 } else {
                     // No rows found for the given username
                     JSONObject responseJson = new JSONObject();
                     responseJson.put("code", -1);
-                    Logger.Log(IPUtil.getIpAddr(request) + "username " + name + " qureied myinfo, but unsuccessful.", 0);
+                    Logger.log(IPUtil.getIpAddr(request) + "username " + name + " qureied myinfo, but unsuccessful.", INFO);
                     return responseJson.toString();
                 }
 
             } catch (SQLException e) {
                 e.printStackTrace();
                 JSONObject responseJson = new JSONObject();
-                Logger.Log("username " + name + " qureied myinfo, but unsuccessful.", 0);
+                Logger.log("username " + name + " qureied myinfo, but unsuccessful.", INFO);
                 responseJson.put("code", -1);
                 return responseJson.toString();
             }
@@ -129,7 +129,7 @@ public class UserProcess {
         try {
             sqlObject = new JSONObject(Files.readString(Path.of(SQL_CONFIGURATION)));
         } catch (IOException e) {
-            Logger.Log("ERROR: SQL CONFIG NOT FOUND",2);
+            Logger.log("ERROR: SQL CONFIG NOT FOUND",ERROR);
         }
         switch (type){
             case "password":
@@ -199,7 +199,7 @@ public class UserProcess {
 
         try (Connection connection = DriverManager.getConnection(jdbcUrl, sqlusername, sqlpassword)) {
             String selectQuery = "SELECT * FROM forum WHERE username = ?";
-            Logger.Log(selectQuery, 0);
+            Logger.log(selectQuery, INFO);
 
             try (PreparedStatement preparedStatement = connection.prepareStatement(selectQuery)) {
                 preparedStatement.setString(1, username);
@@ -344,7 +344,7 @@ public class UserProcess {
                 }
                 return ReturnInterface.failed("FAILED");
             } else if(name.equals(null) || uid.equals(null)){
-            Logger.Log("Register ERROR: username or uid null", 2);
+            Logger.log("Register ERROR: username or uid null", ERROR);
         }
         return ReturnInterface.failed("FAILED");
     }
@@ -552,11 +552,11 @@ public class UserProcess {
                 String storedHashedPassword = resultSet.getString("password");
                 String encryptPswd = hashSHA256(password);
                 if (Objects.equals(encryptPswd, storedHashedPassword)) {
-                    Logger.Log(IPUtil.getIpAddr(request) + " "  + username + " login successful.", 0);
+                    Logger.log(IPUtil.getIpAddr(request) + " "  + username + " login successful.", ERROR);
                     return ReturnInterface.success("成功");
                 }
             } else {
-                Logger.Log("username " + username + " login failed.", 0);
+                Logger.log("username " + username + " login failed.", ERROR);
                 return ReturnInterface.failed("登录失败");
             }
             connection.close();

@@ -174,7 +174,7 @@ public class ApiApplication implements ErrorController {
             //Ready
             case 1 -> {
                 serverAlive = 1;
-                Logger.Log("Server Stopped at"+ PackTime, 1);
+                Logger.log("Server Stopped at"+ PackTime, Logger.LogLevel.INFO);
                 //Closed
             }
             default -> serverAlive = -1;
@@ -193,7 +193,7 @@ public class ApiApplication implements ErrorController {
     }
     @PostMapping("/qo/creative/msgupload")
     public String creativeUpload(@RequestBody String data){
-        Logger.Log("[CreativeCHAT]" + data, 0);
+        Logger.log("[CreativeCHAT]" + data, Logger.LogLevel.INFO);
         CreativeMsgList.put(data, 0);
         return null;
     }
@@ -244,7 +244,7 @@ public class ApiApplication implements ErrorController {
     public String resetPassword(String username, String hash, int deviceid, String newPassword, HttpServletRequest request) throws Exception {
         if (deviceid == 77560 && UserProcess.queryHash(hash).equals(username) && !Objects.equals(UserProcess.queryHash(hash), null)) {
             if (UserProcess.changeHash(username, hashSHA256(newPassword))) {
-                Logger.Log("[PASSWORD] ip " + IPUtil.getIpAddr(request) + " queried resetPassword and changed username " + username + "'s password.",0);
+                Logger.log("[PASSWORD] ip " + IPUtil.getIpAddr(request) + " queried resetPassword and changed username " + username + "'s password.",Logger.LogLevel.INFO);
                 return ReturnInterface.success("SUCCESS");
             }
         } else if(deviceid != 77560) {
@@ -252,7 +252,7 @@ public class ApiApplication implements ErrorController {
         } else if(!Objects.equals(UserProcess.queryHash(hash), username)){
             return ReturnInterface.failed("Network Err");
         }
-        Logger.Log("ip " + IPUtil.getIpAddr(request) + " queried resetPassword and wanted to change username " + username + "'s password. but unsuccessful",0);
+        Logger.log("ip " + IPUtil.getIpAddr(request) + " queried resetPassword and wanted to change username " + username + "'s password. but unsuccessful", Logger.LogLevel.INFO);
         return  ReturnInterface.failed("FAILED");
     }
     @RequestMapping("/app/latest")
@@ -339,10 +339,10 @@ public class ApiApplication implements ErrorController {
 
                 ex.printStackTrace();
             }
-            Logger.Log(IPUtil.getIpAddr(request) + "[register]" + username + " registered.", 0);
+            Logger.log(IPUtil.getIpAddr(request) + "[register]" + username + " registered.", Logger.LogLevel.INFO);
             return ReturnInterface.success("SUCCESS");
         }
-        Logger.Log(IPUtil.getIpAddr(request) + "[register]" + username + " registered but failed.", 0);
+        Logger.log(IPUtil.getIpAddr(request) + "[register]" + username + " registered but failed.", Logger.LogLevel.INFO);
         return ReturnInterface.failed("FAILED");
     }
     @GetMapping("/qo/download/status")
