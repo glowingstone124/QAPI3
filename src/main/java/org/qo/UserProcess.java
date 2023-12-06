@@ -350,34 +350,22 @@ public class UserProcess {
     }
     public static String AvatarTrans(String name) throws Exception{
         String apiURL = "https://api.mojang.com/users/profiles/minecraft/" + name;
-        String avartarURL = "https://crafatar.com/avatars/";
-        URL url = new URL(apiURL);
-        HttpURLConnection con = (HttpURLConnection) url.openConnection();
-        con.setRequestMethod("GET");
-
-        int responseCode = con.getResponseCode();
-        if (responseCode == HttpURLConnection.HTTP_OK) {
-            BufferedReader in = new BufferedReader(new InputStreamReader(con.getInputStream()));
-            String inputLine;
-            StringBuilder response = new StringBuilder();
-
-            while ((inputLine = in.readLine()) != null) {
-                response.append(inputLine);
+        String avatarURL = "https://playerdb.co/api/player/minecraft/";
+            JSONObject uuidobj = new JSONObject(Request.sendGetRequest(apiURL));
+            String uuid = uuidobj.getString("id");
+            JSONObject playerUUIDobj = new JSONObject(Request.sendGetRequest(avatarURL + uuid));
+            if (playerUUIDobj.getBoolean("success")){
+                JSONObject player =  playerUUIDobj.getJSONObject("data").getJSONObject("player");
+                JSONObject returnObject = new JSONObject();
+                returnObject.put("url", player.getString("avatar"));
+                returnObject.put("name", player.getString("username"));
+                return returnObject.toString();
+            } else {
+                JSONObject returnObject = new JSONObject();
+                returnObject.put("url", "https://crafthead.net/avatar/8667ba71b85a4004af54457a9734eed7");
+                returnObject.put("name", name);
+                return returnObject.toString();
             }
-            in.close();
-            JSONObject playerUUIDobj = new JSONObject(response.toString());
-            String useruuid = playerUUIDobj.getString("id");
-            String username = playerUUIDobj.getString("name");
-            JSONObject returnObject = new JSONObject();
-            returnObject.put("url", avartarURL + useruuid);
-            returnObject.put("name", name);
-            return returnObject.toString();
-        } else {
-            JSONObject returnObject = new JSONObject();
-            returnObject.put("url", avartarURL + "8667ba71b85a4004af54457a9734eed7");
-            returnObject.put("name", name);
-            return returnObject.toString();
-        }
     }
     public static String downloadMemorial() throws IOException {
         String filePath = "data/memorial.json";
