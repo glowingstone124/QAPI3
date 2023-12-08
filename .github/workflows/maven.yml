@@ -32,7 +32,7 @@ jobs:
     - name: Upload JAR as Artifact
       uses: actions/upload-artifact@v2
       with:
-        name: output
-        path: target/
+        name: output.jar
+        path: target/SpringbootQOapi-1.0-SNAPSHOT.jar
 
 
