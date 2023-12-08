@@ -57,7 +57,7 @@ public class ApiApplication implements ErrorController {
     public String root() {
         JSONObject returnObj = new JSONObject();
         returnObj.put("code",0);
-        returnObj.put("build", "202312062337");
+        returnObj.put("build", "202312081719");
         return returnObj.toString();
     }
     @RequestMapping("/error")
@@ -261,7 +261,7 @@ public class ApiApplication implements ErrorController {
     @RequestMapping("/app/latest")
     public String update(){
         JSONObject returnObj = new JSONObject();
-        returnObj.put("version", 4);
+        returnObj.put("version", 5);
         returnObj.put("die", false);
         return returnObj.toString();
     }
