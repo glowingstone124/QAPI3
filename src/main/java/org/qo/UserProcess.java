@@ -3,6 +3,7 @@ package org.qo;
 import jakarta.servlet.http.HttpServletRequest;
 import org.json.JSONException;
 import org.json.JSONObject;
+import org.qo.server.AvatarCache;
 
 import java.io.BufferedReader;
 import java.io.FileReader;
@@ -351,14 +352,16 @@ public class UserProcess {
     public static String AvatarTrans(String name) throws Exception{
         String apiURL = "https://api.mojang.com/users/profiles/minecraft/" + name;
         String avatarURL = "https://playerdb.co/api/player/minecraft/";
+        if (!AvatarCache.has(name)) {
             JSONObject uuidobj = new JSONObject(Request.sendGetRequest(apiURL));
             String uuid = uuidobj.getString("id");
             JSONObject playerUUIDobj = new JSONObject(Request.sendGetRequest(avatarURL + uuid));
-            if (playerUUIDobj.getBoolean("success")){
-                JSONObject player =  playerUUIDobj.getJSONObject("data").getJSONObject("player");
+            if (playerUUIDobj.getBoolean("success")) {
+                JSONObject player = playerUUIDobj.getJSONObject("data").getJSONObject("player");
                 JSONObject returnObject = new JSONObject();
                 returnObject.put("url", player.getString("avatar"));
                 returnObject.put("name", player.getString("username"));
+                AvatarCache.cache(player.getString("avatar"), player.getString("username"));
                 return returnObject.toString();
             } else {
                 JSONObject returnObject = new JSONObject();
@@ -366,6 +369,11 @@ public class UserProcess {
                 returnObject.put("name", name);
                 return returnObject.toString();
             }
+        }
+        JSONObject returnObject = new JSONObject();
+        returnObject.put("url", "https://crafthead.net/avatar/8667ba71b85a4004af54457a9734eed7");
+        returnObject.put("name", name);
+        return returnObject.toString();
     }
     public static String downloadMemorial() throws IOException {
         String filePath = "data/memorial.json";

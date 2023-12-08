@@ -1,10 +1,12 @@
 package org.qo;
 
-import java.io.BufferedReader;
-import java.io.DataOutputStream;
-import java.io.InputStreamReader;
+import java.io.*;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.net.URLConnection;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 
 public class Request {
 
@@ -64,8 +66,6 @@ public class Request {
             // Enable output and input for the connection.
             connection.setDoOutput(true);
             connection.setDoInput(true);
-
-            // Read the response from the server.
             int responseCode = connection.getResponseCode();
             if (responseCode == HttpURLConnection.HTTP_OK) {
                 try (BufferedReader reader = new BufferedReader(new InputStreamReader(connection.getInputStream()))) {
@@ -76,12 +76,18 @@ public class Request {
                 }
             }
         } finally {
-            // Close the connection to the server.
             if (connection != null) {
                 connection.disconnect();
             }
         }
-        //Bukkit.getLogger().info("request "+targetUrl);
         return result;
+    }
+    public static void Download(String fileUrl, String savePath) throws IOException {
+        URL url = new URL(fileUrl);
+        URLConnection connection = url.openConnection();
+        try (InputStream inputStream = connection.getInputStream()) {
+            Path targetPath = Path.of(savePath);
+            Files.copy(inputStream, targetPath, StandardCopyOption.REPLACE_EXISTING);
+        }
     }
 }
