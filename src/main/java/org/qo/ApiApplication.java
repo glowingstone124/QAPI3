@@ -268,20 +268,14 @@ public class ApiApplication implements ErrorController {
     @RequestMapping("/qo/download/systeminfo")
     public String systeminfo(){
         JSONObject systemInfoJson = new JSONObject();
-
-        // Get CPU usage
         OperatingSystemMXBean operatingSystemMXBean = ManagementFactory.getOperatingSystemMXBean();
         String cpuUsage = String.valueOf(operatingSystemMXBean.getSystemLoadAverage());
         systemInfoJson.put("cpu_usage", cpuUsage);
         JSONObject memoryUsageJson = getMemoryUsage();
         systemInfoJson.put("memory_usage", memoryUsageJson);
-
-        // Get disk usage
         JSONObject diskUsageJson = getDiskUsage();
         systemInfoJson.put("disk_usage", diskUsageJson);
-
         systemInfoJson.put("system_name", System.getProperty("os.name"));
-
         return systemInfoJson.toString();
     }
     private static JSONObject getMemoryUsage() {
