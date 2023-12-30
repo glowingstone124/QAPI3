@@ -1,5 +1,6 @@
 package org.qo;
 
+import org.qo.server.BackupDatabase;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.Bean;
@@ -11,6 +12,7 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
 import java.util.Scanner;
 import java.util.Timer;
+import java.util.TimerTask;
 
 import static org.qo.Logger.LogLevel.*;
 
@@ -22,15 +24,10 @@ public class Main {
         SpringApplication.run(ApiApplication.class, args);
         Logger.startLogWriter("log.log", 3000);
         Timer timer = new Timer();
-        /*TimerTask task = new TimerTask() {
-            @Override
-            public void run() {
-                executeCommand();
-            }
-        }; */
+        TimerTask task = new BackupDatabase();
         long initialDelay = 0;
-        long period = 12 * 60 * 60 * 1000;
-        //timer.scheduleAtFixedRate(task, initialDelay, period);
+        long period = 24 * 60 * 60 * 1000;
+        timer.scheduleAtFixedRate(task, initialDelay, period);
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             Logger.log("API shutdown.", INFO);
         }));
@@ -42,15 +39,13 @@ public class Main {
             @Override
             public void addCorsMappings(CorsRegistry registry) {
                 registry.addMapping("/**")
-                        .allowedOrigins("http://127.0.0.1:5500") // 允许的来源
-                        .allowedMethods("GET", "POST") // 允许的HTTP方法
-                        .allowedHeaders("*") // 允许的请求头信息
-                        .allowCredentials(true); // 允许发送凭据（例如，cookies）
+                        .allowedOrigins("http://127.0.0.1:5500")
+                        .allowedMethods("GET", "POST")
+                        .allowedHeaders("*")
+                        .allowCredentials(true);
             }
         };
     }
-
-    // 如果使用了Spring Security，还需要配置CorsFilter来处理跨域请求
     @Bean
     public CorsFilter corsFilter() {
         CorsConfiguration config = new CorsConfiguration();

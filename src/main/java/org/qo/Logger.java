@@ -19,15 +19,15 @@ public class Logger {
     private static final Object lock = new Object();
 
     public static void log(String message, @Nullable Object level) {
+        String logEntry = null;
         if (level == null || level instanceof Integer) {
             System.out.println("your code are using a non-specified log level (int, boolean, etc.) please correct this.");
         }
-        String logEntry = null;
         if (level instanceof LogLevel) {
             Date now = new Date();
             SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
             String timestamp = sdf.format(now);
-            logEntry = String.format("[%s] [%s] %s", timestamp, level != null ? level : "UNSPECIFIED LOG LEVEL", message);
+            logEntry = String.format("[%s] [%s] %s", timestamp,  level != null ? level : "UNSPECIFIED LOG LEVEL", message);
         }
         if (logEntry != null) {
             synchronized (lock) {
@@ -67,9 +67,9 @@ public class Logger {
                 try (BufferedWriter writer = new BufferedWriter(new FileWriter(logFilePath, true))) {
                     for (String logEntry : logsToWrite) {
                         writer.write(logEntry + "\n");
+                        System.out.println(logEntry + "\n");
                         logWriteCnt++;
                     }
-                    System.out.println("This row updated " + logWriteCnt + " line(s) log.");
                 } catch (IOException e) {
                     e.printStackTrace();
                 }

@@ -32,26 +32,16 @@ public class UserProcess {
 
     public static String firstLoginSearch(String name, HttpServletRequest request) {
         try {
-            // 连接到数据库
             Connection connection = DriverManager.getConnection(jdbcUrl, sqlusername, sqlpassword);
-
-            // 准备查询语句
             String query = "SELECT * FROM forum WHERE username = ?";
             PreparedStatement preparedStatement = connection.prepareStatement(query);
-
-            // 设置查询参数
             preparedStatement.setString(1, name);
-
-            // 执行查询
             ResultSet resultSet = preparedStatement.executeQuery();
-
-            // 处理查询结果
             if (resultSet.next()) {
                 Boolean first = resultSet.getBoolean("firstLogin");
                 JSONObject responseJson = new JSONObject();
                 responseJson.put("code", 0);
                 responseJson.put("first", first);
-                // 关闭资源
                 resultSet.close();
                 preparedStatement.close();
 
@@ -74,8 +64,6 @@ public class UserProcess {
         } catch (Exception e) {
             e.printStackTrace();
         }
-
-// 处理错误的情况
         JSONObject responseJson = new JSONObject();
         responseJson.put("code", 1);
         responseJson.put("first", -1);

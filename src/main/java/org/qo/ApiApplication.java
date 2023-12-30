@@ -261,9 +261,56 @@ public class ApiApplication implements ErrorController {
     @RequestMapping("/app/latest")
     public String update(){
         JSONObject returnObj = new JSONObject();
-        returnObj.put("version", 5);
+        returnObj.put("version", 4);
         returnObj.put("die", false);
         return returnObj.toString();
+    }
+    @RequestMapping("/qo/download/systeminfo")
+    public String systeminfo(){
+        JSONObject systemInfoJson = new JSONObject();
+
+        // Get CPU usage
+        OperatingSystemMXBean operatingSystemMXBean = ManagementFactory.getOperatingSystemMXBean();
+        String cpuUsage = String.valueOf(operatingSystemMXBean.getSystemLoadAverage());
+        systemInfoJson.put("cpu_usage", cpuUsage);
+        JSONObject memoryUsageJson = getMemoryUsage();
+        systemInfoJson.put("memory_usage", memoryUsageJson);
+
+        // Get disk usage
+        JSONObject diskUsageJson = getDiskUsage();
+        systemInfoJson.put("disk_usage", diskUsageJson);
+
+        systemInfoJson.put("system_name", System.getProperty("os.name"));
+
+        return systemInfoJson.toString();
+    }
+    private static JSONObject getMemoryUsage() {
+        Runtime runtime = Runtime.getRuntime();
+        long totalMemory = runtime.totalMemory();
+        long freeMemory = runtime.freeMemory();
+        long usedMemory = totalMemory - freeMemory;
+
+        JSONObject memoryUsageJson = new JSONObject();
+        memoryUsageJson.put("total_memory", totalMemory);
+        memoryUsageJson.put("used_memory", usedMemory);
+        memoryUsageJson.put("free_memory", freeMemory);
+
+        return memoryUsageJson;
+    }
+
+    // Get disk usage
+    private static JSONObject getDiskUsage() {
+        File file = new File("/");
+        long totalSpace = file.getTotalSpace();
+        long freeSpace = file.getFreeSpace();
+        long usableSpace = file.getUsableSpace();
+
+        JSONObject diskUsageJson = new JSONObject();
+        diskUsageJson.put("total_space", totalSpace);
+        diskUsageJson.put("free_space", freeSpace);
+        diskUsageJson.put("usable_space", usableSpace);
+
+        return diskUsageJson;
     }
     @RequestMapping("/qo/time")
     public String timedate() {
