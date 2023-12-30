@@ -216,7 +216,6 @@ public class ApiApplication implements ErrorController {
                 String latestMessage = null;
                 if (entry.getValue() == 0) {
                     latestMessage = entry.getKey();
-                    // Set the associated integer value to 1
                     entry.setValue(1);
                     break; // Exit the loop after finding the latest message
                 }
@@ -332,7 +331,7 @@ public class ApiApplication implements ErrorController {
         return null;
     }
     @RequestMapping("/forum/register")
-    public String register(@NotNull String username, @NotNull String password, @NotNull String token, HttpServletRequest request) throws Exception{
+    public String register(@RequestParam(name = "username", required = true) String username, @RequestParam(name = "password", required = true) String password, @RequestParam(name = "token", required = true) String token, HttpServletRequest request) throws Exception{
         if(Objects.equals(token, token(username,1700435)) && !UserProcess.queryForum(username)){
             try {
                 UserProcess.regforum(username, password);
@@ -346,7 +345,7 @@ public class ApiApplication implements ErrorController {
             return ReturnInterface.success("SUCCESS");
         }
         Logger.log(IPUtil.getIpAddr(request) + "[register]" + username + " registered but failed.", Logger.LogLevel.INFO);
-        return ReturnInterface.failed("FAILED");
+        return ReturnInterface.denied("FAILED");
     }
     @GetMapping("/qo/download/status")
     public String returnStatus() {
@@ -372,7 +371,7 @@ public class ApiApplication implements ErrorController {
         }
     }
     @RequestMapping("/qo/upload/registry")
-    public static String InsertData(@RequestParam @NotNull String name,@RequestParam @NotNull Long uid, HttpServletRequest request) throws Exception {
+    public static String InsertData(@RequestParam(name = "name", required = true)String name,@RequestParam(name = "uid", required = true) Long uid, HttpServletRequest request) throws Exception {
         return UserProcess.regMinecraftUser(name, uid, request);
     }
     @RequestMapping("/qo/download/memorial")

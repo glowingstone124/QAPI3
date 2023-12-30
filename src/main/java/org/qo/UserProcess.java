@@ -49,11 +49,8 @@ public class UserProcess {
             }
             String updateQuery = "UPDATE forum SET firstLogin = ? WHERE username = ?";
             PreparedStatement apreparedStatement = connection.prepareStatement(updateQuery);
-            // 设置更新参数值
             apreparedStatement.setBoolean(1, false);
             apreparedStatement.setString(2, name);
-
-            // 执行更新操作
             Logger.log(IPUtil.getIpAddr(request) + " username " + name + " qureied firstlogin.", INFO);
             int rowsAffected = apreparedStatement.executeUpdate();
             apreparedStatement.close();
@@ -310,30 +307,23 @@ public class UserProcess {
     }
     public static String regMinecraftUser(String name, Long uid, HttpServletRequest request){
         if (!UserProcess.dumplicateUID(uid) && name != null && uid != null) {
-                try {
-                    Connection connection = DriverManager.getConnection(jdbcUrl, sqlusername, sqlpassword);
-                    String insertQuery = "INSERT INTO users (username, uid,frozen, remain, economy) VALUES (?, ?, ?, ?, ?)";
-                    PreparedStatement preparedStatement = connection.prepareStatement(insertQuery);
-                    preparedStatement.setString(1, name);
-                    preparedStatement.setLong(2, uid);
-                    preparedStatement.setBoolean(3, false);
-                    preparedStatement.setInt(4, 3);
-                    preparedStatement.setInt(5,0);
-                    // 执行插入操作
-                    int rowsAffected = preparedStatement.executeUpdate();
-                    System.out.println(rowsAffected + " row(s) inserted." + "from " + IPUtil.getIpAddr(request));
-                    System.out.println(name + " Registered.");
-                    // 关闭资源
-                    preparedStatement.close();
-                    connection.close();
-                    UserProcess.insertIp(IPUtil.getIpAddr(request));
-                    return ReturnInterface.success("Success!");
-                } catch (Exception e) {
-                    e.printStackTrace();
-                }
+            try {
+                Connection connection = DriverManager.getConnection(jdbcUrl, sqlusername, sqlpassword);
+                String insertQuery = "INSERT INTO users (username, uid,frozen, remain, economy) VALUES (?, ?, ?, ?, ?)";
+                PreparedStatement preparedStatement = connection.prepareStatement(insertQuery);
+                preparedStatement.setString(1, name);preparedStatement.setLong(2, uid);
+                preparedStatement.setBoolean(3, false);
+                preparedStatement.setInt(4, 3);preparedStatement.setInt(5,0);
+                int rowsAffected = preparedStatement.executeUpdate();
+                System.out.println(rowsAffected + " row(s) inserted." + "from " + IPUtil.getIpAddr(request));
+                System.out.println(name + " Registered.");
+                preparedStatement.close();
+                connection.close();UserProcess.insertIp(IPUtil.getIpAddr(request));
+                return ReturnInterface.success("Success!");
+            } catch (Exception e) {
+                e.printStackTrace();
                 return ReturnInterface.failed("FAILED");
-            } else if(name.equals(null) || uid.equals(null)){
-            Logger.log("Register ERROR: username or uid null", ERROR);
+            }
         }
         return ReturnInterface.failed("FAILED");
     }
@@ -378,22 +368,6 @@ public class UserProcess {
             e.printStackTrace();
             throw e;
         }
-    }
-    public static boolean VerifyPSWD(String username, String inputPassword) throws IOException {
-        try {
-            String userContent = readFile(FILE_PATH);
-            if (userContent != null) {
-                JSONObject userProfiles = new JSONObject(userContent);
-                if (userProfiles.has(username)) {
-                    JSONObject userProfile = userProfiles.getJSONObject(username);
-                    String storedPassword = userProfile.getString("password");
-                    return inputPassword.equals(storedPassword);
-                }
-            }
-        } catch (JSONException e) {
-            e.printStackTrace();
-        }
-        return false;
     }
     public static String readFile(String filename) {
         try {
@@ -553,7 +527,7 @@ public class UserProcess {
                 }
             } else {
                 Logger.log("username " + username + " login failed.", ERROR);
-                return ReturnInterface.failed("登录失败");
+                return ReturnInterface.denied("登录失败");
             }
             connection.close();
             preparedStatement.close();
