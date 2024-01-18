@@ -57,7 +57,7 @@ public class ApiApplication implements ErrorController {
     public String root() {
         JSONObject returnObj = new JSONObject();
         returnObj.put("code",0);
-        returnObj.put("build", "202312081719");
+        returnObj.put("build", "202401182034");
         return returnObj.toString();
     }
     @RequestMapping("/error")
@@ -98,7 +98,6 @@ public class ApiApplication implements ErrorController {
     public String webhook(@RequestBody String data) {
         System.out.println(data);
         return null;
-
     }
 
 @RequestMapping("/introduction/attractions")
@@ -194,12 +193,7 @@ public class ApiApplication implements ErrorController {
     public String firstLogin(@RequestParam(name = "name", required = true) String name, HttpServletRequest request){
         return UserProcess.firstLoginSearch(name,request);
     }
-    @PostMapping("/qo/creative/msgupload")
-    public String creativeUpload(@RequestBody String data){
-        Logger.log("[CreativeCHAT]" + data, Logger.LogLevel.INFO);
-        CreativeMsgList.put(data, 0);
-        return null;
-    }
+
     @PostMapping("/qo/upload/gametimerecord")
     public void parser(@RequestParam(name = "name", required = true) String name,@RequestParam(name = "time", required = true) int time){
         UserProcess.handleTime(name,time);
@@ -208,39 +202,6 @@ public class ApiApplication implements ErrorController {
     public String getTime(String username) {
         String result = UserProcess.getTime(username).toString();
         return result;
-    }
-    @GetMapping("/qo/survival/msgdownload")
-    public String survivalDownload(){
-        if(CreativeMsgList != null) {
-            for (Map.Entry<String, Integer> entry : CreativeMsgList.entrySet()) {
-                String latestMessage = null;
-                if (entry.getValue() == 0) {
-                    latestMessage = entry.getKey();
-                    entry.setValue(1);
-                    break; // Exit the loop after finding the latest message
-                }
-            }
-        } else {
-            return ReturnInterface.failed("INVALID");
-        }
-        return null;
-    }
-    @GetMapping("/qo/creative/msgdownload")
-    public String creativeDownload(){
-        if (SurvivalMsgList != null) {
-            for (Map.Entry<String, Integer> entry : SurvivalMsgList.entrySet()) {
-                String latestMessage = null;
-                if (entry.getValue() == 0) {
-                    latestMessage = entry.getKey();
-                    // Set the associated integer value to 1
-                    entry.setValue(1);
-                    return ReturnInterface.success(latestMessage);
-                }
-            }
-        } else {
-            return ReturnInterface.success("INVALID");
-        }
-        return null;
     }
     @RequestMapping("/qo/query/resetpassword")
     public String resetPassword(String username, String hash, int deviceid, String newPassword, HttpServletRequest request) throws Exception {
@@ -267,20 +228,14 @@ public class ApiApplication implements ErrorController {
     @RequestMapping("/qo/download/systeminfo")
     public String systeminfo(){
         JSONObject systemInfoJson = new JSONObject();
-
-        // Get CPU usage
         OperatingSystemMXBean operatingSystemMXBean = ManagementFactory.getOperatingSystemMXBean();
         String cpuUsage = String.valueOf(operatingSystemMXBean.getSystemLoadAverage());
         systemInfoJson.put("cpu_usage", cpuUsage);
         JSONObject memoryUsageJson = getMemoryUsage();
         systemInfoJson.put("memory_usage", memoryUsageJson);
-
-        // Get disk usage
         JSONObject diskUsageJson = getDiskUsage();
         systemInfoJson.put("disk_usage", diskUsageJson);
-
         systemInfoJson.put("system_name", System.getProperty("os.name"));
-
         return systemInfoJson.toString();
     }
     private static JSONObject getMemoryUsage() {
@@ -296,8 +251,6 @@ public class ApiApplication implements ErrorController {
 
         return memoryUsageJson;
     }
-
-    // Get disk usage
     private static JSONObject getDiskUsage() {
         File file = new File("/");
         long totalSpace = file.getTotalSpace();
@@ -320,13 +273,6 @@ public class ApiApplication implements ErrorController {
     public String handlePost(@RequestBody String data, HttpServletRequest request) {
         if (data != null) {
             status = data;
-        }
-        return null;
-    }
-    @PostMapping("/qo/upload/CrStatus")
-    public String handleCrUpload(@RequestBody String data, HttpServletRequest request){
-        if (data != null) {
-           CreativeStatus = data;
         }
         return null;
     }
