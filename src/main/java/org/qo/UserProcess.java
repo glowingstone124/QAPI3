@@ -288,10 +288,8 @@ public class UserProcess {
         String date = year + "-" + month + "-" + day;
         String EncryptedPswd = hashSHA256(password);
         Connection connection = DriverManager.getConnection(jdbcUrl, sqlusername, sqlpassword);
-        // 准备插入语句
-        String insertQuery = "INSERT INTO forum (username, date, password, premium, donate, firstLogin, linkto) VALUES (?, ?, ?, ?, ?, ?, ?)";
+        String insertQuery = "INSERT INTO forum (username, date, password, premium, donate, firstLogin, linkto, id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
         PreparedStatement preparedStatement = connection.prepareStatement(insertQuery);
-        // 设置参数值
         preparedStatement.setString(1, username);
         preparedStatement.setString(2, date);
         preparedStatement.setString(3, EncryptedPswd);
@@ -299,6 +297,7 @@ public class UserProcess {
         preparedStatement.setBoolean(5, false);
         preparedStatement.setBoolean(6, true);
         preparedStatement.setString(7, "EMPTY");
+        preparedStatement.setInt(8, 0);
         preparedStatement.executeUpdate();
         // 关闭资源
         preparedStatement.close();
@@ -520,18 +519,19 @@ public class UserProcess {
                 if (Objects.equals(encryptPswd, storedHashedPassword)) {
                     Logger.log(IPUtil.getIpAddr(request) + " "  + username + " login successful.", ERROR);
                     return ReturnInterface.success("成功");
+                } else {
+                    try (FileWriter writer = new FileWriter("login.log", true)) {
+                        java.util.Date now = new Date();
+                        SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+                        String timestamp = sdf.format(now);
+                        String logMessage = "[" + timestamp + "] 用户 " + username + " 使用错误密码" + hashSHA256(password) + " 登录\n";
+                        writer.write(logMessage);
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                    }
                 }
             } else {
                 Logger.log("username " + username + " login failed.", ERROR);
-                try (FileWriter writer = new FileWriter("login.log", true)) {
-                    java.util.Date now = new Date();
-                    SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
-                    String timestamp = sdf.format(now);
-                    String logMessage = "[" + timestamp + "] 用户 " + username + " 使用错误密码" + hashSHA256(password) + " 登录\n";
-                    writer.write(logMessage);
-                } catch (IOException e) {
-                    e.printStackTrace();
-                }
                 return ReturnInterface.denied("登录失败");
             }
             connection.close();
