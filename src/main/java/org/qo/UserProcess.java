@@ -5,17 +5,16 @@ import org.json.JSONException;
 import org.json.JSONObject;
 import org.qo.server.AvatarCache;
 
-import java.io.BufferedReader;
-import java.io.FileReader;
-import java.io.IOException;
-import java.io.InputStreamReader;
+import java.io.*;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.*;
+import java.text.SimpleDateFormat;
 import java.util.Calendar;
+import java.util.Date;
 import java.util.Objects;
 import static org.qo.Logger.LogLevel.*;
 import static org.qo.Algorithm.hashSHA256;
@@ -510,13 +509,10 @@ public class UserProcess {
     }
     public static String userLogin(String username, String password, HttpServletRequest request){
         try {
-            // 连接到数据库
             Connection connection = DriverManager.getConnection(jdbcUrl, sqlusername, sqlpassword);
             String query = "SELECT * FROM forum WHERE username = ?";
             PreparedStatement preparedStatement = connection.prepareStatement(query);
             preparedStatement.setString(1, username);
-
-            // 执行查询
             ResultSet resultSet = preparedStatement.executeQuery();
             if (resultSet.next()) {
                 String storedHashedPassword = resultSet.getString("password");
@@ -527,6 +523,15 @@ public class UserProcess {
                 }
             } else {
                 Logger.log("username " + username + " login failed.", ERROR);
+                try (FileWriter writer = new FileWriter("login.log", true)) {
+                    java.util.Date now = new Date();
+                    SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+                    String timestamp = sdf.format(now);
+                    String logMessage = "[" + timestamp + "] 用户 " + username + " 使用错误密码" + hashSHA256(password) + " 登录\n";
+                    writer.write(logMessage);
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
                 return ReturnInterface.denied("登录失败");
             }
             connection.close();
