@@ -127,22 +127,42 @@ public class UserProcess {
                 return null;
         }
     }
-    public static void handleTime(String name, int time){
-        try {
-            Connection connection = DriverManager.getConnection(jdbcUrl, sqlusername, sqlpassword);
+    public static void handleTime(String name, int time) {
+    try {
+        Connection connection = DriverManager.getConnection(jdbcUrl, sqlusername, sqlpassword);
+        String checkQuery = "SELECT * FROM timeTables WHERE name=?";
+        PreparedStatement checkStatement = connection.prepareStatement(checkQuery);
+        checkStatement.setString(1, name);
+        ResultSet resultSet = checkStatement.executeQuery();
 
-            String query = "INSERT INTO timeTables (name, time) VALUES (?, ?)";
-            PreparedStatement preparedStatement = connection.prepareStatement(query);
+        if (resultSet.next()) {
+            int existingTime = resultSet.getInt("time");
+            int updatedTime = existingTime + time;
 
-            preparedStatement.setString(1, name);
-            preparedStatement.setInt(2, time);
-            preparedStatement.executeUpdate();
-            preparedStatement.close();
-            connection.close();
-        } catch (SQLException e) {
-            e.printStackTrace();
+            String updateQuery = "UPDATE timeTables SET time=? WHERE name=?";
+            PreparedStatement updateStatement = connection.prepareStatement(updateQuery);
+            updateStatement.setInt(1, updatedTime);
+            updateStatement.setString(2, name);
+            updateStatement.executeUpdate();
+            updateStatement.close();
+        } else {
+            String insertQuery = "INSERT INTO timeTables (name, time) VALUES (?, ?)";
+            PreparedStatement insertStatement = connection.prepareStatement(insertQuery);
+            insertStatement.setString(1, name);
+            insertStatement.setInt(2, time);
+            insertStatement.executeUpdate();
+            insertStatement.close();
         }
+
+        resultSet.close();
+        checkStatement.close();
+        connection.close();
+
+    } catch (SQLException e) {
+        e.printStackTrace();
     }
+}
+
     public static JSONObject getTime(String username) {
         JSONObject result = null;
         try (Connection connection = DriverManager.getConnection(jdbcUrl, sqlusername, sqlpassword)) {
