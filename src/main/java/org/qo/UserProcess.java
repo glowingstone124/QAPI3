@@ -23,6 +23,7 @@ import static org.qo.Algorithm.hashSHA256;
 public class UserProcess {
     public static final String SQL_CONFIGURATION = "data/sql/info.json";
     public static String jdbcUrl = getDatabaseInfo("url");
+    public static String CODE = "null"
     public static String sqlusername = getDatabaseInfo("username");
     public static String sqlpassword = getDatabaseInfo("password");
 
@@ -91,7 +92,7 @@ public class UserProcess {
                     Logger.log(IPUtil.getIpAddr(request) + "username " + name + " qureied myinfo.", INFO);
                     return responseJson.toString();
                 } else {
-                    // No rows found for the given username
+                    // No rows found for the given username”
                     JSONObject responseJson = new JSONObject();
                     responseJson.put("code", -1);
                     Logger.log(IPUtil.getIpAddr(request) + "username " + name + " qureied myinfo, but unsuccessful.", INFO);
