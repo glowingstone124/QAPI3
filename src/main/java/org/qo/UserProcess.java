@@ -22,8 +22,6 @@ import static org.qo.Algorithm.hashSHA256;
 
 public class UserProcess {
     public static final String CODE = "users/recoverycode/index.json";
-    private static final String FILE_PATH = "usermap.json";
-    private static final String SERVER_FILE_PATH = "playermap.json";
     public static final String SQL_CONFIGURATION = "data/sql/info.json";
     public static String jdbcUrl = getDatabaseInfo("url");
     public static String sqlusername = getDatabaseInfo("username");
