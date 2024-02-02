@@ -26,7 +26,7 @@ public class Main {
         TimerTask task = new BackupDatabase();
         long initialDelay = 0;
         long period = 24 * 60 * 60 * 1000;
-        timer.scheduleAtFixedRate(task, initialDelay, period);
+        //timer.scheduleAtFixedRate(task, initialDelay, period);
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             Logger.log("API shutdown.", INFO);
         }));
