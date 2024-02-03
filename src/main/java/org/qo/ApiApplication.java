@@ -317,8 +317,8 @@ public class ApiApplication implements ErrorController {
         }
     }
     @RequestMapping("/qo/upload/registry")
-    public static String InsertData(@RequestParam(name = "name", required = true)String name,@RequestParam(name = "uid", required = true) Long uid, HttpServletRequest request) throws Exception {
-        return UserProcess.regMinecraftUser(name, uid, request);
+    public static String InsertData(@RequestParam(name = "name", required = true)String name,@RequestParam(name = "uid", required = true) Long uid,@RequestParam(name = "appname", required = true) String appname, HttpServletRequest request) throws Exception {
+        return UserProcess.regMinecraftUser(name, uid, request, appname);
     }
     @RequestMapping("/qo/download/memorial")
     public static String downloadMemorial() throws IOException {

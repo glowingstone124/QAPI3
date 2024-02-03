@@ -321,11 +321,12 @@ public class UserProcess {
         preparedStatement.close();
         connection.close();
     }
-    public static String regMinecraftUser(String name, Long uid, HttpServletRequest request){
+    public static String regMinecraftUser(String name, Long uid, HttpServletRequest request, String appname){
         if (!UserProcess.dumplicateUID(uid) && name != null && uid != null) {
             try {
                 Connection connection = DriverManager.getConnection(jdbcUrl, sqlusername, sqlpassword);
                 String insertQuery = "INSERT INTO users (username, uid,frozen, remain, economy) VALUES (?, ?, ?, ?, ?)";
+                Link(name, appname);
                 PreparedStatement preparedStatement = connection.prepareStatement(insertQuery);
                 preparedStatement.setString(1, name);preparedStatement.setLong(2, uid);
                 preparedStatement.setBoolean(3, false);
