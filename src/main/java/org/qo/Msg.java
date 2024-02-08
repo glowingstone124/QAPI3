@@ -18,7 +18,7 @@ public class Msg {
         } catch (IOException e) {
             e.printStackTrace();
         }
-        if (msgList.size() >= 100) {
+        if (msgList.size() >= 300) {
             msgList.remove(0);
         }
         msgList.add(msg);
