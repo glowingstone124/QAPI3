@@ -16,13 +16,16 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
-
+import org.springframework.stereotype.Component;
 import java.io.*;
 import java.lang.management.ManagementFactory;
 import java.lang.management.OperatingSystemMXBean;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.nio.file.Paths;
 import java.util.Date;
 import java.util.*;
@@ -47,12 +50,24 @@ public class ApiApplication implements ErrorController {
 
     public static Map<String, Integer> SurvivalMsgList = new HashMap<String, Integer>();
     public static Map<String, Integer> CreativeMsgList = new HashMap<String, Integer>();
+    public static int requests = 0;
     String jsonData = "data/playermap.json";
     public static String noticeData = "data/notice.json";
 
     public ApiApplication() throws IOException {
+        ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
+        scheduler.scheduleAtFixedRate(this::reqCount, 0, 1, TimeUnit.SECONDS);
     }
-
+    private void reqCount() {
+        if (requests>100){
+            System.out.println("Total "+requests+"in one sec");
+        }
+        requests = 0;
+    }
+    @RequestMapping("/attac")
+    public void test(){
+        requests++;
+    }
     @RequestMapping("/")
     public String root() {
         JSONObject returnObj = new JSONObject();
