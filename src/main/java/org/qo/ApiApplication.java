@@ -78,6 +78,12 @@ public class ApiApplication implements ErrorController {
         Paste ps = new Paste();
         return ps.handle(request, text);
     }
+    @PostMapping("/qo/paste/{route}")
+    public String getContent(@PathVariable String route) throws Exception{
+        Paste ps = new Paste();
+        return ps.getContent(route);
+    }
+
     @RequestMapping("/error")
     public String error(HttpServletRequest request, HttpServletResponse response){
         JSONObject returnObj = new JSONObject();

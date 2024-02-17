@@ -55,4 +55,27 @@ public class Paste {
         connection.close();
         return randomString.toString();
     }
+    public String getContent(String route) throws Exception{
+        Connection connection = DriverManager.getConnection(jdbcUrl, sqlusername, sqlpassword);
+        String result = null;
+        String query = "SELECT * FROM pastes WHERE route = ?";
+        PreparedStatement preparedStatement = connection.prepareStatement(query);
+        preparedStatement.setString(1, route);
+        ResultSet resultSet = preparedStatement.executeQuery();
+        if (resultSet.next()) {
+            result = resultSet.getString("content");
+        }
+        resultSet.close();
+        preparedStatement.close();
+        connection.close();
+        JsonObject respObj = new JsonObject();
+        if (!result.isEmpty()){
+            respObj.addProperty("code", 404);
+            return respObj.toString();
+        }
+        respObj.addProperty("code", 0);
+        respObj.addProperty("content", result);
+
+        return respObj.toString();
+    }
 }
