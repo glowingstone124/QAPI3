@@ -73,6 +73,11 @@ public class ApiApplication implements ErrorController {
         returnObj.put("build", "202402171526");
         return returnObj.toString();
     }
+    @PostMapping("/qo/upload/paste")
+    public String paste(@RequestBody String text, HttpServletRequest request) throws Exception{
+        Paste ps = new Paste();
+        return ps.handle(request, text);
+    }
     @RequestMapping("/error")
     public String error(HttpServletRequest request, HttpServletResponse response){
         JSONObject returnObj = new JSONObject();
