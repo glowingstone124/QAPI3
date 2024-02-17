@@ -69,7 +69,7 @@ public class Paste {
         preparedStatement.close();
         connection.close();
         JsonObject respObj = new JsonObject();
-        if (result.isEmpty()){
+        if (result == null){
             respObj.addProperty("code", 404);
             return respObj.toString();
         }
