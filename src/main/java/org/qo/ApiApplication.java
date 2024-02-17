@@ -78,7 +78,7 @@ public class ApiApplication implements ErrorController {
         Paste ps = new Paste();
         return ps.handle(request, text);
     }
-    @PostMapping("/qo/paste/{route}")
+    @GetMapping("/qo/paste/{route}")
     public String getContent(@PathVariable String route) throws Exception{
         Paste ps = new Paste();
         return ps.getContent(route);
