@@ -42,8 +42,6 @@ public class ApiApplication implements ErrorController {
     public static int serverAlive;
     public static long PackTime;
     public static String CreativeStatus;
-    Path filePath = Paths.get("app/latest/QCommunity-3.0.3-Setup.exe");
-    Path webdlPath = Paths.get("webs/download.html");
     public static String jdbcUrl = getDatabaseInfo("url");
     public static String sqlusername = getDatabaseInfo("username");
     public static String sqlpassword = getDatabaseInfo("password");
@@ -60,7 +58,7 @@ public class ApiApplication implements ErrorController {
     }
     private void reqCount() {
         if (requests>100){
-            System.out.println("Total "+requests+"in one sec");
+            System.out.println("Total "+requests+" in one sec");
         }
         requests = 0;
     }
@@ -72,7 +70,7 @@ public class ApiApplication implements ErrorController {
     public String root() {
         JSONObject returnObj = new JSONObject();
         returnObj.put("code",0);
-        returnObj.put("build", "202401182034");
+        returnObj.put("build", "202402171526");
         return returnObj.toString();
     }
     @RequestMapping("/error")
@@ -214,7 +212,7 @@ public class ApiApplication implements ErrorController {
         UserProcess.handleTime(name,time);
     }
     @GetMapping("/qo/download/getgametime")
-    public String getTime(String username) {
+    public String getTime(@RequestParam(name = "username", required = true)String username) {
         String result = UserProcess.getTime(username).toString();
         return result;
     }
