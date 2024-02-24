@@ -1,32 +1,19 @@
 package org.qo;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
-import com.google.gson.JsonArray;
-import com.google.gson.JsonObject;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
-import org.apache.catalina.User;
 import org.jetbrains.annotations.NotNull;
 import org.json.JSONObject;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.web.servlet.error.ErrorController;
-import org.springframework.core.io.Resource;
-import org.springframework.core.io.UrlResource;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
-import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
-import org.springframework.stereotype.Component;
 import java.io.*;
 import java.lang.management.ManagementFactory;
 import java.lang.management.OperatingSystemMXBean;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
-import java.nio.file.Paths;
 import java.util.Date;
 import java.util.*;
 
@@ -42,14 +29,9 @@ public class ApiApplication implements ErrorController {
     public static int serverAlive;
     public static long PackTime;
     public static String CreativeStatus;
-    public static String jdbcUrl = getDatabaseInfo("url");
-    public static String sqlusername = getDatabaseInfo("username");
-    public static String sqlpassword = getDatabaseInfo("password");
     public static int requests = 0;
-    String jsonData = "data/playermap.json";
-    public static String noticeData = "data/notice.json";
 
-    public ApiApplication() throws IOException {
+    public ApiApplication(){
         ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
         scheduler.scheduleAtFixedRate(this::reqCount, 0, 1, TimeUnit.SECONDS);
     }
@@ -82,7 +64,7 @@ public class ApiApplication implements ErrorController {
     }
 
     @RequestMapping("/error")
-    public String error(HttpServletRequest request, HttpServletResponse response){
+    public String error(HttpServletResponse response){
         JSONObject returnObj = new JSONObject();
         long timeStamp = System.currentTimeMillis();
         returnObj.put("timestamp", timeStamp);
@@ -105,14 +87,6 @@ public class ApiApplication implements ErrorController {
         return UserProcess.fetchMyinfo(name,request);
     }
 
-    @PostMapping("/qo/sponsor")
-    public String getSponsor(@RequestBody String data){
-        JSONObject SponsorObj = new JSONObject(data);
-        System.out.println(data);
-        JSONObject returnObj = new JSONObject();
-        returnObj.put("ec", 200);
-        return returnObj.toString();
-    }
     @PostMapping("/qo/alive/upload")
     public void getAlive(@RequestBody String data){
         JSONObject Heartbeat = new JSONObject(data);
@@ -232,7 +206,6 @@ public class ApiApplication implements ErrorController {
             } catch (NullPointerException e){
                 e.printStackTrace();
             } catch (Exception ex){
-
                 ex.printStackTrace();
             }
             Logger.log(IPUtil.getIpAddr(request) + "[register]" + username + " registered.", Logger.LogLevel.INFO);
@@ -243,14 +216,7 @@ public class ApiApplication implements ErrorController {
     }
     @GetMapping("/qo/download/status")
     public String returnStatus() {
-        serverStatus = "[]";
         serverStatus = status;
-        return serverStatus;
-    }
-    @GetMapping("/qo/download/CrStatus")
-    public String rgetStatus() {
-        serverStatus = "[]";
-        serverStatus = CreativeStatus;
         return serverStatus;
     }
     public static class UserInfo {
