@@ -45,9 +45,6 @@ public class ApiApplication implements ErrorController {
     public static String jdbcUrl = getDatabaseInfo("url");
     public static String sqlusername = getDatabaseInfo("username");
     public static String sqlpassword = getDatabaseInfo("password");
-
-    public static Map<String, Integer> SurvivalMsgList = new HashMap<String, Integer>();
-    public static Map<String, Integer> CreativeMsgList = new HashMap<String, Integer>();
     public static int requests = 0;
     String jsonData = "data/playermap.json";
     public static String noticeData = "data/notice.json";
@@ -93,72 +90,10 @@ public class ApiApplication implements ErrorController {
         returnObj.put("code", -1);
         return returnObj.toString();
     }
-    @RequestMapping("/introduction")
-    public String introductionMenu() {
-        try {
-            if ((Files.readString(Path.of("forum/introduction/main.json"), StandardCharsets.UTF_8) != null)) {
-                return Files.readString(Path.of("forum/introduction/main.json"));
-            }
-        } catch (IOException e) {
-            return ReturnInterface.failed("ERROR:CONFIGURATION NOT FOUND");
-        }
-        return ReturnInterface.failed("ERROR");
-    }
-
-    @RequestMapping("/introduction/server")
-    public String serverIntros(@RequestParam(name = "articleID", required = true) int articleID) throws Exception {
-        if (articleID == -1) {
-            return Files.readString(Path.of("forum/introduction/server/menu.json"), StandardCharsets.UTF_8);
-        } else {
-            String returnFile = Files.readString(Path.of("forum/introduction/server/" + articleID + ".html"));
-            if (returnFile != null) {
-                return ReturnInterface.success(Files.readString(Path.of("forum/introduction/server/" + articleID + ".html")));
-            }
-            return ReturnInterface.failed("NOT FOUND");
-        }
-    }
-
     @PostMapping("/qo/apihook")
     public String webhook(@RequestBody String data) {
         System.out.println(data);
         return null;
-    }
-
-@RequestMapping("/introduction/attractions")
-    public String attractionIntros(@RequestParam(name = "articleID", required = true) int articleID) throws Exception{
-        if (articleID == -1){
-            return Files.readString(Path.of("forum/introduction/attractions/menu.json"), StandardCharsets.UTF_8);
-        } else {
-            String returnFile = Files.readString(Path.of("forum/introduction/attractions/" + articleID + ".html"));
-            if (returnFile != null) {
-                return ReturnInterface.success(Files.readString(Path.of("forum/introduction/attractions/" + articleID + ".html")));
-            }
-            return ReturnInterface.failed("NOT FOUND");
-        }
-    }
-    @RequestMapping("/introduction/commands")
-    public String commandIntros(@RequestParam(name = "articleID", required = true)int articleID) throws Exception{
-        if (articleID == -1){
-            return Files.readString(Path.of("forum/introduction/commands/menu.json"), StandardCharsets.UTF_8);
-        } else {
-            String returnFile = Files.readString(Path.of("forum/introduction/commands/" + articleID + ".html"));
-            if (returnFile != null) {
-                return ReturnInterface.success(Files.readString(Path.of("forum/introduction/commands/" + articleID + ".html")));
-            }
-            return ReturnInterface.failed("NOT FOUND");
-        }
-    }
-    @RequestMapping("/introduction/notice")
-    public String notice(@RequestParam(name = "articleID", required = true)int articleID) throws Exception{
-        if (articleID == -1){
-            return Files.readString(Path.of("forum/introduction/notices/menu.json"), StandardCharsets.UTF_8);
-        } else {
-            String returnFile = Files.readString(Path.of("forum/introduction/notices/" + articleID + ".html"));
-            if (returnFile != null) {
-                return ReturnInterface.success(Files.readString(Path.of("forum/introduction/notices/" + articleID + ".html")));
-            }
-            return ReturnInterface.failed("NOT FOUND");
-        }
     }
     @GetMapping("/forum/login")
     public String userLogin(@RequestParam(name="username", required = true)String username, @RequestParam(name = "password", required = true)String password , HttpServletRequest request) {
@@ -170,15 +105,6 @@ public class ApiApplication implements ErrorController {
         return UserProcess.fetchMyinfo(name,request);
     }
 
-    @PostMapping("/qo/survival/msgupload")
-    public String survivalUpload(@RequestBody String data, HttpServletRequest request){
-        if (IPUtil.getIpAddr(request).equals("127.0.0.1")) {
-            StringBuilder sb = new StringBuilder();
-            sb.append("[SURVIVAL]").append(data);
-            SurvivalMsgList.put(sb.toString(), 0);
-        }
-        return null;
-    }
     @PostMapping("/qo/sponsor")
     public String getSponsor(@RequestBody String data){
         JSONObject SponsorObj = new JSONObject(data);
@@ -201,10 +127,8 @@ public class ApiApplication implements ErrorController {
             case 1 -> {
                 serverAlive = 1;
                 Logger.log("Server Stopped at"+ PackTime, Logger.LogLevel.INFO);
-                //Closed
             }
             default -> serverAlive = -1;
-            //Unexpected status
         }
     }
     @GetMapping("/qo/alive/download")
@@ -356,23 +280,6 @@ public class ApiApplication implements ErrorController {
     public static String link(String forum, String name){
         String output = UserProcess.Link(forum,name);
         return ReturnInterface.success(output);
-    }
-    @RequestMapping("/api/getNotice")
-    public static String notice(){
-        try (BufferedReader br = new BufferedReader(new FileReader(noticeData))) {
-            StringBuilder content = new StringBuilder();
-            String line;
-            while ((line = br.readLine()) != null) {
-                content.append(line);
-                return content.toString();
-            }
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-        JSONObject returnObj = new JSONObject();
-        returnObj.put("title", "无法获取更新");
-        returnObj.put("info", "ERROR");
-        return returnObj.toString();
     }
     @RequestMapping("/qo/download/link")
     public static String downloadLink(String name){
