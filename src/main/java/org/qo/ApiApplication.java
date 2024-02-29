@@ -268,8 +268,10 @@ public class ApiApplication implements ErrorController {
         return ReturnInterface.success(operateEco(username,value, opEco.ADD));
     }
     @PostMapping("/qo/msglist/upload")
-    public void handleMsg(@RequestBody String data){
-        Msg.put(data);
+    public void handleMsg(@RequestBody String data ,HttpServletRequest request){
+        if (IPUtil.getIpAddr(request).equals("127.0.0.1")) {
+            Msg.put(data);
+        }
     }
     @GetMapping("/qo/msglist/download")
     public String returnMsg(){
