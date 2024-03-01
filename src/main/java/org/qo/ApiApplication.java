@@ -49,7 +49,7 @@ public class ApiApplication implements ErrorController {
     public String root() {
         JSONObject returnObj = new JSONObject();
         returnObj.put("code",0);
-        returnObj.put("build", "202402171526");
+        returnObj.put("build", "202402241454");
         return returnObj.toString();
     }
     @PostMapping("/qo/upload/paste")

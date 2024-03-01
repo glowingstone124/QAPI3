@@ -1,7 +1,5 @@
 package org.qo;
 
-
-import com.mysql.cj.log.Log;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.BufferedWriter;
@@ -17,7 +15,6 @@ import java.util.TimerTask;
 public class Logger {
     private static List<String> logBuffer = new ArrayList<>();
     private static final Object lock = new Object();
-
     public static void log(String message, @Nullable Object level) {
         String logEntry = null;
         if (level == null || level instanceof Integer) {
