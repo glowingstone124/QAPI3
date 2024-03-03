@@ -1,6 +1,7 @@
 package org.qo;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.google.gson.Gson;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.jetbrains.annotations.NotNull;
@@ -276,5 +277,13 @@ public class ApiApplication implements ErrorController {
     @GetMapping("/qo/msglist/download")
     public String returnMsg(){
         return Msg.get().toString();
+    }
+    @PostMapping("/qo/webmsg/upload")
+    public void handleWeb(@RequestBody String content){
+        Msg.webPut(content);
+    }
+    @GetMapping("/qo/webmsg/download")
+    public String returnWeb(){
+        return Msg.webGet();
     }
 }

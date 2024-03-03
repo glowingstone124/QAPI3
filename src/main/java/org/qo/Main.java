@@ -1,5 +1,6 @@
 package org.qo;
 
+import org.qo.mail.Mail;
 import org.qo.server.BackupDatabase;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
@@ -22,6 +23,10 @@ import static org.qo.Logger.LogLevel.*;
 @SpringBootApplication
 public class Main {
     public static void main(String[] args) throws Exception {
+        Mail mail = new Mail();
+        if (!mail.test()){
+            Logger.log("Mail function doesn't work properly.", ERROR);
+        }
         Funcs.Start();
         Logger.log("API Started.", INFO);
         SpringApplication.run(ApiApplication.class, args);
