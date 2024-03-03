@@ -144,7 +144,7 @@ public class ApiApplication implements ErrorController {
     @RequestMapping("/app/latest")
     public String update(){
         JSONObject returnObj = new JSONObject();
-        returnObj.put("version", 4);
+        returnObj.put("version", 6);
         returnObj.put("die", false);
         return returnObj.toString();
     }
