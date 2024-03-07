@@ -4,6 +4,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import org.json.JSONException;
 import org.json.JSONObject;
 import org.qo.mail.Mail;
+import org.qo.mail.MailPreset;
 import org.qo.server.AvatarCache;
 
 import java.io.*;
@@ -336,7 +337,7 @@ public class UserProcess {
                 System.out.println(rowsAffected + " row(s) inserted." + "from " + IPUtil.getIpAddr(request));
                 System.out.println(name + " Registered.");
                 Mail mail = new Mail();
-                mail.send(uid + "@qq.com", "感谢您注册QO2账号", "<h2>您的QQ账号" + uid + "已经绑定到游戏id:" + name + "</h2>");
+                mail.send(uid + "@qq.com", "感谢您注册QO2账号", MailPreset.register);
                 preparedStatement.close();
                 connection.close();UserProcess.insertIp(IPUtil.getIpAddr(request));
                 return ReturnInterface.success("Success!");
