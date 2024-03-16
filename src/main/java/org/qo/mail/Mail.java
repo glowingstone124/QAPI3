@@ -2,7 +2,9 @@ package org.qo.mail;
 
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import org.apache.naming.EjbRef;
 import org.jetbrains.annotations.NotNull;
+import org.qo.Logger;
 
 import javax.mail.*;
 import javax.mail.internet.InternetAddress;
@@ -79,6 +81,7 @@ public class Mail {
             message.setContent("<p>TEST CONTENT</p>", "text/html; charset=utf-8");
             Transport.send(message);
         } catch (MessagingException e) {
+            Logger.log(e.getMessage(), Logger.LogLevel.ERROR);
             return false;
         }
         return true;
