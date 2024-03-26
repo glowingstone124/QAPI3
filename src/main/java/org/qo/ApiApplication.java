@@ -6,9 +6,12 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.jetbrains.annotations.NotNull;
 import org.json.JSONObject;
+import org.qo.server.Documents;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.web.servlet.error.ErrorController;
 import org.springframework.web.bind.annotation.*;
+
+import javax.swing.text.Document;
 import java.io.*;
 import java.lang.management.ManagementFactory;
 import java.lang.management.OperatingSystemMXBean;
@@ -254,6 +257,15 @@ public class ApiApplication implements ErrorController {
             return ReturnInterface.success(UserProcess.queryLink(name));
         } else {
             return ReturnInterface.failed("NOT FOUND");
+        }
+    }
+    @GetMapping("/qo/document/{route}")
+    public String document(@PathVariable String route) throws Exception{
+        Documents dc = new Documents();
+        if (route.equals("index")){
+             return dc.lists();
+        } else {
+            return dc.transform(route);
         }
     }
     @RequestMapping("/qo/download/registry")

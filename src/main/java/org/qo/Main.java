@@ -1,16 +1,13 @@
 package org.qo;
 
 import org.qo.mail.Mail;
-import org.qo.server.BackupDatabase;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.Bean;
-import org.springframework.http.MediaType;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 import org.springframework.web.filter.CorsFilter;
 import org.springframework.web.servlet.config.annotation.*;
-import org.springframework.context.annotation.Configuration;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 
@@ -33,10 +30,6 @@ public class Main {
         SpringApplication.run(ApiApplication.class, args);
         Logger.startLogWriter("log.log", 3000);
         Timer timer = new Timer();
-        TimerTask task = new BackupDatabase();
-        long initialDelay = 0;
-        long period = 24 * 60 * 60 * 1000;
-        //timer.scheduleAtFixedRate(task, initialDelay, period);
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             Logger.log("API shutdown.", INFO);
         }));
