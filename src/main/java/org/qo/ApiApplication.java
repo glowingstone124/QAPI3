@@ -9,9 +9,17 @@ import org.json.JSONObject;
 import org.qo.server.Documents;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.web.servlet.error.ErrorController;
+import org.springframework.core.io.ByteArrayResource;
+import org.springframework.core.io.Resource;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import javax.swing.*;
 import javax.swing.text.Document;
+import java.awt.*;
 import java.io.*;
 import java.lang.management.ManagementFactory;
 import java.lang.management.OperatingSystemMXBean;
@@ -202,6 +210,16 @@ public class ApiApplication implements ErrorController {
         }
         return null;
     }
+    @GetMapping("/qo/download/statpic")
+    public ResponseEntity<Resource> handleStat() {
+        //TODO Image Generation
+        /*Resource imageResource = new ByteArrayResource(imageBytes);
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.IMAGE_PNG);
+        return new ResponseEntity<>(imageResource, headers, HttpStatus.OK);
+        */
+        return null;
+    }
     @RequestMapping("/forum/register")
     public String register(@RequestParam(name = "username", required = true) String username, @RequestParam(name = "password", required = true) String password, @RequestParam(name = "token", required = true) String token, HttpServletRequest request) throws Exception{
         if(Objects.equals(token, token(username,1700435)) && !UserProcess.queryForum(username)){
@@ -281,8 +299,9 @@ public class ApiApplication implements ErrorController {
         return ReturnInterface.success(operateEco(username,value, opEco.ADD));
     }
     @PostMapping("/qo/msglist/upload")
-    public void handleMsg(@RequestBody String data ,HttpServletRequest request){
-        if (IPUtil.getIpAddr(request).equals("127.0.0.1")) {
+    public void handleMsg(@RequestBody String data,@RequestParam(name="auth",required = true) String auth) throws Exception {
+        Funcs fc = new Funcs();
+        if (fc.verify(auth, Funcs.Perms.CHATSYNC)) {
             Msg.put(data);
         }
     }

@@ -24,6 +24,7 @@ import static org.qo.Algorithm.hashSHA256;
 
 public class UserProcess {
     public static final String SQL_CONFIGURATION = "data/sql/info.json";
+    public static final String CODE_CONFIGURATION = "data/code.json";
     public static String jdbcUrl = getDatabaseInfo("url");
     public static String CODE = "null";
     public static String sqlusername = getDatabaseInfo("username");
