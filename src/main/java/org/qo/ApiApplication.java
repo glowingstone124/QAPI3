@@ -6,6 +6,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.jetbrains.annotations.NotNull;
 import org.json.JSONObject;
+import org.qo.picgen.PicGen;
 import org.qo.server.Documents;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.web.servlet.error.ErrorController;
@@ -212,13 +213,10 @@ public class ApiApplication implements ErrorController {
     }
     @GetMapping("/qo/download/statpic")
     public ResponseEntity<Resource> handleStat() {
-        //TODO Image Generation
-        /*Resource imageResource = new ByteArrayResource(imageBytes);
+        Resource imageResource = new ByteArrayResource(PicGen.Companion.generateImageBytes("output.png"));
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.IMAGE_PNG);
         return new ResponseEntity<>(imageResource, headers, HttpStatus.OK);
-        */
-        return null;
     }
     @RequestMapping("/forum/register")
     public String register(@RequestParam(name = "username", required = true) String username, @RequestParam(name = "password", required = true) String password, @RequestParam(name = "token", required = true) String token, HttpServletRequest request) throws Exception{

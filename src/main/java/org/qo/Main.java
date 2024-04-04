@@ -1,6 +1,7 @@
 package org.qo;
 
 import org.qo.mail.Mail;
+import org.qo.picgen.PicGen;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.Bean;
@@ -15,8 +16,8 @@ import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import java.util.Timer;
 import java.util.TimerTask;
 
+import org.qo.picgen.PicGen.Companion.*;
 import static org.qo.Logger.LogLevel.*;
-
 @SpringBootApplication
 public class Main {
     public static void main(String[] args) throws Exception {
@@ -30,6 +31,14 @@ public class Main {
         SpringApplication.run(ApiApplication.class, args);
         Logger.startLogWriter("log.log", 3000);
         Timer timer = new Timer();
+
+        TimerTask ts = new TimerTask() {
+            @Override
+            public void run() {
+                PicGen.Companion.callinits();
+            }
+        };
+        timer.schedule(ts,10000);
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             Logger.log("API shutdown.", INFO);
         }));
