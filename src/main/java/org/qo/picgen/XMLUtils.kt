@@ -41,7 +41,7 @@ class XMLUtils {
         } catch (e: IOException){
             return mutableListOf<Text>(
                 Text("ERROR", TextType.TITLE),
-                Text("generated at \$current", TextType.TEXT),
+                Text("Generated at ${current.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))}", TextType.TITLE),
                 Text("Could not retrive api messages from server.", TextType.TEXT)
             )
         }
