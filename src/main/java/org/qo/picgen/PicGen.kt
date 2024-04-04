@@ -50,10 +50,10 @@ class PicGen {
             if (!availableCfg()) {
                 throw ConfigurationException(i18nFun.key("config.notfound"))
             }
-            Logger.log(i18nFun.key("notification.finish") + timer.measure {
+            //Logger.log(i18nFun.key("notification.finish") + timer.measure {
                 imgFactory(outputPath, textLines, config, 0)
-            }, LogLevel.INFO)
-            println(outputPath)
+            //}, LogLevel.INFO)
+            //println(outputPath)
         }
 
         fun availableCfg(): Boolean {
