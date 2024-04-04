@@ -16,6 +16,8 @@ import javax.naming.ConfigurationException
 import Types.*
 import XMLUtils
 import i18n
+import org.qo.Logger
+import org.qo.Logger.LogLevel
 import java.nio.file.Paths
 
 class PicGen {
@@ -33,22 +35,8 @@ class PicGen {
             val alignment: TextAlignment,
             val font: String
         )
-        val outputPath = "output.png"
         private val i18nFun = i18n()
-
-        fun generateImageBytes(outputPath: String): ByteArray {
-            val xu = XMLUtils()
-            val textLines = xu.parseXML()
-            val configPath = "config.xml"
-            val config = xu.readConfig(configPath)
-            val timer: Timer = Timer()
-            try {
-                return Files.readAllBytes(Paths.get(outputPath))
-            } catch (e: NoSuchFileException) {
-                imgFactory(outputPath, textLines, config, 0)
-                return Files.readAllBytes(Paths.get(outputPath))
-            }
-        }
+        val outputPath = "output.png"
         fun callinits(){
             default()
         }
@@ -62,9 +50,9 @@ class PicGen {
             if (!availableCfg()) {
                 throw ConfigurationException(i18nFun.key("config.notfound"))
             }
-            println(i18nFun.key("notification.finish") + timer.measure {
+            Logger.log(i18nFun.key("notification.finish") + timer.measure {
                 imgFactory(outputPath, textLines, config, 0)
-            })
+            }, LogLevel.INFO)
             println(outputPath)
         }
 
@@ -77,7 +65,7 @@ class PicGen {
                 try {
                     Files.readString(Path.of(config))
                 } catch (e: IOException) {
-                    println("Config file $config doesn't exist.")
+                    Logger.log("Config file $config doesn't exist.", LogLevel.ERROR)
                     return false
                 }
             }

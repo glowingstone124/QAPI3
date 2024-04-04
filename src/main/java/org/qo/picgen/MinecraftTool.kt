@@ -1,4 +1,3 @@
-
 import com.google.gson.Gson
 import org.qo.Request
 
@@ -10,18 +9,15 @@ class MinecraftTool {
 
     val timer: Timer = Timer()
 
-
     fun getStat(): GameStats {
-        val apiQueryTime: Long = timer.measure{
-            val json = Request.sendGetRequest("http://qoriginal.vip:8080/qo/download/status").trimIndent()
-            val gson = Gson()
-            val gameStats = gson.fromJson(json, GameStats::class.java)
-        }
-        val gameStats: GameStats by lazy {
-            val json = Request.sendGetRequest("http://qoriginal.vip:8080/qo/download/status").trimIndent()
-            val gson = Gson()
-            gson.fromJson(json, GameStats::class.java)
-        }
-        return gameStats
+        val json = Request.sendGetRequest("http://qoriginal.vip:8080/qo/download/status").trimIndent()
+        val gson = Gson()
+        return gson.fromJson(json, GameStats::class.java)
+    }
+    fun getPing(): Int{
+        val json = Request.sendGetRequest("https://uapis.cn/api/ping?host=43.248.96.196").trimIndent()
+        val jsonParser :Gson = Gson()
+        val result = jsonParser.toJson(json)
+        return 0
     }
 }

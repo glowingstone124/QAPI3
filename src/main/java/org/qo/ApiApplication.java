@@ -24,6 +24,8 @@ import java.awt.*;
 import java.io.*;
 import java.lang.management.ManagementFactory;
 import java.lang.management.OperatingSystemMXBean;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -212,8 +214,9 @@ public class ApiApplication implements ErrorController {
         return null;
     }
     @GetMapping("/qo/download/statpic")
-    public ResponseEntity<Resource> handleStat() {
-        Resource imageResource = new ByteArrayResource(PicGen.Companion.generateImageBytes("output.png"));
+    public ResponseEntity<Resource> handleStat() throws Exception {
+        byte[] bar = Files.readAllBytes(Path.of("output.png"));
+        Resource imageResource = new ByteArrayResource(bar);
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.IMAGE_PNG);
         return new ResponseEntity<>(imageResource, headers, HttpStatus.OK);

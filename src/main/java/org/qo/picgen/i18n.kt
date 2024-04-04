@@ -7,7 +7,7 @@ class i18n {
 
     init {
         val defaultLocale: Locale = Locale.getDefault()
-        println(defaultLocale.language)
+        //println(defaultLocale.language)
         val langFile = when(defaultLocale.language) {
             "zh" -> "zh-cn.yml"
             "en" -> "en-us.yml"

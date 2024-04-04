@@ -29,6 +29,7 @@ class XMLUtils {
                     "\$current" -> current.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))
                     "\$mspt" -> mt.getStat().mspt.toString()
                     "\$onlinecount" -> mt.getStat().onlinecount.toString()
+                    "\$ping" -> mt.getPing().toString()
                     else -> {
                         val errorMessageTemplate = international.key("notification.warnundefinedtag")
                         val errorMessage = errorMessageTemplate?.replace("\${it.value}", it.value)
@@ -40,6 +41,7 @@ class XMLUtils {
         } catch (e: IOException){
             return mutableListOf<Text>(
                 Text("ERROR", TextType.TITLE),
+                Text("generated at \$current", TextType.TEXT),
                 Text("Could not retrive api messages from server.", TextType.TEXT)
             )
         }
