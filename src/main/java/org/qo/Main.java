@@ -1,10 +1,17 @@
 package org.qo;
 
+import org.apache.tomcat.util.threads.VirtualThreadExecutor;
 import org.qo.mail.Mail;
 import org.qo.picgen.PicGen;
+import org.quartz.*;
+import org.quartz.impl.StdSchedulerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.Bean;
+import org.springframework.core.task.TaskExecutor;
+import org.springframework.scheduling.annotation.EnableScheduling;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 import org.springframework.web.filter.CorsFilter;
@@ -15,20 +22,15 @@ import org.springframework.boot.web.servlet.FilterRegistrationBean;
 
 import java.util.Timer;
 import java.util.TimerTask;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+
 import static org.qo.Logger.LogLevel.*;
+@EnableScheduling
 @SpringBootApplication
 public class Main {
     public static void main(String[] args) throws Exception {
-        Timer timer = new Timer(true);
-        TimerTask ts = new TimerTask() {
-            @Override
-            public void run() {
-                Logger.log("GEN NEW PIC.", INFO);
-                PicGen.Companion.callinits();
-            }
-        };
-
-        timer.schedule(ts, 600, 60000);
         Mail mail = new Mail();
         if (!mail.test()){
             Logger.log("Mail function doesn't work properly. With following exception:", ERROR);
@@ -38,12 +40,15 @@ public class Main {
         Logger.log("API Started.", INFO);
         SpringApplication.run(ApiApplication.class, args);
         Logger.startLogWriter("log.log", 3000);
-
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             Logger.log("API shutdown.", INFO);
         }));
     }
-
+    @Scheduled(initialDelay = 5000, fixedDelay = 5000)
+        public void run() {
+            //System.out.println("123456");
+            PicGen.Companion.callinits();
+        }
     @Bean
     public WebMvcConfigurer corsConfigurer() {
         return new WebMvcConfigurer() {
@@ -74,5 +79,11 @@ public class Main {
         registrationBean.setFilter(new Filter());
         registrationBean.addUrlPatterns("/*"); // added ContentType application/json Globally
         return registrationBean;
+    }
+    public class MyJob implements Runnable {
+        @Override
+        public void run() {
+            PicGen.Companion.callinits();
+        }
     }
 }

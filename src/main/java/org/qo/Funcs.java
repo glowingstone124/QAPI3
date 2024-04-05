@@ -30,7 +30,7 @@ public class Funcs {
         String jsonContent = Files.readString(Path.of(UserProcess.CODE_CONFIGURATION));
         JsonObject codes = gson.fromJson(jsonContent, JsonObject.class);
         if (codes.has(input)){
-            String pm = codes.get("Perm").getAsString();
+            String pm = codes.get(input).getAsString(); // 修正此处，使用 input 而不是 "Perm"
             Perms map = Perms.valueOf(pm);
             if (perms.compareTo(map) >= 0){
                 return true;
@@ -38,6 +38,7 @@ public class Funcs {
         }
         return false;
     }
+
 
     public enum Perms{
         FULL(999),

@@ -310,10 +310,6 @@ public class ApiApplication implements ErrorController {
     public String returnMsg(){
         return Msg.get().toString();
     }
-    @PostMapping("/qo/webmsg/upload")
-    public void handleWeb(@RequestBody String content){
-        Msg.webPut(content);
-    }
     @GetMapping("/qo/webmsg/download")
     public String returnWeb(){
         return Msg.webGet();
