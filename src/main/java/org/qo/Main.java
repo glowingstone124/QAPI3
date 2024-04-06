@@ -47,7 +47,11 @@ public class Main {
     @Scheduled(initialDelay = 5000, fixedDelay = 5000)
         public void run() {
             //System.out.println("123456");
-            PicGen.Companion.callinits();
+            try {
+                PicGen.Companion.callinits();
+            } catch (Exception e) {
+                //DO nothing but except next time
+            }
         }
     @Bean
     public WebMvcConfigurer corsConfigurer() {
