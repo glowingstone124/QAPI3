@@ -314,4 +314,17 @@ public class ApiApplication implements ErrorController {
     public String returnWeb(){
         return Msg.webGet();
     }
+    @PostMapping("/qo/loginip/upload")
+    public void handleLogin(@RequestParam(name = "ip", required = true) String ip,@RequestParam(name = "auth", required = true) String auth, @RequestParam(name="username",required = true) String username) throws Exception {
+        insertLoginIP(ip, username);
+    }
+    @GetMapping("/qo/loginip/download")
+    public String getLogin(@RequestParam(name="username",required = true) String username) throws Exception {
+        String result = getLogin(username);
+        if (result.equals("undefined")){
+            return ReturnInterface.denied("请求的用户没有历史ip记录");
+        } else {
+            return ReturnInterface.success(result);
+        }
+    }
 }
