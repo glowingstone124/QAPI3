@@ -316,11 +316,14 @@ public class ApiApplication implements ErrorController {
     }
     @PostMapping("/qo/loginip/upload")
     public void handleLogin(@RequestParam(name = "ip", required = true) String ip,@RequestParam(name = "auth", required = true) String auth, @RequestParam(name="username",required = true) String username) throws Exception {
-        insertLoginIP(ip, username);
+        Funcs fc = new Funcs();
+        if (fc.verify(auth, Funcs.Perms.FULL)) {
+            insertLoginIP(ip, username);
+        }
     }
     @GetMapping("/qo/loginip/download")
     public String getLogin(@RequestParam(name="username",required = true) String username) throws Exception {
-        String result = getLogin(username);
+        String result = getLatestLoginIP(username);
         if (result.equals("undefined")){
             return ReturnInterface.denied("请求的用户没有历史ip记录");
         } else {
