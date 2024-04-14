@@ -1,0 +1,2 @@
+notification.finish: "Complete. Costs"
+config.notfound: "Error: config not found. You can find templates of configs in github repository of this project."

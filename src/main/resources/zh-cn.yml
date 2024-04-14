@@ -1,0 +1,2 @@
+config.notfound: "找不到config文件。您可以在此项目的github仓库找到用于创建config的模板。"
+notification.finish: "完成，耗时:"
