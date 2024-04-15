@@ -18,6 +18,9 @@ import java.text.SimpleDateFormat;
 import java.util.Calendar;
 import java.util.Date;
 import java.util.Objects;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.BlockingQueue;
+
 import static org.qo.Logger.LogLevel.*;
 import static org.qo.Algorithm.hashSHA256;
 
@@ -29,10 +32,26 @@ public class UserProcess {
     public static String CODE = "null";
     public static String sqlusername = getDatabaseInfo("username");
     public static String sqlpassword = getDatabaseInfo("password");
+    private static int POOL_SIZE = 70;
+    private static BlockingQueue<Connection> connectionPool = new ArrayBlockingQueue<>(POOL_SIZE);
+
+    static {
+        try {
+            for (int i = 0; i < POOL_SIZE; i++) {
+                Connection connection = DriverManager.getConnection(jdbcUrl, sqlusername, sqlpassword);
+                connectionPool.offer(connection);
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+            throw new RuntimeException("Failed to initialize connection pool.");
+        }
+    }
 
     public static String firstLoginSearch(String name, HttpServletRequest request) {
+        Connection connection = null;
         try {
-            Connection connection = DriverManager.getConnection(jdbcUrl, sqlusername, sqlpassword);
+            connection = connectionPool.take();
+
             String query = "SELECT * FROM forum WHERE username = ?";
             PreparedStatement preparedStatement = connection.prepareStatement(query);
             preparedStatement.setString(1, name);
@@ -47,69 +66,79 @@ public class UserProcess {
 
                 return responseJson.toString();
             }
+
             String updateQuery = "UPDATE forum SET firstLogin = ? WHERE username = ?";
             PreparedStatement apreparedStatement = connection.prepareStatement(updateQuery);
             apreparedStatement.setBoolean(1, false);
             apreparedStatement.setString(2, name);
+            apreparedStatement.executeUpdate(); // 执行更新操作
+            apreparedStatement.close(); // 关闭更新的 preparedStatement
+
             Logger.log(IPUtil.getIpAddr(request) + " username " + name + " qureied firstlogin.", INFO);
-            int rowsAffected = apreparedStatement.executeUpdate();
-            apreparedStatement.close();
-            connection.close();
-            resultSet.close();
-            preparedStatement.close();
-            connection.close();
         } catch (Exception e) {
             e.printStackTrace();
+            Logger.log(IPUtil.getIpAddr(request) + " username " + name + " qureied firstlogin but unsuccessful.", INFO);
+        } finally {
+            if (connection != null) {
+                connectionPool.offer(connection);
+            }
         }
+
         JSONObject responseJson = new JSONObject();
         responseJson.put("code", 1);
         responseJson.put("first", -1);
-        Logger.log(IPUtil.getIpAddr(request) + " username " + name + " qureied firstlogin but unsuccessful.", INFO);
         return responseJson.toString();
     }
-        public static String fetchMyinfo(String name, HttpServletRequest request) throws Exception {
-            String date;
-            Boolean premium;
-            Boolean donate;
-            if (name.isEmpty()) {
 
-            }
-            try {
-                Connection connection = DriverManager.getConnection(jdbcUrl, sqlusername, sqlpassword);
-                String query = "SELECT * FROM forum WHERE username = ?";
-                PreparedStatement preparedStatement = connection.prepareStatement(query);
-                preparedStatement.setString(1, name);
-                ResultSet resultSet = preparedStatement.executeQuery();
-                if (resultSet.next()) {
-                    date = resultSet.getString("date");
-                    premium = resultSet.getBoolean("premium");
-                    donate = resultSet.getBoolean("donate");
-                    String linkto = resultSet.getString("linkto");
-                    JSONObject responseJson = new JSONObject();
-                    responseJson.put("date", date);
-                    responseJson.put("premium", premium);
-                    responseJson.put("donate", donate);
-                    responseJson.put("code", 0);
-                    responseJson.put("linkto", linkto);
-                    responseJson.put("username", name);
-                    Logger.log(IPUtil.getIpAddr(request) + "username " + name + " qureied myinfo.", INFO);
-                    return responseJson.toString();
-                } else {
-                    // No rows found for the given username”
-                    JSONObject responseJson = new JSONObject();
-                    responseJson.put("code", -1);
-                    Logger.log(IPUtil.getIpAddr(request) + "username " + name + " qureied myinfo, but unsuccessful.", INFO);
-                    return responseJson.toString();
-                }
+    public static String fetchMyinfo(String name, HttpServletRequest request) {
+        if (name.isEmpty()) {
+            JSONObject responseJson = new JSONObject();
+            responseJson.put("code", -1);
+            Logger.log(IPUtil.getIpAddr(request) + "username is empty when qureied myinfo.", INFO);
+            return responseJson.toString();
+        }
 
-            } catch (SQLException e) {
-                e.printStackTrace();
+        Connection connection = null;
+        try {
+            connection = connectionPool.take();
+
+            String query = "SELECT * FROM forum WHERE username = ?";
+            PreparedStatement preparedStatement = connection.prepareStatement(query);
+            preparedStatement.setString(1, name);
+            ResultSet resultSet = preparedStatement.executeQuery();
+            if (resultSet.next()) {
+                String date = resultSet.getString("date");
+                Boolean premium = resultSet.getBoolean("premium");
+                Boolean donate = resultSet.getBoolean("donate");
+                String linkto = resultSet.getString("linkto");
                 JSONObject responseJson = new JSONObject();
-                Logger.log("username " + name + " qureied myinfo, but unsuccessful.", INFO);
+                responseJson.put("date", date);
+                responseJson.put("premium", premium);
+                responseJson.put("donate", donate);
+                responseJson.put("code", 0);
+                responseJson.put("linkto", linkto);
+                responseJson.put("username", name);
+                Logger.log(IPUtil.getIpAddr(request) + "username " + name + " qureied myinfo.", INFO);
+                return responseJson.toString();
+            } else {
+                JSONObject responseJson = new JSONObject();
                 responseJson.put("code", -1);
+                Logger.log(IPUtil.getIpAddr(request) + "username " + name + " qureied myinfo, but unsuccessful.", INFO);
                 return responseJson.toString();
             }
+        } catch (Exception e) {
+            e.printStackTrace();
+            Logger.log("username " + name + " qureied myinfo, but unsuccessful.", INFO);
+            JSONObject responseJson = new JSONObject();
+            responseJson.put("code", -1);
+            return responseJson.toString();
+        } finally {
+            if (connection != null) {
+                connectionPool.offer(connection);
+            }
         }
+    }
+
     public static String getDatabaseInfo(String type) {
         JSONObject sqlObject = null;
         try {
@@ -130,7 +159,7 @@ public class UserProcess {
     }
     public static void handleTime(String name, int time) {
     try {
-        Connection connection = DriverManager.getConnection(jdbcUrl, sqlusername, sqlpassword);
+        Connection connection = connectionPool.take();
         String checkQuery = "SELECT * FROM timeTables WHERE name=?";
         PreparedStatement checkStatement = connection.prepareStatement(checkQuery);
         checkStatement.setString(1, name);
@@ -157,12 +186,13 @@ public class UserProcess {
 
         resultSet.close();
         checkStatement.close();
-        connection.close();
-
+        connectionPool.offer(connection);
     } catch (SQLException e) {
         e.printStackTrace();
+    } catch (InterruptedException e) {
+        throw new RuntimeException(e);
     }
-}
+    }
 
     public static JSONObject getTime(String username) {
         JSONObject result = null;
@@ -195,8 +225,8 @@ public class UserProcess {
 
     public static boolean queryForum(String username) throws Exception {
         boolean resultExists = false;
-
-        try (Connection connection = DriverManager.getConnection(jdbcUrl, sqlusername, sqlpassword)) {
+        Connection connection = connectionPool.take();
+        try  {
             String selectQuery = "SELECT * FROM forum WHERE username = ?";
             Logger.log(selectQuery, INFO);
 
@@ -207,6 +237,8 @@ public class UserProcess {
                     resultExists = resultSet.next();
                 }
             }
+        } finally {
+            connectionPool.offer(connection);
         }
         return resultExists;
     }
@@ -217,7 +249,6 @@ public class UserProcess {
         if (codeObject.has(hash)) {
             String username = codeObject.getString(hash);
             String finalOutput = username;
-           // codeObject.remove(hash);
             Files.write(Path.of(CODE), codeObject.toString().getBytes(StandardCharsets.UTF_8));
             System.out.println(username);
             return finalOutput;
@@ -226,46 +257,9 @@ public class UserProcess {
             return null;
         }
     }
-    public static String queryArticles(int ArticleID, int ArticleSheets) throws Exception {
-        String ArticleSheet;
-        switch (ArticleSheets){
-            case 0:
-                ArticleSheet = "serverArticles";
-                break;
-            case 1:
-                ArticleSheet = "commandArticles";
-                break;
-            case 2:
-                ArticleSheet = "attractionsArticles";
-                break;
-            case 3:
-                ArticleSheet = "noticeArticles";
-                break;
-            default:
-                ArticleSheet = null;
-                break;
-        }
-
-        try (Connection connection = DriverManager.getConnection(jdbcUrl, sqlusername, sqlpassword)) {
-            String selectQuery = "SELECT * FROM " + ArticleSheet +" WHERE id = ?";
-
-            try (PreparedStatement preparedStatement = connection.prepareStatement(selectQuery)) {
-                preparedStatement.setInt(1, ArticleID);
-
-                try (ResultSet resultSet = preparedStatement.executeQuery()) {
-                    if (resultSet.next()) {
-                        String resultName = resultSet.getString("Name");
-                        return resultName;
-                    } else {
-                        return null;
-                    }
-                }
-            }
-        }
-    }
     public static String queryReg(String name) throws Exception{
+        Connection connection = connectionPool.take();
         try {
-            Connection connection = DriverManager.getConnection(jdbcUrl, sqlusername, sqlpassword);
             String query = "SELECT * FROM users WHERE username = ?";
             PreparedStatement preparedStatement = connection.prepareStatement(query);
             preparedStatement.setString(1, name);
@@ -287,6 +281,8 @@ public class UserProcess {
             connection.close();
         } catch (Exception e) {
             e.printStackTrace();
+        } finally {
+            connectionPool.offer(connection);
         }
         JSONObject responseJson = new JSONObject();
         responseJson.put("code", 1);
@@ -301,7 +297,7 @@ public class UserProcess {
         int day = calendar.get(Calendar.DAY_OF_MONTH);
         String date = year + "-" + month + "-" + day;
         String EncryptedPswd = hashSHA256(password);
-        Connection connection = DriverManager.getConnection(jdbcUrl, sqlusername, sqlpassword);
+        Connection connection = connectionPool.take();
         String insertQuery = "INSERT INTO forum (username, date, password, premium, donate, firstLogin, linkto, id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
         PreparedStatement preparedStatement = connection.prepareStatement(insertQuery);
         preparedStatement.setString(1, username);
@@ -315,7 +311,7 @@ public class UserProcess {
         preparedStatement.executeUpdate();
         // 关闭资源
         preparedStatement.close();
-        connection.close();
+        connectionPool.offer(connection);
     }
     public static String regMinecraftUser(String name, Long uid, HttpServletRequest request, String appname){
         if (!UserProcess.dumplicateUID(uid) && name != null && uid != null) {
@@ -384,25 +380,6 @@ public class UserProcess {
             throw e;
         }
     }
-    public static String readFile(String filename) {
-        try {
-            BufferedReader reader = new BufferedReader(new FileReader(filename));
-            StringBuilder content = new StringBuilder();
-            String line;
-
-            while ((line = reader.readLine()) != null) {
-                content.append(line);
-            }
-
-            reader.close();
-
-            return content.toString();
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-
-        return null;
-    }
     public static String Link(String forum, String name){
         try {
             Connection connection = DriverManager.getConnection(jdbcUrl, sqlusername, sqlpassword);
@@ -450,27 +427,9 @@ public class UserProcess {
         }
         return null;
     }
-    public static boolean hasIp(String ip){
+    public static boolean insertIp(String ip) throws Exception{
+        Connection connection = connectionPool.take();
         try {
-            Connection connection = DriverManager.getConnection(jdbcUrl, sqlusername, sqlpassword);
-            String query = "SELECT * FROM iptable WHERE ip = ?";
-            PreparedStatement preparedStatement = connection.prepareStatement(query);
-            preparedStatement.setString(1, ip);
-            ResultSet resultSet = preparedStatement.executeQuery();
-            if (resultSet.next()) {
-                return true;
-            }
-            resultSet.close();
-            preparedStatement.close();
-            connection.close();
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-        return false;
-    }
-    public static boolean insertIp(String ip) {
-        try {
-            Connection connection = DriverManager.getConnection(jdbcUrl, sqlusername, sqlpassword);
             String query = "INSERT INTO iptable (ip) VALUES (?)";
             PreparedStatement preparedStatement = connection.prepareStatement(query);
             preparedStatement.setString(1, ip);
@@ -480,6 +439,8 @@ public class UserProcess {
             return rowsAffected > 0;
         } catch (Exception e) {
             e.printStackTrace();
+        } finally {
+            connectionPool.offer(connection);
         }
         return false;
     }
