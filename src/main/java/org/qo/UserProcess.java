@@ -1,6 +1,7 @@
 package org.qo;
 
 import jakarta.servlet.http.HttpServletRequest;
+import org.apache.tomcat.util.threads.VirtualThreadExecutor;
 import org.json.JSONException;
 import org.json.JSONObject;
 import org.qo.mail.Mail;
@@ -16,6 +17,9 @@ import java.text.SimpleDateFormat;
 import java.util.Calendar;
 import java.util.Date;
 import java.util.Objects;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+
 import static org.qo.Logger.LogLevel.*;
 import static org.qo.Algorithm.hashSHA256;
 
@@ -26,6 +30,8 @@ public class UserProcess {
     public static String CODE = "null";
     public static String sqlusername = getDatabaseInfo("username");
     public static String sqlpassword = getDatabaseInfo("password");
+    public static VirtualThreadExecutor virtualThreadExecutor = new VirtualThreadExecutor("SQLExec");
+
 
     public static String firstLoginSearch(String name, HttpServletRequest request) {
         try (Connection connection = ConnectionPool.getConnection();
@@ -127,7 +133,6 @@ public class UserProcess {
                     if (resultSet.next()) {
                         int existingTime = resultSet.getInt("time");
                         int updatedTime = existingTime + time;
-
                         String updateQuery = "UPDATE timeTables SET time=? WHERE name=?";
                         try (PreparedStatement updateStatement = connection.prepareStatement(updateQuery)) {
                             updateStatement.setInt(1, updatedTime);
@@ -209,47 +214,9 @@ public class UserProcess {
         }
     }
 
-    public static String queryArticles(int ArticleID, int ArticleSheets) throws Exception {
-        String ArticleSheet;
-        switch (ArticleSheets) {
-            case 0:
-                ArticleSheet = "serverArticles";
-                break;
-            case 1:
-                ArticleSheet = "commandArticles";
-                break;
-            case 2:
-                ArticleSheet = "attractionsArticles";
-                break;
-            case 3:
-                ArticleSheet = "noticeArticles";
-                break;
-            default:
-                ArticleSheet = null;
-                break;
-        }
-
-        try (Connection connection = ConnectionPool.getConnection()) {
-            String selectQuery = "SELECT * FROM " + ArticleSheet + " WHERE id = ?";
-
-            try (PreparedStatement preparedStatement = connection.prepareStatement(selectQuery)) {
-                preparedStatement.setInt(1, ArticleID);
-
-                try (ResultSet resultSet = preparedStatement.executeQuery()) {
-                    if (resultSet.next()) {
-                        String resultName = resultSet.getString("Name");
-                        return resultName;
-                    } else {
-                        return null;
-                    }
-                }
-            }
-        }
-    }
-
     public static String queryReg(String name) {
         try (Connection connection = ConnectionPool.getConnection();
-             PreparedStatement preparedStatement = connection.prepareStatement("SELECT * FROM users WHERE username = ?")) {
+             PreparedStatement preparedStatement = connection.prepareStatement("SELECT uid,frozen,economy FROM users WHERE username = ?")) {
             preparedStatement.setString(1, name);
             try (ResultSet resultSet = preparedStatement.executeQuery()) {
                 if (resultSet.next()) {
@@ -274,56 +241,68 @@ public class UserProcess {
         return responseJson.toString();
     }
 
-    public static void regforum(String username, String password) throws Exception {
-        // 解析JSON数据为JSONArray
-        Calendar calendar = Calendar.getInstance();
-        int year = calendar.get(Calendar.YEAR);
-        int month = calendar.get(Calendar.MONTH) + 1; // 注意月份是从0开始计数的
-        int day = calendar.get(Calendar.DAY_OF_MONTH);
-        String date = year + "-" + month + "-" + day;
-        String EncryptedPswd = hashSHA256(password);
-        try (Connection connection = ConnectionPool.getConnection()) {
-            String insertQuery = "INSERT INTO forum (username, date, password, premium, donate, firstLogin, linkto, id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
-            try (PreparedStatement preparedStatement = connection.prepareStatement(insertQuery)) {
-                preparedStatement.setString(1, username);
-                preparedStatement.setString(2, date);
-                preparedStatement.setString(3, EncryptedPswd);
-                preparedStatement.setBoolean(4, false);
-                preparedStatement.setBoolean(5, false);
-                preparedStatement.setBoolean(6, true);
-                preparedStatement.setString(7, "EMPTY");
-                preparedStatement.setInt(8, 0);
-                preparedStatement.executeUpdate();
-            }
-        }
-    }
-
-    public static String regMinecraftUser(String name, Long uid, HttpServletRequest request, String appname) {
-        if (!UserProcess.dumplicateUID(uid) && name != null && uid != null) {
-            try (Connection connection = ConnectionPool.getConnection()) {
-                String insertQuery = "INSERT INTO users (username, uid,frozen, remain, economy) VALUES (?, ?, ?, ?, ?)";
-                Link(name, appname);
-                try (PreparedStatement preparedStatement = connection.prepareStatement(insertQuery)) {
-                    preparedStatement.setString(1, name);
-                    preparedStatement.setLong(2, uid);
-                    preparedStatement.setBoolean(3, false);
-                    preparedStatement.setInt(4, 3);
-                    preparedStatement.setInt(5, 0);
-                    int rowsAffected = preparedStatement.executeUpdate();
-                    System.out.println(rowsAffected + " row(s) inserted." + "from " + IPUtil.getIpAddr(request));
-                    System.out.println(name + " Registered.");
-                    Mail mail = new Mail();
-                    mail.send(uid + "@qq.com", "感谢您注册QO2账号", MailPreset.register);
-                    UserProcess.insertIp(IPUtil.getIpAddr(request));
-                    return ReturnInterface.success("Success!");
+    public static void regforum(String username, String password) {
+        virtualThreadExecutor.execute(new Runnable() {
+            @Override
+            public void run() {
+                Calendar calendar = Calendar.getInstance();
+                int year = calendar.get(Calendar.YEAR);
+                int month = calendar.get(Calendar.MONTH) + 1;
+                int day = calendar.get(Calendar.DAY_OF_MONTH);
+                String date = year + "-" + month + "-" + day;
+                String EncryptedPswd = hashSHA256(password);
+                try (Connection connection = ConnectionPool.getConnection()) {
+                    String insertQuery = "INSERT INTO forum (username, date, password, premium, donate, firstLogin, linkto, id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
+                    try (PreparedStatement preparedStatement = connection.prepareStatement(insertQuery)) {
+                        preparedStatement.setString(1, username);
+                        preparedStatement.setString(2, date);
+                        preparedStatement.setString(3, EncryptedPswd);
+                        preparedStatement.setBoolean(4, false);
+                        preparedStatement.setBoolean(5, false);
+                        preparedStatement.setBoolean(6, true);
+                        preparedStatement.setString(7, "EMPTY");
+                        preparedStatement.setInt(8, 0);
+                        preparedStatement.executeUpdate();
+                    } catch (SQLException e) {
+                        e.printStackTrace();
+                    }
+                } catch (SQLException e) {
+                    e.printStackTrace();
                 }
-            } catch (Exception e) {
-                e.printStackTrace();
+            }
+        });
+    }
+    public static String regMinecraftUser(String name, Long uid, HttpServletRequest request, String appname) throws ExecutionException, InterruptedException {
+        CompletableFuture<String> future = CompletableFuture.supplyAsync(() -> {
+            if (!UserProcess.dumplicateUID(uid) && name != null && uid != null) {
+                try (Connection connection = ConnectionPool.getConnection()) {
+                    String insertQuery = "INSERT INTO users (username, uid,frozen, remain, economy) VALUES (?, ?, ?, ?, ?)";
+                    Link(name, appname);
+                    try (PreparedStatement preparedStatement = connection.prepareStatement(insertQuery)) {
+                        preparedStatement.setString(1, name);
+                        preparedStatement.setLong(2, uid);
+                        preparedStatement.setBoolean(3, false);
+                        preparedStatement.setInt(4, 3);
+                        preparedStatement.setInt(5, 0);
+                        int rowsAffected = preparedStatement.executeUpdate();
+                        System.out.println(rowsAffected + " row(s) inserted." + "from " + IPUtil.getIpAddr(request));
+                        System.out.println(name + " Registered.");
+                        Mail mail = new Mail();
+                        mail.send(uid + "@qq.com", "感谢您注册QO2账号", MailPreset.register);
+                        UserProcess.insertIp(IPUtil.getIpAddr(request));
+                        return ReturnInterface.success("Success!");
+                    }
+                } catch (Exception e) {
+                    e.printStackTrace();
+                    return ReturnInterface.failed("FAILED");
+                }
+            } else {
                 return ReturnInterface.failed("FAILED");
             }
-        }
-        return ReturnInterface.failed("FAILED");
+        });
+        return future.get();
     }
+
 
     public static String AvatarTrans(String name) throws Exception {
         String apiURL = "https://api.mojang.com/users/profiles/minecraft/" + name;
@@ -478,7 +457,7 @@ public class UserProcess {
                             return ReturnInterface.success("成功");
                         } else {
                             try (FileWriter writer = new FileWriter("login.log", true)) {
-                                java.util.Date now = new Date();
+                                Date now = new Date();
                                 SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
                                 String timestamp = sdf.format(now);
                                 String logMessage = "[" + timestamp + "] 用户 " + username + " 使用错误密码" + hashSHA256(password) + " 登录\n";
@@ -529,23 +508,28 @@ public class UserProcess {
      * @param username 登录用户名
      */
     public static void insertLoginIP(String ip, String username) throws Exception {
-        String query = "SELECT username, uid FROM users WHERE username = ?";
-        String insert = "INSERT INTO iptable (username, ip) VALUES (?, ?)";
-        try (Connection connection = ConnectionPool.getConnection();
-             PreparedStatement preparedStatement = connection.prepareStatement(query)) {
-            preparedStatement.setString(1, username);
-            try (ResultSet resultSet = preparedStatement.executeQuery()) {
-                if (resultSet.next()) {
-                    try (PreparedStatement preparedStatement1 = connection.prepareStatement(insert)) {
-                        preparedStatement1.setString(1, username);
-                        preparedStatement1.setString(2, ip);
-                        preparedStatement1.executeUpdate();
+        virtualThreadExecutor.execute(new Runnable() {
+            @Override
+            public void run() {
+                String query = "SELECT username, uid FROM users WHERE username = ?";
+                String insert = "INSERT INTO iptable (username, ip) VALUES (?, ?)";
+                try (Connection connection = ConnectionPool.getConnection();
+                     PreparedStatement preparedStatement = connection.prepareStatement(query)) {
+                    preparedStatement.setString(1, username);
+                    try (ResultSet resultSet = preparedStatement.executeQuery()) {
+                        if (resultSet.next()) {
+                            try (PreparedStatement preparedStatement1 = connection.prepareStatement(insert)) {
+                                preparedStatement1.setString(1, username);
+                                preparedStatement1.setString(2, ip);
+                                preparedStatement1.executeUpdate();
+                            }
+                        }
                     }
+                } catch (Exception e) {
+                    e.printStackTrace();
                 }
             }
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
+        });
     }
 
     /**
