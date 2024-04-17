@@ -285,8 +285,8 @@ public class UserProcess {
                         preparedStatement.setInt(4, 3);
                         preparedStatement.setInt(5, 0);
                         int rowsAffected = preparedStatement.executeUpdate();
-                        System.out.println(rowsAffected + " row(s) inserted." + "from " + IPUtil.getIpAddr(request));
-                        System.out.println(name + " Registered.");
+                        Logger.log(rowsAffected + " row(s) inserted." + "from " + IPUtil.getIpAddr(request), INFO);
+                        Logger.log(name + " Registered.", INFO);
                         Mail mail = new Mail();
                         mail.send(uid + "@qq.com", "感谢您注册QO2账号", MailPreset.register);
                         UserProcess.insertIp(IPUtil.getIpAddr(request));
