@@ -31,11 +31,12 @@ import static org.qo.Logger.LogLevel.*;
 @SpringBootApplication
 public class Main {
     public static void main(String[] args) throws Exception {
-        Mail mail = new Mail();
-        if (!mail.test()){
-            Logger.log("Mail function doesn't work properly. With following exception:", ERROR);
-            Logger.log("", ERROR);
-        }
+        ConnectionPool.init();
+        //Mail mail = new Mail();
+        //if (!mail.test()){
+            //Logger.log("Mail function doesn't work properly. With following exception:", ERROR);
+           // Logger.log("", ERROR);
+        //}
         Funcs.Start();
         Logger.log("API Started.", INFO);
         SpringApplication.run(ApiApplication.class, args);
