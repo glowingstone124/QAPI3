@@ -38,6 +38,7 @@ public class Main {
            // Logger.log("", ERROR);
         //}
         Funcs.Start();
+        Funcs.ShowDic();
         Logger.log("API Started.", INFO);
         SpringApplication.run(ApiApplication.class, args);
         Logger.startLogWriter("log.log", 3000);
