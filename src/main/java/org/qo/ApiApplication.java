@@ -17,6 +17,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.thymeleaf.templateresource.StringTemplateResource;
 
 import javax.swing.*;
 import javax.swing.text.Document;
@@ -212,9 +213,11 @@ public class ApiApplication implements ErrorController {
         return ReturnInterface.denied("FAILED");
     }
     @GetMapping("/qo/download/status")
-    public String returnStatus() {
+    public ResponseEntity<String> returnStatus() {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
         serverStatus = status;
-        return serverStatus;
+        return new ResponseEntity<>(serverStatus,  headers, HttpStatus.OK);
     }
     public static class UserInfo {
         public String username;
