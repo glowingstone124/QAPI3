@@ -1,12 +1,10 @@
 package org.qo;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
-import com.google.gson.Gson;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.jetbrains.annotations.NotNull;
 import org.json.JSONObject;
-import org.qo.picgen.PicGen;
 import org.qo.server.Documents;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.web.servlet.error.ErrorController;
@@ -17,14 +15,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
-import org.thymeleaf.templateresource.StringTemplateResource;
 
-import javax.swing.*;
-import javax.swing.text.Document;
-import java.awt.*;
 import java.io.*;
-import java.lang.management.ManagementFactory;
-import java.lang.management.OperatingSystemMXBean;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.concurrent.Executors;
@@ -44,7 +36,6 @@ public class ApiApplication implements ErrorController {
     public static String serverStatus;
     public static int serverAlive;
     public static long PackTime;
-    public static String CreativeStatus;
     public static int requests = 0;
 
     public ApiApplication(){
@@ -99,7 +90,7 @@ public class ApiApplication implements ErrorController {
     }
     @JsonProperty("myinfo")
     @RequestMapping("/forum/fetch/myself")
-    public String myinfo(@NotNull String name, HttpServletRequest request) throws Exception {
+    public String myinfo(@NotNull String name, HttpServletRequest request) {
         return UserProcess.fetchMyinfo(name,request);
     }
 
@@ -138,12 +129,11 @@ public class ApiApplication implements ErrorController {
     }
     @GetMapping("/qo/download/getgametime")
     public String getTime(@RequestParam(name = "username", required = true)String username) {
-        String result = UserProcess.getTime(username).toString();
-        return result;
+        return UserProcess.getTime(username).toString();
     }
     @RequestMapping("/qo/query/resetpassword")
     public String resetPassword(String username, String hash, int deviceid, String newPassword, HttpServletRequest request) throws Exception {
-        if (deviceid == 77560 && UserProcess.queryHash(hash).equals(username) && !Objects.equals(UserProcess.queryHash(hash), null)) {
+        if (deviceid == 77560 && Objects.equals(UserProcess.queryHash(hash), username) && !Objects.equals(UserProcess.queryHash(hash), null)) {
             if (UserProcess.changeHash(username, hashSHA256(newPassword))) {
                 Logger.log("[PASSWORD] ip " + IPUtil.getIpAddr(request) + " queried resetPassword and changed username " + username + "'s password.",Logger.LogLevel.INFO);
                 return ReturnInterface.success("SUCCESS");
@@ -163,26 +153,13 @@ public class ApiApplication implements ErrorController {
         returnObj.put("die", false);
         return returnObj.toString();
     }
-    private static JSONObject getMemoryUsage() {
-        Runtime runtime = Runtime.getRuntime();
-        long totalMemory = runtime.totalMemory();
-        long freeMemory = runtime.freeMemory();
-        long usedMemory = totalMemory - freeMemory;
-
-        JSONObject memoryUsageJson = new JSONObject();
-        memoryUsageJson.put("total_memory", totalMemory);
-        memoryUsageJson.put("used_memory", usedMemory);
-        memoryUsageJson.put("free_memory", freeMemory);
-
-        return memoryUsageJson;
-    }
     @RequestMapping("/qo/time")
     public String timedate() {
         long timeStamp = System.currentTimeMillis();
         return ReturnInterface.success(String.valueOf(timeStamp));
     }
     @PostMapping("/qo/upload/status")
-    public String handlePost(@RequestBody String data, HttpServletRequest request) {
+    public String handlePost(@RequestBody String data) {
         if (data != null) {
             status = data;
         }
@@ -219,17 +196,6 @@ public class ApiApplication implements ErrorController {
         serverStatus = status;
         return new ResponseEntity<>(serverStatus,  headers, HttpStatus.OK);
     }
-    public static class UserInfo {
-        public String username;
-        public long uid;
-        public int remain;
-
-        public UserInfo(String username, long uid, int remain) {
-            this.username = username;
-            this.uid = uid;
-            this.remain = remain;
-        }
-    }
     @RequestMapping("/qo/upload/registry")
     public static String InsertData(@RequestParam(name = "name", required = true)String name,@RequestParam(name = "uid", required = true) Long uid,@RequestParam(name = "appname", required = true) String appname, HttpServletRequest request) throws Exception {
         return UserProcess.regMinecraftUser(name, uid, request, appname);
@@ -249,7 +215,7 @@ public class ApiApplication implements ErrorController {
     }
     @RequestMapping("/qo/download/link")
     public static String downloadLink(String name){
-        if (UserProcess.queryLink(name) != null && !UserProcess.queryLink(name).equals("EMPTY")){
+        if (UserProcess.queryLink(name) != null && !Objects.equals(UserProcess.queryLink(name), "EMPTY")){
             return ReturnInterface.success(UserProcess.queryLink(name));
         } else {
             return ReturnInterface.failed("NOT FOUND");
@@ -265,7 +231,7 @@ public class ApiApplication implements ErrorController {
         }
     }
     @RequestMapping("/qo/download/registry")
-    public static String GetData(String name) throws Exception {
+    public static String GetData(String name){
         return UserProcess.queryReg(name);
     }
     @PostMapping("/qo/economy/minus")
@@ -299,7 +265,7 @@ public class ApiApplication implements ErrorController {
         }
     }
     @GetMapping("/qo/loginip/download")
-    public String getLogin(@RequestParam(name="username",required = true) String username) throws Exception {
+    public String getLogin(@RequestParam(name="username",required = true) String username){
         String result = getLatestLoginIP(username);
         if (result.equals("undefined")){
             return ReturnInterface.denied("请求的用户没有历史ip记录");
