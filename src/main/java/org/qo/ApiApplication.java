@@ -132,7 +132,7 @@ public class ApiApplication implements ErrorController {
         return UserProcess.getTime(username).toString();
     }
     @RequestMapping("/qo/query/resetpassword")
-    public String resetPassword(String username, String hash, int deviceid, String newPassword, HttpServletRequest request) throws Exception {
+    public ResponseEntity<String> resetPassword(String username, String hash, int deviceid, String newPassword, HttpServletRequest request) throws Exception {
         if (deviceid == 77560 && Objects.equals(UserProcess.queryHash(hash), username) && !Objects.equals(UserProcess.queryHash(hash), null)) {
             if (UserProcess.changeHash(username, hashSHA256(newPassword))) {
                 Logger.log("[PASSWORD] ip " + IPUtil.getIpAddr(request) + " queried resetPassword and changed username " + username + "'s password.",Logger.LogLevel.INFO);
@@ -154,7 +154,7 @@ public class ApiApplication implements ErrorController {
         return returnObj.toString();
     }
     @RequestMapping("/qo/time")
-    public String timedate() {
+    public ResponseEntity<String> timedate() {
         long timeStamp = System.currentTimeMillis();
         return ReturnInterface.success(String.valueOf(timeStamp));
     }
@@ -174,7 +174,7 @@ public class ApiApplication implements ErrorController {
         return new ResponseEntity<>(imageResource, headers, HttpStatus.OK);
     }
     @RequestMapping("/forum/register")
-    public String register(@RequestParam(name = "username", required = true) String username, @RequestParam(name = "password", required = true) String password, @RequestParam(name = "token", required = true) String token, HttpServletRequest request) throws Exception{
+    public ResponseEntity<String> register(@RequestParam(name = "username", required = true) String username, @RequestParam(name = "password", required = true) String password, @RequestParam(name = "token", required = true) String token, HttpServletRequest request) throws Exception{
         if(Objects.equals(token, token(username,1700435)) && !UserProcess.queryForum(username)){
             try {
                 UserProcess.regforum(username, password);
@@ -209,12 +209,12 @@ public class ApiApplication implements ErrorController {
         return UserProcess.AvatarTrans(name);
     }
     @RequestMapping("/qo/upload/link")
-    public static String link(String forum, String name){
+    public ResponseEntity<String> link(String forum, String name){
         String output = UserProcess.Link(forum,name);
         return ReturnInterface.success(output);
     }
     @RequestMapping("/qo/download/link")
-    public static String downloadLink(String name){
+    public ResponseEntity<String> downloadLink(String name){
         if (UserProcess.queryLink(name) != null && !Objects.equals(UserProcess.queryLink(name), "EMPTY")){
             return ReturnInterface.success(UserProcess.queryLink(name));
         } else {
@@ -235,11 +235,11 @@ public class ApiApplication implements ErrorController {
         return UserProcess.queryReg(name);
     }
     @PostMapping("/qo/economy/minus")
-    public String minus(String username, int value){
+    public ResponseEntity<String> minus(String username, int value){
         return ReturnInterface.success(operateEco(username,value, opEco.MINUS));
     }
     @PostMapping("/qo/economy/plus")
-    public String add(String username, int value){
+    public ResponseEntity<String> add(String username, int value){
         return ReturnInterface.success(operateEco(username,value, opEco.ADD));
     }
     @PostMapping("/qo/msglist/upload")
@@ -265,7 +265,7 @@ public class ApiApplication implements ErrorController {
         }
     }
     @GetMapping("/qo/loginip/download")
-    public String getLogin(@RequestParam(name="username",required = true) String username){
+    public ResponseEntity<String> getLogin(@RequestParam(name="username",required = true) String username){
         String result = getLatestLoginIP(username);
         if (result.equals("undefined")){
             return ReturnInterface.denied("请求的用户没有历史ip记录");
