@@ -85,7 +85,7 @@ public class ApiApplication implements ErrorController {
         return null;
     }
     @GetMapping("/forum/login")
-    public String userLogin(@RequestParam(name="username", required = true)String username, @RequestParam(name = "password", required = true)String password , HttpServletRequest request) {
+    public ResponseEntity<String> userLogin(@RequestParam(name="username", required = true)String username, @RequestParam(name = "password", required = true)String password , HttpServletRequest request) {
         return UserProcess.userLogin(username,password,request);
     }
     @JsonProperty("myinfo")
@@ -197,7 +197,7 @@ public class ApiApplication implements ErrorController {
         return new ResponseEntity<>(serverStatus,  headers, HttpStatus.OK);
     }
     @RequestMapping("/qo/upload/registry")
-    public static String InsertData(@RequestParam(name = "name", required = true)String name,@RequestParam(name = "uid", required = true) Long uid,@RequestParam(name = "appname", required = true) String appname, HttpServletRequest request) throws Exception {
+    public static ResponseEntity<String> InsertData(@RequestParam(name = "name", required = true)String name,@RequestParam(name = "uid", required = true) Long uid,@RequestParam(name = "appname", required = true) String appname, HttpServletRequest request) throws Exception {
         return UserProcess.regMinecraftUser(name, uid, request, appname);
     }
     @RequestMapping("/qo/download/memorial")
