@@ -7,6 +7,7 @@ import org.json.JSONObject;
 import org.qo.mail.Mail;
 import org.qo.mail.MailPreset;
 import org.qo.server.AvatarCache;
+import org.springframework.http.ResponseEntity;
 
 import java.io.*;
 import java.nio.charset.StandardCharsets;
@@ -272,8 +273,8 @@ public class UserProcess {
             }
         });
     }
-    public static String regMinecraftUser(String name, Long uid, HttpServletRequest request, String appname) throws ExecutionException, InterruptedException {
-        CompletableFuture<String> future = CompletableFuture.supplyAsync(() -> {
+    public static ResponseEntity<String> regMinecraftUser(String name, Long uid, HttpServletRequest request, String appname) throws ExecutionException, InterruptedException {
+        CompletableFuture<ResponseEntity<String>> future = CompletableFuture.supplyAsync(() -> {
             if (!UserProcess.dumplicateUID(uid) && name != null && uid != null) {
                 try (Connection connection = ConnectionPool.getConnection()) {
                     String insertQuery = "INSERT INTO users (username, uid,frozen, remain, economy) VALUES (?, ?, ?, ?, ?)";
@@ -443,7 +444,7 @@ public class UserProcess {
         return success;
     }
 
-    public static String userLogin(String username, String password, HttpServletRequest request) {
+    public static ResponseEntity<String> userLogin(String username, String password, HttpServletRequest request) {
         try (Connection connection = ConnectionPool.getConnection()) {
             String query = "SELECT * FROM forum WHERE username = ?";
             try (PreparedStatement preparedStatement = connection.prepareStatement(query)) {
@@ -474,9 +475,7 @@ public class UserProcess {
             }
         } catch (SQLException e) {
             e.printStackTrace();
-            JSONObject responseJson = new JSONObject();
-            responseJson.put("code", -1);
-            return responseJson.toString();
+            return ReturnInterface.failed("internal error");
         }
         return ReturnInterface.failed("NULL");
     }
