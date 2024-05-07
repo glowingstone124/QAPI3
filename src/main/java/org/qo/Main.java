@@ -2,7 +2,6 @@ package org.qo;
 
 import org.apache.tomcat.util.threads.VirtualThreadExecutor;
 import org.qo.mail.Mail;
-import org.qo.picgen.PicGen;
 import org.quartz.*;
 import org.quartz.impl.StdSchedulerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -46,15 +45,6 @@ public class Main {
             Logger.log("API shutdown.", INFO);
         }));
     }
-    @Scheduled(initialDelay = 5000, fixedDelay = 5000)
-        public void run() {
-            //System.out.println("123456");
-            try {
-                PicGen.Companion.callinits();
-            } catch (Exception e) {
-                //DO nothing but except next time
-            }
-        }
     @Bean
     public WebMvcConfigurer corsConfigurer() {
         return new WebMvcConfigurer() {
@@ -85,11 +75,5 @@ public class Main {
         registrationBean.setFilter(new Filter());
         registrationBean.addUrlPatterns("/*"); // added ContentType application/json Globally
         return registrationBean;
-    }
-    public class MyJob implements Runnable {
-        @Override
-        public void run() {
-            PicGen.Companion.callinits();
-        }
     }
 }
