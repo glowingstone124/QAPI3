@@ -11,7 +11,6 @@ import java.io.IOException;
 
 public class IPBlockFilter extends OncePerRequestFilter {
 
-    private final IPBlockService ipBlockService = new IPBlockService("blockIP.txt");
 
     @Override
     protected void doFilterInternal(HttpServletRequest request,
@@ -20,7 +19,7 @@ public class IPBlockFilter extends OncePerRequestFilter {
             throws ServletException, IOException {
 
         String clientIp = request.getRemoteAddr();
-        if (ipBlockService.isBlocked(clientIp)) {
+        if (IPBlockService.getInstance("blockIP.txt").isBlocked(clientIp)) {
             response.sendError(HttpStatus.FORBIDDEN.value(), "Access is denied for your IP address");
             return;
         }

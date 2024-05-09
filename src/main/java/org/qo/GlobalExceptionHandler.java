@@ -12,26 +12,30 @@ import static org.qo.Logger.LogLevel.*;
 
 @ControllerAdvice
 public class GlobalExceptionHandler {
-
+    final IPBlockService ipblocksrv = IPBlockService.getInstance("blockIP.txt");
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<String> handleInvalidRequest(Exception e, HttpServletRequest request) {
         Logger.log("error from ip " + request.getRemoteAddr(), ERROR);
+        ipblocksrv.addBlockedIP(request.getRemoteAddr());
         return new ResponseEntity<>("Invalid request", HttpStatus.BAD_REQUEST);
     }
 
     @ExceptionHandler(HttpMessageNotReadableException.class)
     public ResponseEntity<String> handleGeneralException(Exception e, HttpServletRequest request) {
         Logger.log("error from ip " + request.getRemoteAddr(), ERROR);
+        ipblocksrv.addBlockedIP(request.getRemoteAddr());
         return new ResponseEntity<>("Invalid request", HttpStatus.BAD_REQUEST);
     }
     @ExceptionHandler(InvalidMediaTypeException.class)
     public ResponseEntity<String> handleException(Exception e, HttpServletRequest request) {
         Logger.log("error from ip " + request.getRemoteAddr(), ERROR);
+        ipblocksrv.addBlockedIP(request.getRemoteAddr());
         return new ResponseEntity<>("Invalid request", HttpStatus.BAD_REQUEST);
     }
     @ExceptionHandler(Exception.class)
     public ResponseEntity<String> handleGlobalException(Exception e, HttpServletRequest request) {
         Logger.log("error from ip " + request.getRemoteAddr(), ERROR);
+        ipblocksrv.addBlockedIP(request.getRemoteAddr());
         return new ResponseEntity<>("done.", HttpStatus.OK);
     }
 }
