@@ -29,8 +29,10 @@ public class IPBlockService {
 
     public void addBlockedIP(String ip) {
         synchronized (blockedIPs) {
-            blockedIPs.add(ip);
-            saveBlockedIPs();
+            if (!ip.startsWith("192.168") || !ip.startsWith("127.0") || !ip.startsWith("10.64")) {
+                blockedIPs.add(ip);
+                saveBlockedIPs();
+            }
         }
     }
 
