@@ -79,6 +79,10 @@ public class ApiApplication implements ErrorController {
         returnObj.put("code", -1);
         return returnObj.toString();
     }
+    @PostMapping("/qo/upload/github")
+    public void HandleGithub(@RequestBody String req){
+        JSONObject body = new JSONObject(req);
+    }
     @PostMapping("/qo/apihook")
     public String webhook(@RequestBody String data) {
         System.out.println(data);
