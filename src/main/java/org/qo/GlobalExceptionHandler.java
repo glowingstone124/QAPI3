@@ -31,12 +31,6 @@ public class GlobalExceptionHandler {
         ipblocksrv.addBlockedIP(request.getRemoteAddr());
         return new ResponseEntity<>("Invalid request", HttpStatus.BAD_REQUEST);
     }
-    @ExceptionHandler(IllegalArgumentException.class)
-    public ResponseEntity<String> illgException(Exception e, HttpServletRequest request) {
-        Logger.log("error from ip " + request.getRemoteAddr(), ERROR);
-        ipblocksrv.addBlockedIP(request.getRemoteAddr());
-        return new ResponseEntity<>("Invalid request", HttpStatus.BAD_REQUEST);
-    }
     @ExceptionHandler(Exception.class)
     public ResponseEntity<String> handleGlobalException(Exception e, HttpServletRequest request) {
         Logger.log("error from ip " + request.getRemoteAddr(), ERROR);
