@@ -32,7 +32,7 @@ import static org.qo.UserProcess.*;
 @RestController
 @SpringBootApplication
 public class ApiApplication implements ErrorController {
-    public static String status;
+    public static String status = "no old status found";
     public static String serverStatus;
     public static int serverAlive;
     public static long PackTime;
@@ -197,9 +197,23 @@ public class ApiApplication implements ErrorController {
     public ResponseEntity<String> returnStatus() {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
-        serverStatus = status;
-        return new ResponseEntity<>(serverStatus,  headers, HttpStatus.OK);
+        if (status.equals("no old status found")) {
+            JSONObject plObj = new JSONObject();
+            plObj.put("code", 1);
+            plObj.put("reason", "no old status found");
+            return new ResponseEntity<>(plObj.toString(), headers, HttpStatus.OK);
+        } else {
+            JSONObject statObj = new JSONObject(status);
+            if (System.currentTimeMillis() - statObj.getLong("timestamp") >= 3000L) {
+                statObj.put("code", 1);
+                statObj.put("reason", "status expired: latest data was presented longer than 3000 milliseconds ago.");
+            } else {
+                statObj.put("code", 0);
+            }
+            return new ResponseEntity<>(statObj.toString(), headers, HttpStatus.OK);
+        }
     }
+
     @RequestMapping("/qo/upload/registry")
     public static ResponseEntity<String> InsertData(@RequestParam(name = "name", required = true)String name,@RequestParam(name = "uid", required = true) Long uid,@RequestParam(name = "appname", required = true) String appname, HttpServletRequest request) throws Exception {
         return UserProcess.regMinecraftUser(name, uid, request, appname);
