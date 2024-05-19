@@ -111,7 +111,9 @@ public class ApiApplication implements ErrorController {
             //Ready
             case 1 -> {
                 serverAlive = 1;
+
                 Logger.log("Server Stopped at"+ PackTime, Logger.LogLevel.INFO);
+                Msg.put("服务器停止于"+ PackTime);
             }
             default -> serverAlive = -1;
         }
@@ -251,14 +253,6 @@ public class ApiApplication implements ErrorController {
     @RequestMapping("/qo/download/registry")
     public static String GetData(String name){
         return UserProcess.queryReg(name);
-    }
-    @PostMapping("/qo/economy/minus")
-    public ResponseEntity<String> minus(String username, int value){
-        return ReturnInterface.success(operateEco(username,value, opEco.MINUS));
-    }
-    @PostMapping("/qo/economy/plus")
-    public ResponseEntity<String> add(String username, int value){
-        return ReturnInterface.success(operateEco(username,value, opEco.ADD));
     }
     @PostMapping("/qo/msglist/upload")
     public void handleMsg(@RequestBody String data,@RequestParam(name="auth",required = true) String auth) throws Exception {
