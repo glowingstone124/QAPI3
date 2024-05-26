@@ -33,7 +33,6 @@ public class UserProcess {
     public static String sqlpassword = getDatabaseInfo("password");
     public static VirtualThreadExecutor virtualThreadExecutor = new VirtualThreadExecutor("SQLExec");
 
-
     public static String firstLoginSearch(String name, HttpServletRequest request) {
         try (Connection connection = ConnectionPool.getConnection();
              PreparedStatement preparedStatement = connection.prepareStatement("SELECT * FROM forum WHERE username = ?")) {
