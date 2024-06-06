@@ -2,12 +2,15 @@ package org.qo;
 
 import jakarta.servlet.http.HttpServletRequest;
 import org.apache.tomcat.util.threads.VirtualThreadExecutor;
+import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 import org.qo.mail.Mail;
 import org.qo.mail.MailPreset;
 import org.qo.server.AvatarCache;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
+import org.springframework.stereotype.Service;
 
 import java.io.*;
 import java.nio.charset.StandardCharsets;
@@ -18,12 +21,13 @@ import java.text.SimpleDateFormat;
 import java.util.Calendar;
 import java.util.Date;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 
 import static org.qo.Logger.LogLevel.*;
 import static org.qo.Algorithm.hashSHA256;
-
+@Service
 public class UserProcess {
     public static final String SQL_CONFIGURATION = "data/sql/info.json";
     public static final String CODE_CONFIGURATION = "data/code.json";
@@ -32,7 +36,6 @@ public class UserProcess {
     public static String sqlusername = getDatabaseInfo("username");
     public static String sqlpassword = getDatabaseInfo("password");
     public static VirtualThreadExecutor virtualThreadExecutor = new VirtualThreadExecutor("SQLExec");
-
     public static String firstLoginSearch(String name, HttpServletRequest request) {
         try (Connection connection = ConnectionPool.getConnection();
              PreparedStatement preparedStatement = connection.prepareStatement("SELECT * FROM forum WHERE username = ?")) {
@@ -62,7 +65,6 @@ public class UserProcess {
         Logger.log(IPUtil.getIpAddr(request) + " username " + name + " qureied firstlogin but unsuccessful.", INFO);
         return responseJson.toString();
     }
-
     public static String fetchMyinfo(String name, HttpServletRequest request) {
         String date;
         Boolean premium;
@@ -124,6 +126,21 @@ public class UserProcess {
         }
     }
 
+    public static String getServerStats() throws IOException {
+        JSONArray statusArray = new JSONArray(Files.readString(Path.of("stat.json")));
+        for (int i = 0; i < statusArray.length(); i++) {
+            JSONObject event = statusArray.getJSONObject(i);
+            String title = event.getString("title");
+            String date = event.getString("date");
+            String author = event.getString("author");
+            String summary = event.getString("summary");
+            if (summary == null || author == null || date == null || title == null){
+                Logger.log("INVALID Status Message found.", ERROR);
+                return null;
+            }
+        }
+        return statusArray.toString();
+    }
     public static void handleTime(String name, int time) {
         try (Connection connection = ConnectionPool.getConnection()) {
             String checkQuery = "SELECT * FROM timeTables WHERE name=?";

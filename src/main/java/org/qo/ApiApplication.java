@@ -6,6 +6,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import org.jetbrains.annotations.NotNull;
 import org.json.JSONObject;
 import org.qo.server.Documents;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.web.servlet.error.ErrorController;
 import org.springframework.core.io.ByteArrayResource;
@@ -37,7 +38,6 @@ public class ApiApplication implements ErrorController {
     public static int serverAlive;
     public static long PackTime;
     public static int requests = 0;
-
     public ApiApplication(){
         ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
         scheduler.scheduleAtFixedRate(this::reqCount, 0, 1, TimeUnit.SECONDS);
@@ -59,17 +59,6 @@ public class ApiApplication implements ErrorController {
         returnObj.put("build", "202402241454");
         return returnObj.toString();
     }
-    @PostMapping("/qo/upload/paste")
-    public String paste(@RequestBody String text, HttpServletRequest request) throws Exception{
-        Paste ps = new Paste();
-        return ps.handle(request, text);
-    }
-    @GetMapping("/qo/paste/{route}")
-    public String getContent(@PathVariable String route) throws Exception{
-        Paste ps = new Paste();
-        return ps.getContent(route);
-    }
-
     @RequestMapping("/error")
     public String error(HttpServletResponse response){
         JSONObject returnObj = new JSONObject();
@@ -170,6 +159,12 @@ public class ApiApplication implements ErrorController {
             status = data;
         }
         return null;
+    }
+    @GetMapping("/qo/download/stats")
+    public ResponseEntity<String> getServerStatus() throws IOException {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        return new ResponseEntity<>(UserProcess.getServerStats(), headers, HttpStatus.OK);
     }
     @GetMapping("/qo/download/statpic")
     public ResponseEntity<Resource> handleStat() throws Exception {
