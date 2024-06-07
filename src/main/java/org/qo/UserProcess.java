@@ -320,7 +320,41 @@ public class UserProcess {
         return future.get();
     }
 
+    public static void deleteMinecraftUser(String name) {
+        virtualThreadExecutor.execute(new Runnable() {
+            @Override
+            public void run() {
+                if (name != null && !name.trim().isEmpty()) {
+                    try (Connection connection = ConnectionPool.getConnection()) {
+                        String deleteQuery = "DELETE FROM users WHERE username = ?";
+                        try (PreparedStatement preparedStatement = connection.prepareStatement(deleteQuery)) {
+                            preparedStatement.setString(1, name);
+                            int rowsAffected = preparedStatement.executeUpdate();
+                            if (rowsAffected > 0) {
+                                System.out.println("User " + name + " deleted successfully!");
+                            }
+                        }
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                        System.out.println("FAILED");
+                    }
+                } else {
+                    System.out.println("Invalid username!");
+                }
+            }
+        });
+    }
 
+    public static ResponseEntity<String> delMinecraftUser(String appname,String mcname) throws ExecutionException, InterruptedException {
+        CompletableFuture<ResponseEntity<String>> future = CompletableFuture.supplyAsync(() -> {
+            if (queryLink(appname).equals(mcname) && !Objects.equals(queryLink(appname), "EMPTY")){
+                deleteMinecraftUser(appname);
+                return ReturnInterface.success("SUCCESS.");
+            }
+            return ReturnInterface.denied("USERNAME NOT MATCH!");
+        });
+        return future.get();
+    }
     public static String AvatarTrans(String name) throws Exception {
         String apiURL = "https://api.mojang.com/users/profiles/minecraft/" + name;
         String avatarURL = "https://playerdb.co/api/player/minecraft/";
@@ -375,13 +409,9 @@ public class UserProcess {
                         if (Objects.equals(resultname, "EMPTY")) {
                             String updateQuery = "UPDATE forum SET linkto = ? WHERE username = ?";
                             try (PreparedStatement updateStatement = connection.prepareStatement(updateQuery)) {
-                                while (resultSet.next()) {
-                                    String username = forum;
-                                    String linkAccount = name;
-                                    updateStatement.setString(1, linkAccount);
-                                    updateStatement.setString(2, username);
-                                    updateStatement.executeUpdate();
-                                }
+                                updateStatement.setString(1, name);
+                                updateStatement.setString(2, forum);
+                                updateStatement.executeUpdate();
                                 return "DONE";
                             }
                         } else {
@@ -396,9 +426,10 @@ public class UserProcess {
         return "failed";
     }
 
+
     public static String queryLink(String forum) {
         try (Connection connection = ConnectionPool.getConnection()) {
-            String query = "SELECT * FROM forum WHERE username = ?";
+            String query = "SELECT linkto FROM forum WHERE username = ?";
             try (PreparedStatement preparedStatement = connection.prepareStatement(query)) {
                 preparedStatement.setString(1, forum);
                 try (ResultSet resultSet = preparedStatement.executeQuery()) {

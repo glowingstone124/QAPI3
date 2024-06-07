@@ -21,6 +21,7 @@ import org.springframework.web.bind.annotation.*;
 import java.io.*;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -222,6 +223,10 @@ public class ApiApplication implements ErrorController {
     @RequestMapping("/qo/download/avatar")
     public String avartarTrans(@RequestParam() String name) throws Exception {
         return UserProcess.AvatarTrans(name);
+    }
+    @PostMapping("/qo/delete/user")
+    public ResponseEntity<String> exec(@RequestParam String appname, @RequestParam String minecraftUser) throws ExecutionException, InterruptedException {
+        return UserProcess.delMinecraftUser(appname,minecraftUser);
     }
     @RequestMapping("/qo/upload/link")
     public ResponseEntity<String> link(String forum, String name){
