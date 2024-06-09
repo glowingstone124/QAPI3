@@ -303,7 +303,7 @@ public class ApiApplication implements ErrorController {
         }
         return new ResponseEntity<>(retObj.toString(), headers, HttpStatus.OK);
     }
-    @GetMapping("/qo/inventory/request")
+    @GetMapping("/qo/inventory/validate")
     public void validateInventoryView(@RequestParam String auth, @RequestParam String key) throws Exception {
         if (fc.verify(auth, Funcs.Perms.FULL)){
             UserProcess.approveInventoryViewRequest(key);
