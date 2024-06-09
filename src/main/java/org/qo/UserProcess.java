@@ -257,7 +257,7 @@ public class UserProcess {
         responseJson.put("qq", -1);
         return responseJson.toString();
     }
-    public static String queryReg(Long qq) {
+    public static String queryReg(long qq) {
         try (Connection connection = ConnectionPool.getConnection();
              PreparedStatement preparedStatement = connection.prepareStatement("SELECT username,frozen,economy FROM users WHERE uid = ?")) {
             preparedStatement.setLong(1, qq);
