@@ -1,5 +1,6 @@
 package org.qo;
 
+import com.google.gson.JsonObject;
 import jakarta.servlet.http.HttpServletRequest;
 import org.apache.tomcat.util.threads.VirtualThreadExecutor;
 import org.json.JSONArray;
@@ -18,10 +19,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.*;
 import java.text.SimpleDateFormat;
-import java.util.Calendar;
+import java.util.*;
 import java.util.Date;
-import java.util.Objects;
-import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 
@@ -32,6 +31,7 @@ public class UserProcess {
     public static final String SQL_CONFIGURATION = "data/sql/info.json";
     public static final String CODE_CONFIGURATION = "data/code.json";
     public static String jdbcUrl = getDatabaseInfo("url");
+    public static ArrayList<Key> inventoryViewList = new ArrayList<>();
     public static String CODE = "null";
     public static String sqlusername = getDatabaseInfo("username");
     public static String sqlpassword = getDatabaseInfo("password");
@@ -596,10 +596,75 @@ public class UserProcess {
         }
         return "error";
     }
+    public static boolean insertInventoryViewRequest(String key, String viewer, String sender) {
+        Key request = new Key();
+        request.viewer = viewer;
+        request.provider = sender;
+        request.key = key;
+        request.expire = System.currentTimeMillis() + 360000;
+        request.approve = false;
+        if (inventoryViewList.size() >= 20) {
+            return false;
+        }
 
+        for (Key obj : inventoryViewList) {
+            if (obj.equals(request)) {
+                return false;
+            }
+        }
+
+        inventoryViewList.add(request);
+        return true;
+    }
+    public static void approveInventoryViewRequest(String secret){
+        for (Key obj : inventoryViewList) {
+            if (Objects.equals(obj.key, secret)) {
+                obj.approve = true;
+            }
+        }
+    }
+    public static String InventoryViewStatus(String key){
+        JsonObject retObj = new JsonObject();
+        int appr = 1;
+        String viewer = "";
+        for (Key obj : inventoryViewList) {
+            if (Objects.equals(obj.key, key)){
+                if (obj.approve){
+                    appr = 0;
+                }
+                viewer = obj.viewer;
+            }
+        }
+        retObj.addProperty("approved", appr);
+        retObj.addProperty("viewer", viewer);
+        return retObj.toString();
+    }
     public enum opEco {
         ADD,
         SUB,
         MINUS
+    }
+    public static class Key {
+        String viewer;
+        String provider;
+        String key;
+        boolean approve;
+        long expire;
+
+        @Override
+        public boolean equals(Object obj) {
+            if (this == obj) return true;
+            if (obj == null || getClass() != obj.getClass()) return false;
+            Key key1 = (Key) obj;
+            return viewer.equals(key1.viewer) && provider.equals(key1.provider);
+        }
+
+        @Override
+        public int hashCode() {
+            int result = viewer.hashCode();
+            result = 31 * result + provider.hashCode();
+            result = 31 * result + key.hashCode();
+            return result;
+        }
     }
 }

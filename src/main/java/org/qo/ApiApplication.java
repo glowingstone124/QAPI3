@@ -1,8 +1,10 @@
 package org.qo;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.google.gson.JsonObject;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import org.apache.catalina.User;
 import org.jetbrains.annotations.NotNull;
 import org.json.JSONObject;
 import org.qo.server.Documents;
@@ -38,6 +40,7 @@ public class ApiApplication implements ErrorController {
     public static String serverStatus;
     public static int serverAlive;
     public static long PackTime;
+    private Funcs fc = new Funcs();
     public static int requests = 0;
     public ApiApplication(){
         ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
@@ -284,5 +287,31 @@ public class ApiApplication implements ErrorController {
         } else {
             return ReturnInterface.success(result);
         }
+    }
+    @GetMapping("/qo/inventory/request")
+    public ResponseEntity<String> insertInventoryInspection(@RequestParam String name, @RequestParam String from){
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        String key = Funcs.generateRandomString(32);
+        JsonObject retObj = new JsonObject();
+        if (UserProcess.insertInventoryViewRequest(name,from,key)){
+            retObj.addProperty("key", key);
+            retObj.addProperty("code", 0);
+        } else {
+            retObj.addProperty("code", 1);
+        }
+        return new ResponseEntity<>(retObj.toString(), headers, HttpStatus.OK);
+    }
+    @GetMapping("/qo/inventory/request")
+    public void validateInventoryView(@RequestParam String auth, @RequestParam String key) throws Exception {
+        if (fc.verify(auth, Funcs.Perms.FULL)){
+            UserProcess.approveInventoryViewRequest(key);
+        }
+    }
+    @GetMapping("/qo/inventory/query")
+    public ResponseEntity<String> queryInventoryStat(@RequestParam String secrets){
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        return new ResponseEntity<>(UserProcess.InventoryViewStatus(secrets), headers, HttpStatus.OK);
     }
 }
