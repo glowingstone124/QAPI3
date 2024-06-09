@@ -314,4 +314,10 @@ public class ApiApplication implements ErrorController {
         headers.setContentType(MediaType.APPLICATION_JSON);
         return new ResponseEntity<>(UserProcess.InventoryViewStatus(secrets), headers, HttpStatus.OK);
     }
+    @GetMapping("/qo/download/name")
+    public ResponseEntity<String> queryPlayerName(@RequestParam String name){
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        return new ResponseEntity<>(UserProcess.queryReg(name), headers, HttpStatus.OK);
+    }
 }

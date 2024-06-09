@@ -257,7 +257,32 @@ public class UserProcess {
         responseJson.put("qq", -1);
         return responseJson.toString();
     }
+    public static String queryReg(Long qq) {
+        try (Connection connection = ConnectionPool.getConnection();
+             PreparedStatement preparedStatement = connection.prepareStatement("SELECT username,frozen,economy FROM users WHERE uid = ?")) {
+            preparedStatement.setLong(1, qq);
+            try (ResultSet resultSet = preparedStatement.executeQuery()) {
+                if (resultSet.next()) {
+                   String username  = resultSet.getString("username");
+                    Boolean frozen = resultSet.getBoolean("frozen");
+                    int eco = resultSet.getInt("economy");
 
+                    JSONObject responseJson = new JSONObject();
+                    responseJson.put("code", 0);
+                    responseJson.put("frozen", frozen);
+                    responseJson.put("username", username);
+                    responseJson.put("economy", eco);
+                    return responseJson.toString();
+                }
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        JSONObject responseJson = new JSONObject();
+        responseJson.put("code", 1);
+        responseJson.put("username", -1);
+        return responseJson.toString();
+    }
     public static void regforum(String username, String password) {
         virtualThreadExecutor.execute(new Runnable() {
             @Override
