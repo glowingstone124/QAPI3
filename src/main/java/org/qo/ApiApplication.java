@@ -295,6 +295,7 @@ public class ApiApplication implements ErrorController {
         String key = Funcs.generateRandomString(32);
         JsonObject retObj = new JsonObject();
         if (UserProcess.insertInventoryViewRequest(name,from,key)){
+            Msg.put(from+"发起了一个新的物品栏访问请求到"+name+ "。如果批准请输入/approve + 32位密钥");
             retObj.addProperty("key", key);
             retObj.addProperty("code", 0);
         } else {
