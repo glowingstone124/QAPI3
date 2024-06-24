@@ -234,9 +234,6 @@ public class UserProcess {
     }
 
     public static String queryReg(String name) {
-        if (Operation.exists(name)){
-            return Operation.get(name);
-        }
         try (Connection connection = ConnectionPool.getConnection();
              PreparedStatement preparedStatement = connection.prepareStatement("SELECT uid,frozen,economy FROM users WHERE username = ?")) {
             preparedStatement.setString(1, name);
