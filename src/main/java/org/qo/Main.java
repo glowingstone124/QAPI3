@@ -1,7 +1,9 @@
 package org.qo;
 
+import org.qo.redis.Configuration;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.web.cors.CorsConfiguration;
@@ -17,12 +19,20 @@ import static org.qo.Logger.LogLevel.*;
 @SpringBootApplication
 public class Main {
     public static void main(String[] args) throws Exception {
+        if (args.length != 0) {
+            for (String arg : args) {
+                if (arg.equals("--disable-redis")) {
+                    Configuration.EnableRedis = false;
+                }
+            }
+        }
         ConnectionPool.init();
         //Mail mail = new Mail();
         //if (!mail.test()){
             //Logger.log("Mail function doesn't work properly. With following exception:", ERROR);
            // Logger.log("", ERROR);
         //}
+        org.qo.redis.Configuration.init();
         Funcs.Start();
         Funcs.ShowDic();
         Logger.log("API Started.", INFO);

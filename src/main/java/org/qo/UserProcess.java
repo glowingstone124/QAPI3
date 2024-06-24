@@ -8,6 +8,8 @@ import org.json.JSONException;
 import org.json.JSONObject;
 import org.qo.mail.Mail;
 import org.qo.mail.MailPreset;
+import org.qo.redis.Configuration;
+import org.qo.redis.Operation;
 import org.qo.server.AvatarCache;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
@@ -232,6 +234,9 @@ public class UserProcess {
     }
 
     public static String queryReg(String name) {
+        if (Operation.exists(name)){
+            return Operation.get(name);
+        }
         try (Connection connection = ConnectionPool.getConnection();
              PreparedStatement preparedStatement = connection.prepareStatement("SELECT uid,frozen,economy FROM users WHERE username = ?")) {
             preparedStatement.setString(1, name);
@@ -246,6 +251,7 @@ public class UserProcess {
                     responseJson.put("frozen", frozen);
                     responseJson.put("qq", uid);
                     responseJson.put("economy", eco);
+                    Operation.insert(name, String.valueOf(uid));
                     return responseJson.toString();
                 }
             }
