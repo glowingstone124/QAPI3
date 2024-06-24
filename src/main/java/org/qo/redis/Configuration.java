@@ -55,7 +55,7 @@ public class Configuration {
         poolConfig.setTestOnReturn(true);
         poolConfig.setTestWhileIdle(true);
 
-        pool = new JedisPool(poolConfig, HOST, PORT);
+        pool = new JedisPool(poolConfig, HOST, PORT,5000, PASSWORD);
 
         try (Jedis jedis = pool.getResource()) {
             jedis.auth(PASSWORD);
