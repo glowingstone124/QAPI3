@@ -1,6 +1,7 @@
 package org.qo;
 
 import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import jakarta.servlet.http.HttpServletRequest;
 import org.apache.tomcat.util.threads.VirtualThreadExecutor;
 import org.json.JSONArray;
@@ -28,6 +29,9 @@ import java.util.concurrent.ExecutionException;
 
 import static org.qo.Logger.LogLevel.*;
 import static org.qo.Algorithm.hashSHA256;
+import static org.qo.redis.Configuration.QOAPP_REG_DATABASE;
+import static org.qo.redis.Configuration.QO_REG_DATABASE;
+
 @Service
 public class UserProcess {
     public static final String SQL_CONFIGURATION = "data/sql/info.json";
@@ -234,6 +238,11 @@ public class UserProcess {
     }
 
     public static String queryReg(String name) {
+        if(Operation.exists("users:" +name, QO_REG_DATABASE)) {
+           JsonObject retObj = (JsonObject) JsonParser.parseString(Objects.requireNonNull(Operation.get(name, QO_REG_DATABASE)));
+           retObj.addProperty("code", 0);
+           return retObj.toString();
+        }
         try (Connection connection = ConnectionPool.getConnection();
              PreparedStatement preparedStatement = connection.prepareStatement("SELECT uid,frozen,economy FROM users WHERE username = ?")) {
             preparedStatement.setString(1, name);
@@ -244,11 +253,11 @@ public class UserProcess {
                     int eco = resultSet.getInt("economy");
 
                     JSONObject responseJson = new JSONObject();
-                    responseJson.put("code", 0);
                     responseJson.put("frozen", frozen);
                     responseJson.put("qq", uid);
                     responseJson.put("economy", eco);
-                    Operation.insert(name, String.valueOf(uid));
+                    Operation.insert("user:" + name, responseJson.toString(), QO_REG_DATABASE);
+                    responseJson.put("code", 0);
                     return responseJson.toString();
                 }
             }
@@ -520,6 +529,12 @@ public class UserProcess {
     }
 
     public static ResponseEntity<String> userLogin(String username, String password, HttpServletRequest request) {
+        String hashedPassword = hashSHA256(password);
+        String userKey = "app:" + username;
+        if (Operation.exists(userKey, QOAPP_REG_DATABASE) && Objects.equals(Operation.get(userKey, QOAPP_REG_DATABASE), hashedPassword)) {
+            Logger.log(IPUtil.getIpAddr(request) + " " + username + " login successful.", INFO);
+            return ReturnInterface.success("成功");
+        }
         try (Connection connection = ConnectionPool.getConnection()) {
             String query = "SELECT * FROM forum WHERE username = ?";
             try (PreparedStatement preparedStatement = connection.prepareStatement(query)) {
@@ -527,20 +542,12 @@ public class UserProcess {
                 try (ResultSet resultSet = preparedStatement.executeQuery()) {
                     if (resultSet.next()) {
                         String storedHashedPassword = resultSet.getString("password");
-                        String encryptPswd = hashSHA256(password);
-                        if (Objects.equals(encryptPswd, storedHashedPassword)) {
+                        if (Objects.equals(hashedPassword, storedHashedPassword)) {
+                            Operation.insert(userKey, storedHashedPassword, QOAPP_REG_DATABASE);
                             Logger.log(IPUtil.getIpAddr(request) + " " + username + " login successful.", ERROR);
                             return ReturnInterface.success("成功");
                         } else {
-                            try (FileWriter writer = new FileWriter("login.log", true)) {
-                                Date now = new Date();
-                                SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
-                                String timestamp = sdf.format(now);
-                                String logMessage = "[" + timestamp + "] 用户 " + username + " 使用错误密码" + hashSHA256(password) + " 登录\n";
-                                writer.write(logMessage);
-                            } catch (IOException e) {
-                                e.printStackTrace();
-                            }
+                            Logger.log("username " + username + " login failed.", ERROR);
                         }
                     } else {
                         Logger.log("username " + username + " login failed.", ERROR);
@@ -552,7 +559,7 @@ public class UserProcess {
             e.printStackTrace();
             return ReturnInterface.failed("internal error");
         }
-        return ReturnInterface.failed("NULL");
+        return ReturnInterface.failed("internal error");
     }
 
     public static String operateEco(String username, int value, opEco operation) {

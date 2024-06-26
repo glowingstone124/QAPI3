@@ -16,7 +16,8 @@ public class Configuration {
     public static String PATH = "data/redis/config.json";
     public static boolean EnableRedis = true;
     public static JedisPool pool;
-
+    public static int QO_REG_DATABASE = 0;
+    public static int QOAPP_REG_DATABASE = 1;
     static {
         try {
             initPool();
