@@ -20,6 +20,7 @@ import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
 import java.sql.*;
 import java.text.SimpleDateFormat;
 import java.util.*;
@@ -531,18 +532,18 @@ public class UserProcess {
     public static ResponseEntity<String> userLogin(String username, String password, HttpServletRequest request) {
         String hashedPassword = hashSHA256(password);
         String userKey = "app:" + username;
-        if (Operation.exists(userKey, QOAPP_REG_DATABASE) && Objects.equals(Operation.get(userKey, QOAPP_REG_DATABASE), hashedPassword)) {
+        if (Operation.exists(userKey, QOAPP_REG_DATABASE) && MessageDigest.isEqual(Operation.get(userKey, QOAPP_REG_DATABASE).getBytes(), hashedPassword.getBytes())) {
             Logger.log(IPUtil.getIpAddr(request) + " " + username + " login successful.", INFO);
             return ReturnInterface.success("成功");
         }
         try (Connection connection = ConnectionPool.getConnection()) {
-            String query = "SELECT * FROM forum WHERE username = ?";
+            String query = "SELECT username,password FROM forum WHERE username = ?";
             try (PreparedStatement preparedStatement = connection.prepareStatement(query)) {
                 preparedStatement.setString(1, username);
                 try (ResultSet resultSet = preparedStatement.executeQuery()) {
                     if (resultSet.next()) {
                         String storedHashedPassword = resultSet.getString("password");
-                        if (Objects.equals(hashedPassword, storedHashedPassword)) {
+                        if (MessageDigest.isEqual(hashedPassword.getBytes(), storedHashedPassword.getBytes())) {
                             Operation.insert(userKey, storedHashedPassword, QOAPP_REG_DATABASE);
                             Logger.log(IPUtil.getIpAddr(request) + " " + username + " login successful.", ERROR);
                             return ReturnInterface.success("成功");
