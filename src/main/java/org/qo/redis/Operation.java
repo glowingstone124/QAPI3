@@ -49,4 +49,15 @@ public class Operation {
             return false;
         }
     }
+    public static void delete(String key, int database) {
+        if (!EnableRedis) {
+            return;
+        }
+        try (Jedis jedis = pool.getResource()) {
+            jedis.select(database);
+            jedis.del(key);
+        } catch (JedisConnectionException | JedisDataException e) {
+            Logger.log("ERROR: " + e.getMessage(), Logger.LogLevel.ERROR);
+        }
+    }
 }

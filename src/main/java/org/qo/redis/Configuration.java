@@ -8,6 +8,7 @@ import redis.clients.jedis.exceptions.JedisConnectionException;
 import redis.clients.jedis.exceptions.JedisDataException;
 
 import java.io.*;
+import java.util.Objects;
 
 public class Configuration {
     public static String HOST;
@@ -18,6 +19,7 @@ public class Configuration {
     public static JedisPool pool;
     public static int QO_REG_DATABASE = 0;
     public static int QOAPP_REG_DATABASE = 1;
+    public static int QO_ONLINE_DATABASE = 2;
     static {
         try {
             initPool();
@@ -30,7 +32,6 @@ public class Configuration {
     private static void initPool() throws IOException {
         Gson gson = new Gson();
         JsonObject cfgObj;
-
         File file = new File(PATH);
         if (!file.exists() || !file.isFile()) {
             Logger.log("ERROR: Redis Configuration doesn't exist. Disabling Redis...", Logger.LogLevel.ERROR);

@@ -7,6 +7,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import org.apache.catalina.User;
 import org.jetbrains.annotations.NotNull;
 import org.json.JSONObject;
+import org.qo.redis.Operation;
 import org.qo.server.Documents;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
@@ -23,6 +24,7 @@ import org.springframework.web.bind.annotation.*;
 import java.io.*;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.text.SimpleDateFormat;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -99,14 +101,16 @@ public class ApiApplication implements ErrorController {
         if (currentTime - PackTime > 3000){
             serverAlive = -1;
         }
+        SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+        String uselessthings = sdf.format(new Date(PackTime));
         switch (Heartbeat.getInt("stat")){
             case 0 -> serverAlive = 0;
             //Ready
             case 1 -> {
                 serverAlive = 1;
 
-                Logger.log("Server Stopped at"+ PackTime, Logger.LogLevel.INFO);
-                Msg.put("服务器停止于"+ PackTime);
+                Logger.log("Server Stopped at "+ PackTime, Logger.LogLevel.INFO);
+                Msg.put("服务器停止于"+ uselessthings);
             }
             default -> serverAlive = -1;
         }
@@ -163,6 +167,14 @@ public class ApiApplication implements ErrorController {
             status = data;
         }
         return null;
+    }
+    @PostMapping("/qo/online")
+    public void handleOnlineRequest(@RequestParam String name){
+        UserProcess.handlePlayerOnline(name);
+    }
+    @PostMapping("/qo/offline")
+    public void handleOffRequest(@RequestParam String name){
+        UserProcess.handlePlayerOffline(name);
     }
     @GetMapping("/qo/download/stats")
     public ResponseEntity<String> getServerStatus() throws IOException {

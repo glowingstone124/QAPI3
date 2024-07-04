@@ -30,8 +30,7 @@ import java.util.concurrent.ExecutionException;
 
 import static org.qo.Logger.LogLevel.*;
 import static org.qo.Algorithm.hashSHA256;
-import static org.qo.redis.Configuration.QOAPP_REG_DATABASE;
-import static org.qo.redis.Configuration.QO_REG_DATABASE;
+import static org.qo.redis.Configuration.*;
 
 @Service
 public class UserProcess {
@@ -701,6 +700,16 @@ public class UserProcess {
             result = 31 * result + provider.hashCode();
             result = 31 * result + key.hashCode();
             return result;
+        }
+    }
+    public static void handlePlayerOnline(String name){
+        if (!Operation.exists("online" + name, QO_ONLINE_DATABASE)){
+            Operation.insert("online" + name, "true", QO_ONLINE_DATABASE);
+        }
+    }
+    public static void handlePlayerOffline(String name){
+        if (Operation.exists("online" + name, QO_ONLINE_DATABASE)){
+           Operation.delete("online" + name, QO_ONLINE_DATABASE);
         }
     }
 }
