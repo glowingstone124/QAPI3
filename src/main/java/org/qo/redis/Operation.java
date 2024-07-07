@@ -5,9 +5,6 @@ import redis.clients.jedis.Jedis;
 import redis.clients.jedis.exceptions.JedisConnectionException;
 import redis.clients.jedis.exceptions.JedisDataException;
 
-import java.util.HashMap;
-import java.util.Map;
-
 import static org.qo.redis.Configuration.EnableRedis;
 import static org.qo.redis.Configuration.pool;
 
@@ -20,10 +17,12 @@ public class Operation {
         try (Jedis jedis = pool.getResource()) {
             jedis.select(database);
             jedis.set(key, value);
+            jedis.expire(key, 2 * 60 * 60L);
         } catch (JedisConnectionException | JedisDataException e) {
             Logger.log("ERROR: " + e.getMessage(), Logger.LogLevel.ERROR);
         }
     }
+
     public static String get(String key, int database) {
         if (!EnableRedis) {
             return null;
@@ -49,6 +48,7 @@ public class Operation {
             return false;
         }
     }
+
     public static void delete(String key, int database) {
         if (!EnableRedis) {
             return;
