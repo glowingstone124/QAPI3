@@ -2,6 +2,7 @@ package org.qo;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.google.gson.JsonObject;
+import jakarta.annotation.PostConstruct;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.apache.catalina.User;
@@ -44,7 +45,13 @@ public class ApiApplication implements ErrorController {
     public static long PackTime;
     private Funcs fc = new Funcs();
     public static int requests = 0;
-    public ApiApplication(){
+    public SseService sseService;
+    @Autowired
+    public ApiApplication(SseService sseService) {
+        this.sseService = sseService;
+    }
+    @PostConstruct
+    public void init(){
         ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
         scheduler.scheduleAtFixedRate(this::reqCount, 0, 1, TimeUnit.SECONDS);
     }
