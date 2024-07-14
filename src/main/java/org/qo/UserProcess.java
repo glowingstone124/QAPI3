@@ -338,6 +338,15 @@ public class UserProcess {
                         preparedStatement.setBoolean(3, false);
                         preparedStatement.setInt(4, 3);
                         preparedStatement.setInt(5, 0);
+                        PoolUtils pu = new PoolUtils();
+                        pu.submit(() -> {
+                            JsonObject playerJson = new JsonObject();
+                            playerJson.addProperty("qq", uid);
+                            playerJson.addProperty("code", 0);
+                            playerJson.addProperty("frozen", false);
+                            playerJson.addProperty("economy", 0);
+                            Operation.insert("user:" + name, playerJson.toString(), QO_REG_DATABASE);
+                        });
                         int rowsAffected = preparedStatement.executeUpdate();
                         Logger.log(rowsAffected + " row(s) inserted." + "from " + IPUtil.getIpAddr(request), INFO);
                         Logger.log(name + " Registered.", INFO);

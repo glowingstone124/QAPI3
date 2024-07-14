@@ -71,6 +71,10 @@
                         </goals>
                     </execution>
                 </executions>
+                <configuration>
+                    <source>19</source>
+                    <target>19</target>
+                </configuration>
             </plugin>
         </plugins>
     </build>
@@ -146,6 +150,12 @@
             <version>23.0.0</version>
             <scope>compile</scope>
         </dependency>
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <version>42.7.2</version>
+        </dependency>
+
         <dependency>
             <groupId>com.alibaba</groupId>
             <artifactId>druid</artifactId>
