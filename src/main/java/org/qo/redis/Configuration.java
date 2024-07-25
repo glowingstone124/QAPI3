@@ -3,13 +3,14 @@ package org.qo.redis;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import org.qo.Logger;
+import org.springframework.stereotype.Service;
 import redis.clients.jedis.*;
 import redis.clients.jedis.exceptions.JedisConnectionException;
 import redis.clients.jedis.exceptions.JedisDataException;
 
 import java.io.*;
 import java.util.Objects;
-
+@Service
 public class Configuration {
     public static String HOST;
     public static int PORT;
@@ -20,14 +21,7 @@ public class Configuration {
     public static int QO_REG_DATABASE = 0;
     public static int QOAPP_REG_DATABASE = 1;
     public static int QO_ONLINE_DATABASE = 2;
-    static {
-        try {
-            initPool();
-        } catch (IOException e) {
-            Logger.log("ERROR: Failed to initialize Redis pool. Disabling Redis...", Logger.LogLevel.ERROR);
-            EnableRedis = false;
-        }
-    }
+    public static long EXPIRE_TIME = 2 * 60 * 60L; // 2 Hour
 
     private static void initPool() throws IOException {
         Gson gson = new Gson();
@@ -38,7 +32,6 @@ public class Configuration {
             EnableRedis = false;
             return;
         }
-
         try (BufferedReader br = new BufferedReader(new FileReader(PATH))) {
             StringBuilder sb = new StringBuilder();
             br.lines().forEach(sb::append);
@@ -79,7 +72,7 @@ public class Configuration {
     }
 
 
-    public static void close() {
+    public void close() {
         if (pool != null) {
             pool.close();
         }

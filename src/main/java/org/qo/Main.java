@@ -1,5 +1,6 @@
 package org.qo;
 
+import org.qo.mcsmanager.InstanceUtil;
 import org.qo.redis.Configuration;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
@@ -13,6 +14,9 @@ import org.springframework.web.servlet.config.annotation.*;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 
+
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 
 import static org.qo.Logger.LogLevel.*;
 @EnableScheduling
@@ -38,6 +42,8 @@ public class Main {
         Logger.log("API Started.", INFO);
         SpringApplication.run(ApiApplication.class, args);
         Logger.startLogWriter("log.log", 3000);
+        InstanceUtil iu = new InstanceUtil();
+        iu.run();
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             Logger.log("API shutdown.", INFO);
         }));

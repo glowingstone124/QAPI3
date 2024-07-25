@@ -43,12 +43,13 @@ public class ApiApplication implements ErrorController {
     public static String serverStatus;
     public static int serverAlive;
     public static long PackTime;
-    private Funcs fc = new Funcs();
     public static int requests = 0;
+    private Funcs fc;
     public SseService sseService;
     @Autowired
-    public ApiApplication(SseService sseService) {
+    public ApiApplication(SseService sseService, Funcs fc) {
         this.sseService = sseService;
+        this.fc = fc;
     }
     @PostConstruct
     public void init(){
@@ -96,7 +97,7 @@ public class ApiApplication implements ErrorController {
     }
     @JsonProperty("myinfo")
     @RequestMapping("/forum/fetch/myself")
-    public String myinfo(@NotNull String name, HttpServletRequest request) {
+    public String myinfo(@RequestParam String name, HttpServletRequest request) {
         return UserProcess.fetchMyinfo(name,request);
     }
 

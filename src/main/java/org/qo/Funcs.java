@@ -3,12 +3,14 @@ package org.qo;
 
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
+import org.springframework.context.annotation.Bean;
+import org.springframework.stereotype.Service;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.SecureRandom;
-
+@Service
 public class Funcs {
     private static final String CHARACTERS = "abcdefghijklmnopqrstuvwxyz0123456789";
     public static void ShowDic(){

@@ -75,9 +75,6 @@ public class UserProcess {
         String date;
         Boolean premium;
         Boolean donate;
-        if (name.isEmpty()) {
-
-        }
         try (Connection connection = ConnectionPool.getConnection();
              PreparedStatement preparedStatement = connection.prepareStatement("SELECT * FROM forum WHERE username = ?")) {
             preparedStatement.setString(1, name);
@@ -269,6 +266,7 @@ public class UserProcess {
         responseJson.put("qq", -1);
         return responseJson.toString();
     }
+    
     public static String queryReg(long qq) {
         try (Connection connection = ConnectionPool.getConnection();
              PreparedStatement preparedStatement = connection.prepareStatement("SELECT username,frozen,economy FROM users WHERE uid = ?")) {
