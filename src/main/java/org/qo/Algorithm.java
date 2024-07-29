@@ -9,6 +9,7 @@ public class Algorithm {
     public static String token(String player_name, long qq) {
         String charset = "qazxswedcvfrtgbnhyujmkiolp0129384756_POILKJMNBUYTHGFVCXREWQDSAZ";
         ArrayList<Integer> remix = new ArrayList<>();
+
         if(qq<=0) throw new IllegalArgumentException("Invalid QQ ID");
         long qq_copy = qq;
         for (qq = qq + 707; qq!=0; qq/=64) {
