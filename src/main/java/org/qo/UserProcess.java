@@ -146,25 +146,18 @@ public class UserProcess {
     }
     public static void handleTime(String name, int time) {
         try (Connection connection = ConnectionPool.getConnection()) {
-            String checkQuery = "SELECT * FROM timeTables WHERE name=?";
+            String checkQuery = "SELECT playtime FROM users WHERE username=?";
             try (PreparedStatement checkStatement = connection.prepareStatement(checkQuery)) {
                 checkStatement.setString(1, name);
                 try (ResultSet resultSet = checkStatement.executeQuery()) {
                     if (resultSet.next()) {
-                        int existingTime = resultSet.getInt("time");
+                        int existingTime = resultSet.getInt("playtime");
                         int updatedTime = existingTime + time;
-                        String updateQuery = "UPDATE timeTables SET time=? WHERE name=?";
+                        String updateQuery = "UPDATE users SET playtime=? WHERE username=?";
                         try (PreparedStatement updateStatement = connection.prepareStatement(updateQuery)) {
                             updateStatement.setInt(1, updatedTime);
                             updateStatement.setString(2, name);
                             updateStatement.executeUpdate();
-                        }
-                    } else {
-                        String insertQuery = "INSERT INTO timeTables (name, time) VALUES (?, ?)";
-                        try (PreparedStatement insertStatement = connection.prepareStatement(insertQuery)) {
-                            insertStatement.setString(1, name);
-                            insertStatement.setInt(2, time);
-                            insertStatement.executeUpdate();
                         }
                     }
                 }
@@ -178,12 +171,12 @@ public class UserProcess {
         JSONObject result = null;
         try (Connection connection = ConnectionPool.getConnection()) {
             result = new JSONObject();
-            String query = "SELECT * FROM timeTables WHERE name = ?";
+            String query = "SELECT playtime FROM users WHERE username = ?";
             try (PreparedStatement preparedStatement = connection.prepareStatement(query)) {
                 preparedStatement.setString(1, username);
                 try (ResultSet resultSet = preparedStatement.executeQuery()) {
                     if (resultSet.next()) {
-                        int time = resultSet.getInt("time");
+                        int time = resultSet.getInt("playtime");
                         result.put("name", username);
                         result.put("time", time);
                     } else {
@@ -269,19 +262,20 @@ public class UserProcess {
     
     public static String queryReg(long qq) {
         try (Connection connection = ConnectionPool.getConnection();
-             PreparedStatement preparedStatement = connection.prepareStatement("SELECT username,frozen,economy FROM users WHERE uid = ?")) {
+             PreparedStatement preparedStatement = connection.prepareStatement("SELECT username,frozen,economy,playtime FROM users WHERE uid = ?")) {
             preparedStatement.setLong(1, qq);
             try (ResultSet resultSet = preparedStatement.executeQuery()) {
                 if (resultSet.next()) {
                    String username  = resultSet.getString("username");
                     Boolean frozen = resultSet.getBoolean("frozen");
                     int eco = resultSet.getInt("economy");
-
+                    long playtime = resultSet.getLong("playtime");
                     JSONObject responseJson = new JSONObject();
                     responseJson.put("code", 0);
                     responseJson.put("frozen", frozen);
                     responseJson.put("username", username);
                     responseJson.put("economy", eco);
+                    responseJson.put("playtime", playtime);
                     return responseJson.toString();
                 }
             }
@@ -328,7 +322,7 @@ public class UserProcess {
         CompletableFuture<ResponseEntity<String>> future = CompletableFuture.supplyAsync(() -> {
             if (!UserProcess.dumplicateUID(uid) && name != null && uid != null) {
                 try (Connection connection = ConnectionPool.getConnection()) {
-                    String insertQuery = "INSERT INTO users (username, uid,frozen, remain, economy) VALUES (?, ?, ?, ?, ?)";
+                    String insertQuery = "INSERT INTO users (username, uid,frozen, remain, economy, playtime) VALUES (?, ?, ?, ?, ?, ?)";
                     Link(name, appname);
                     try (PreparedStatement preparedStatement = connection.prepareStatement(insertQuery)) {
                         preparedStatement.setString(1, name);
@@ -336,13 +330,15 @@ public class UserProcess {
                         preparedStatement.setBoolean(3, false);
                         preparedStatement.setInt(4, 3);
                         preparedStatement.setInt(5, 0);
+                        preparedStatement.setInt(6, 0);
                         PoolUtils pu = new PoolUtils();
                         pu.submit(() -> {
                             JsonObject playerJson = new JsonObject();
                             playerJson.addProperty("qq", uid);
                             playerJson.addProperty("code", 0);
                             playerJson.addProperty("frozen", false);
-                            playerJson.addProperty("economy", 0);
+                            playerJson.addProperty("pro", 0);
+                            playerJson.addProperty("playtime",  0);
                             Operation.insert("user:" + name, playerJson.toString(), QO_REG_DATABASE);
                         });
                         int rowsAffected = preparedStatement.executeUpdate();
