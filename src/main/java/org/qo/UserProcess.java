@@ -5,7 +5,8 @@ import com.google.gson.JsonParser;
 import jakarta.servlet.http.HttpServletRequest;
 import org.apache.tomcat.util.threads.VirtualThreadExecutor;
 import org.json.JSONArray;
-import org.json.JSONException;
+import org.qo.orm.UserORM;
+import org.qo.datas.Mapping.*;
 import org.json.JSONObject;
 import org.qo.mail.Mail;
 import org.qo.mail.MailPreset;
@@ -261,28 +262,21 @@ public class UserProcess {
     }
     
     public static String queryReg(long qq) {
-        try (Connection connection = ConnectionPool.getConnection();
-             PreparedStatement preparedStatement = connection.prepareStatement("SELECT username,frozen,economy,playtime FROM users WHERE uid = ?")) {
-            preparedStatement.setLong(1, qq);
-            try (ResultSet resultSet = preparedStatement.executeQuery()) {
-                if (resultSet.next()) {
-                   String username  = resultSet.getString("username");
-                    Boolean frozen = resultSet.getBoolean("frozen");
-                    int eco = resultSet.getInt("economy");
-                    long playtime = resultSet.getLong("playtime");
-                    JSONObject responseJson = new JSONObject();
-                    responseJson.put("code", 0);
-                    responseJson.put("frozen", frozen);
-                    responseJson.put("username", username);
-                    responseJson.put("economy", eco);
-                    responseJson.put("playtime", playtime);
-                    return responseJson.toString();
-                }
-            }
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
+        UserORM userORM = new UserORM();
+        Users user = userORM.read(qq);
         JSONObject responseJson = new JSONObject();
+        if (user != null) {
+            String username  = user.getUsername();
+            Boolean frozen = user.getFrozen();
+            int eco = user.getEconomy();
+            long playtime = user.getPlaytime();
+            responseJson.put("code", 0);
+            responseJson.put("frozen", frozen);
+            responseJson.put("username", username);
+            responseJson.put("economy", eco);
+            responseJson.put("playtime", playtime);
+            return responseJson.toString();
+        }
         responseJson.put("code", 1);
         responseJson.put("username", -1);
         return responseJson.toString();
