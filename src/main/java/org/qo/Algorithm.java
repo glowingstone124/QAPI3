@@ -1,13 +1,16 @@
 package org.qo;
 
+import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
+import java.util.Random;
 
 public class Algorithm {
+    static String charset = "qazxswedcvfrtgbnhyujmkiolp0129384756_POILKJMNBUYTHGFVCXREWQDSAZ";
+    public static final Random RANDOM = new Random();
     public static String token(String player_name, long qq) {
-        String charset = "qazxswedcvfrtgbnhyujmkiolp0129384756_POILKJMNBUYTHGFVCXREWQDSAZ";
         ArrayList<Integer> remix = new ArrayList<>();
 
         if(qq<=0) throw new IllegalArgumentException("Invalid QQ ID");
@@ -57,5 +60,20 @@ public class Algorithm {
             e.printStackTrace();
             return null;
         }
+    }
+    public static String hash(String message, MessageDigest algorithm) {
+        algorithm.reset();
+        algorithm.update(message.getBytes());
+        byte[] digest = algorithm.digest();
+        return String.format("%0" + (digest.length << 1) + "x", new BigInteger(1, digest));
+    }
+
+    public static String generateRandomString(int length) {
+        StringBuilder sb = new StringBuilder(length);
+        for (int i = 0; i < length; i++) {
+            int index = RANDOM.nextInt(charset.length());
+            sb.append(charset.charAt(index));
+        }
+        return sb.toString();
     }
 }

@@ -18,10 +18,12 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 
 import java.io.*;
+import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.sql.*;
 import java.text.SimpleDateFormat;
 import java.util.*;
@@ -37,11 +39,9 @@ import static org.qo.redis.Configuration.*;
 public class UserProcess {
     public static final String SQL_CONFIGURATION = "data/sql/info.json";
     public static final String CODE_CONFIGURATION = "data/code.json";
-    public static String jdbcUrl = getDatabaseInfo("url");
     public static ArrayList<Key> inventoryViewList = new ArrayList<>();
     public static String CODE = "null";
-    public static String sqlusername = getDatabaseInfo("username");
-    public static String sqlpassword = getDatabaseInfo("password");
+    public static UserORM userORM = new UserORM();
     public static VirtualThreadExecutor virtualThreadExecutor = new VirtualThreadExecutor("SQLExec");
     public static String firstLoginSearch(String name, HttpServletRequest request) {
         try (Connection connection = ConnectionPool.getConnection();
@@ -312,41 +312,39 @@ public class UserProcess {
             }
         });
     }
-    public static ResponseEntity<String> regMinecraftUser(String name, Long uid, HttpServletRequest request, String appname) throws ExecutionException, InterruptedException {
+    public static ResponseEntity<String> regMinecraftUser(String name, Long uid, HttpServletRequest request, String appname, String password) throws ExecutionException, InterruptedException {
         CompletableFuture<ResponseEntity<String>> future = CompletableFuture.supplyAsync(() -> {
-            if (!UserProcess.dumplicateUID(uid) && name != null && uid != null) {
-                try (Connection connection = ConnectionPool.getConnection()) {
-                    String insertQuery = "INSERT INTO users (username, uid,frozen, remain, economy, playtime) VALUES (?, ?, ?, ?, ?, ?)";
-                    Link(name, appname);
-                    try (PreparedStatement preparedStatement = connection.prepareStatement(insertQuery)) {
-                        preparedStatement.setString(1, name);
-                        preparedStatement.setLong(2, uid);
-                        preparedStatement.setBoolean(3, false);
-                        preparedStatement.setInt(4, 3);
-                        preparedStatement.setInt(5, 0);
-                        preparedStatement.setInt(6, 0);
-                        PoolUtils pu = new PoolUtils();
-                        pu.submit(() -> {
-                            JsonObject playerJson = new JsonObject();
-                            playerJson.addProperty("qq", uid);
-                            playerJson.addProperty("code", 0);
-                            playerJson.addProperty("frozen", false);
-                            playerJson.addProperty("pro", 0);
-                            playerJson.addProperty("playtime",  0);
-                            Operation.insert("user:" + name, playerJson.toString(), QO_REG_DATABASE);
-                        });
-                        int rowsAffected = preparedStatement.executeUpdate();
-                        Logger.log(rowsAffected + " row(s) inserted." + "from " + IPUtil.getIpAddr(request), INFO);
-                        Logger.log(name + " Registered.", INFO);
-                        Mail mail = new Mail();
-                        mail.send(uid + "@qq.com", "感谢您注册QO2账号", MailPreset.register);
-                        UserProcess.insertIp(IPUtil.getIpAddr(request));
-                        return ReturnInterface.success("Success!");
-                    }
-                } catch (Exception e) {
-                    e.printStackTrace();
-                    return ReturnInterface.failed("FAILED");
+            if (Objects.equals(userORM.read(uid), null)&& name != null && uid != null) {
+                try {
+                    userORM.create(new Users(
+                            name,
+                            uid,
+                            false,
+                            3,
+                            0,
+                            false,
+                            0,
+                            computePassword(password)
+                    ));
+                } catch (NoSuchAlgorithmException e) {
+                    throw new RuntimeException(e);
                 }
+                Link(name, appname);
+                PoolUtils pu = new PoolUtils();
+                pu.submit(() -> {
+                    JsonObject playerJson = new JsonObject();
+                    playerJson.addProperty("qq", uid);
+                    playerJson.addProperty("code", 0);
+                    playerJson.addProperty("frozen", false);
+                    playerJson.addProperty("pro", 0);
+                    playerJson.addProperty("playtime",  0);
+                    Operation.insert("user:" + name, playerJson.toString(), QO_REG_DATABASE);
+                });
+                Logger.log(name + " registered from " + IPUtil.getIpAddr(request), INFO);
+                Mail mail = new Mail();
+                mail.send(uid + "@qq.com", "感谢您注册QO2账号", MailPreset.register);
+                UserProcess.insertIp(IPUtil.getIpAddr(request));
+                return ReturnInterface.success("Success!");
             } else {
                 return ReturnInterface.failed("FAILED");
             }
@@ -708,5 +706,20 @@ public class UserProcess {
         if (Operation.exists("online" + name, QO_ONLINE_DATABASE)){
            Operation.delete("online" + name, QO_ONLINE_DATABASE);
         }
+    }
+    public static boolean verifyPasswd(String username, String password) throws NoSuchAlgorithmException {
+        Users user = userORM.read(username);
+        if (user == null) {
+            return false;
+        }
+        String user_salt = user.getPassword().split("\\$")[2];
+        if (Algorithm.hash(Algorithm.hash(password, MessageDigest.getInstance("SHA-256")) + user_salt ,  MessageDigest.getInstance("SHA-256")).equals(user.getPassword().split("\\$")[3])){
+            return true;
+        };
+        return false;
+    }
+    public static String computePassword(String password) throws NoSuchAlgorithmException {
+        String salt = Algorithm.generateRandomString(16);
+        return Algorithm.hash(Algorithm.hash(password, MessageDigest.getInstance("SHA-256")) + salt, MessageDigest.getInstance("SHA-256"));
     }
 }
