@@ -35,8 +35,7 @@ public class Main {
             //Logger.log("Mail function doesn't work properly. With following exception:", ERROR);
            // Logger.log("", ERROR);
         //}
-        System.out.println(UserProcess.verifyPasswd("glowingstone124", "wanglinger0428"));
-        /*
+
         org.qo.redis.Configuration.init();
         Funcs.Start();
         Funcs.ShowDic();
@@ -48,7 +47,7 @@ public class Main {
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             Logger.log("API shutdown.", INFO);
         }));
-         */
+
     }
     @Bean
     public WebMvcConfigurer corsConfigurer() {
