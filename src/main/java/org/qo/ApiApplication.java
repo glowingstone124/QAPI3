@@ -25,6 +25,7 @@ import org.springframework.web.bind.annotation.*;
 import java.io.*;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.NoSuchAlgorithmException;
 import java.text.SimpleDateFormat;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
@@ -264,15 +265,6 @@ public class ApiApplication implements ErrorController {
             return ReturnInterface.failed("NOT FOUND");
         }
     }
-    @GetMapping("/qo/document/{route}")
-    public String document(@PathVariable String route) throws Exception{
-        Documents dc = new Documents();
-        if (route.equals("index")){
-             return dc.lists();
-        } else {
-            return dc.transform(route);
-        }
-    }
     @RequestMapping("/qo/download/registry")
     public static String GetData(String name){
         return UserProcess.queryReg(name);
@@ -340,5 +332,13 @@ public class ApiApplication implements ErrorController {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
         return new ResponseEntity<>(UserProcess.queryReg(qq), headers, HttpStatus.OK);
+    }
+    @GetMapping("/qo/game/login")
+    public ResponseEntity<String> login(@RequestParam String username, @RequestParam String password) throws NoSuchAlgorithmException {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        JsonObject retObj = new JsonObject();
+        retObj.addProperty("result", verifyPasswd(username, password));
+        return new ResponseEntity<>(retObj.toString(), headers, HttpStatus.OK);
     }
 }
