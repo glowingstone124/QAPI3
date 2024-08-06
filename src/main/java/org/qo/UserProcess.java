@@ -324,7 +324,7 @@ public class UserProcess {
                             0,
                             false,
                             0,
-                            computePassword(password)
+                            computePassword(password, true)
                     ));
                 } catch (NoSuchAlgorithmException e) {
                     throw new RuntimeException(e);
@@ -717,8 +717,11 @@ public class UserProcess {
         };
         return false;
     }
-    public static String computePassword(String password) throws NoSuchAlgorithmException {
+    public static String computePassword(String password, boolean formatted) throws NoSuchAlgorithmException {
         String salt = Algorithm.generateRandomString(16);
+        if (formatted) {
+            return "$SHA$" + salt + "$" +Algorithm.hash(Algorithm.hash(password, MessageDigest.getInstance("SHA-256")) + salt, MessageDigest.getInstance("SHA-256"));
+        }
         return Algorithm.hash(Algorithm.hash(password, MessageDigest.getInstance("SHA-256")) + salt, MessageDigest.getInstance("SHA-256"));
     }
 }
