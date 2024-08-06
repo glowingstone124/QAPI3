@@ -237,8 +237,8 @@ public class ApiApplication implements ErrorController {
     }
 
     @RequestMapping("/qo/upload/registry")
-    public static ResponseEntity<String> InsertData(@RequestParam(name = "name", required = true)String name,@RequestParam(name = "uid", required = true) Long uid,@RequestParam(name = "appname", required = true) String appname, @RequestParam(name = "password", required = true) String password, HttpServletRequest request) throws Exception {
-        return UserProcess.regMinecraftUser(name, uid, request, appname, password);
+    public static ResponseEntity<String> InsertData(@RequestParam(name = "name", required = true)String name,@RequestParam(name = "uid", required = true) Long uid, @RequestParam(name = "password", required = true) String password, HttpServletRequest request) throws Exception {
+        return UserProcess.regMinecraftUser(name, uid, request, password);
     }
     @RequestMapping("/qo/download/memorial")
     public static String downloadMemorial() throws IOException {

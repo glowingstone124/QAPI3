@@ -312,7 +312,7 @@ public class UserProcess {
             }
         });
     }
-    public static ResponseEntity<String> regMinecraftUser(String name, Long uid, HttpServletRequest request, String appname, String password) throws ExecutionException, InterruptedException {
+    public static ResponseEntity<String> regMinecraftUser(String name, Long uid, HttpServletRequest request, String password) throws ExecutionException, InterruptedException {
         CompletableFuture<ResponseEntity<String>> future = CompletableFuture.supplyAsync(() -> {
             if (Objects.equals(userORM.read(uid), null)&& name != null && uid != null) {
                 try {
@@ -329,7 +329,6 @@ public class UserProcess {
                 } catch (NoSuchAlgorithmException e) {
                     throw new RuntimeException(e);
                 }
-                Link(name, appname);
                 PoolUtils pu = new PoolUtils();
                 pu.submit(() -> {
                     JsonObject playerJson = new JsonObject();
