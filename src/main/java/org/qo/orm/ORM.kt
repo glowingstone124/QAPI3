@@ -58,21 +58,59 @@ class UserORM : CrudDao<Users> {
     }
 
     override fun update(user: Users): Boolean {
-        val sql = "UPDATE users SET username = ?, frozen = ?, remain = ?, economy = ?, signed = ?, playtime = ?, password = ? WHERE uid = ?"
+        val fields = mutableListOf<String>()
+        val values = mutableListOf<Any?>()
+
+        user.username?.let {
+            fields.add("username = ?")
+            values.add(it)
+        }
+        user.frozen?.let {
+            fields.add("frozen = ?")
+            values.add(it)
+        }
+        user.remain?.let {
+            fields.add("remain = ?")
+            values.add(it)
+        }
+        user.economy?.let {
+            fields.add("economy = ?")
+            values.add(it)
+        }
+        user.signed?.let {
+            fields.add("signed = ?")
+            values.add(it)
+        }
+        user.playtime?.let {
+            fields.add("playtime = ?")
+            values.add(it)
+        }
+        user.password?.let {
+            fields.add("password = ?")
+            values.add(it)
+        }
+
+        if (fields.isEmpty()) return false
+
+        val sql = "UPDATE users SET ${fields.joinToString(", ")} WHERE uid = ?"
+        values.add(user.uid)
+
         return ConnectionPool.getConnection().use { connection ->
             connection.prepareStatement(sql).use { statement ->
-                statement.setString(1, user.username)
-                statement.setBoolean(2, user.frozen ?: false)
-                statement.setInt(3, user.remain ?: 3)
-                statement.setInt(4, user.economy ?: 0)
-                statement.setBoolean(5, user.signed ?: false)
-                statement.setInt(6, user.playtime ?: 0)
-                statement.setString(7, user.password)
-                statement.setLong(8, user.uid)
+                values.forEachIndexed { index, value ->
+                    when (value) {
+                        is String -> statement.setString(index + 1, value)
+                        is Boolean -> statement.setBoolean(index + 1, value)
+                        is Int -> statement.setInt(index + 1, value)
+                        is Long -> statement.setLong(index + 1, value)
+                        else -> throw IllegalArgumentException("Unsupported data type")
+                    }
+                }
                 statement.executeUpdate() > 0
             }
         }
     }
+
 
     override fun delete(input: Any): Boolean {
         val (sql, paramSetter) = when (input) {

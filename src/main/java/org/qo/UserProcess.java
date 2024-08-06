@@ -29,6 +29,8 @@ import java.text.SimpleDateFormat;
 import java.util.*;
 import java.util.Date;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.ExecutionException;
 
 import static org.qo.Logger.LogLevel.*;
@@ -39,9 +41,11 @@ import static org.qo.redis.Configuration.*;
 public class UserProcess {
     public static final String SQL_CONFIGURATION = "data/sql/info.json";
     public static final String CODE_CONFIGURATION = "data/code.json";
+    public static ConcurrentLinkedDeque<registry_verify_class> verify_list = new ConcurrentLinkedDeque<>();
     public static ArrayList<Key> inventoryViewList = new ArrayList<>();
     public static String CODE = "null";
     public static UserORM userORM = new UserORM();
+    static PoolUtils pu = new PoolUtils();
     public static VirtualThreadExecutor virtualThreadExecutor = new VirtualThreadExecutor("SQLExec");
     public static String firstLoginSearch(String name, HttpServletRequest request) {
         try (Connection connection = ConnectionPool.getConnection();
@@ -319,17 +323,19 @@ public class UserProcess {
                     userORM.create(new Users(
                             name,
                             uid,
-                            false,
+                            true,
                             3,
                             0,
                             false,
                             0,
                             computePassword(password, true)
                     ));
+                    String token = Algorithm.generateRandomString(16);
+                    Msg.put("用户 " + uid + "注册了一个账号：" + name + "，若非本人操作请忽略，确认账号请在消息发出后2小时内输入/approve-register " + token);
+                    verify_list.add(new registry_verify_class(name,token,uid,System.currentTimeMillis()));
                 } catch (NoSuchAlgorithmException e) {
                     throw new RuntimeException(e);
                 }
-                PoolUtils pu = new PoolUtils();
                 pu.submit(() -> {
                     JsonObject playerJson = new JsonObject();
                     playerJson.addProperty("qq", uid);
@@ -350,6 +356,30 @@ public class UserProcess {
         });
         return future.get();
     }
+    public static boolean validateMinecraftUser(String token, HttpServletRequest request, Long uid) {
+        Iterator<registry_verify_class> iterator = verify_list.iterator();
+        while (iterator.hasNext()) {
+            registry_verify_class item = iterator.next();
+            if (Objects.equals(item.token, token) && Objects.equals(item.uid, uid) && System.currentTimeMillis() - item.expiration < 7200000) {
+                pu.submit(() -> {
+                    String sql = "UPDATE users SET frozen = false WHERE uid = ?";
+                    try (Connection connection = ConnectionPool.getConnection();
+                         PreparedStatement statement = connection.prepareStatement(sql)) {
+                        statement.setLong(1, uid);
+                        statement.executeUpdate();
+                    } catch (SQLException e) {
+                        e.printStackTrace();
+                    }
+                });
+                return true;
+            } else if (System.currentTimeMillis() - item.expiration > 7200000) {
+                iterator.remove();
+                return false;
+            }
+        }
+        return false;
+    }
+
 
     public static void deleteMinecraftUser(String name) {
         virtualThreadExecutor.execute(new Runnable() {
@@ -723,5 +753,18 @@ public class UserProcess {
             return "$SHA$" + salt + "$" +Algorithm.hash(Algorithm.hash(password, MessageDigest.getInstance("SHA-256")) + salt, MessageDigest.getInstance("SHA-256"));
         }
         return Algorithm.hash(Algorithm.hash(password, MessageDigest.getInstance("SHA-256")) + salt, MessageDigest.getInstance("SHA-256"));
+    }
+    public static class registry_verify_class {
+        String username;
+        String token;
+        Long uid;
+        Long expiration;
+
+        public registry_verify_class(String username, String token, Long uid, Long expiration) {
+            this.username = username;
+            this.token = token;
+            this.uid = uid;
+            this.expiration = expiration;
+        }
     }
 }

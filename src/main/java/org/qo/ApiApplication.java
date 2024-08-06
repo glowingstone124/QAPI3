@@ -240,6 +240,14 @@ public class ApiApplication implements ErrorController {
     public static ResponseEntity<String> InsertData(@RequestParam(name = "name", required = true)String name,@RequestParam(name = "uid", required = true) Long uid, @RequestParam(name = "password", required = true) String password, HttpServletRequest request) throws Exception {
         return UserProcess.regMinecraftUser(name, uid, request, password);
     }
+    @RequestMapping("/qo/upload/confirmation")
+    public static ResponseEntity<String> verifyReg(@RequestParam String token, HttpServletRequest request,@RequestParam Long uid) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        JsonObject statObj = new JsonObject();
+        statObj.addProperty("result", UserProcess.validateMinecraftUser(token,request,uid));
+        return new ResponseEntity<>(statObj.toString(), headers, HttpStatus.OK);
+    }
     @RequestMapping("/qo/download/memorial")
     public static String downloadMemorial() throws IOException {
         return UserProcess.downloadMemorial();
