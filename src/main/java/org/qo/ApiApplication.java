@@ -5,8 +5,10 @@ import com.google.gson.JsonObject;
 import jakarta.annotation.PostConstruct;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import kotlin.reflect.*;
 import org.apache.catalina.User;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 import org.json.JSONObject;
 import org.qo.redis.Operation;
 import org.qo.server.Documents;
@@ -23,6 +25,7 @@ import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.annotation.*;
 
 import java.io.*;
+import java.lang.annotation.Annotation;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.NoSuchAlgorithmException;
@@ -53,7 +56,7 @@ public class ApiApplication implements ErrorController {
         this.fc = fc;
     }
     @PostConstruct
-    public void init(){
+    public void init() {
         ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
         scheduler.scheduleAtFixedRate(this::reqCount, 0, 1, TimeUnit.SECONDS);
     }
@@ -92,16 +95,6 @@ public class ApiApplication implements ErrorController {
         System.out.println(data);
         return null;
     }
-    @GetMapping("/forum/login")
-    public ResponseEntity<String> userLogin(@RequestParam(name="username", required = true)String username, @RequestParam(name = "password", required = true)String password , HttpServletRequest request) {
-        return UserProcess.userLogin(username,password,request);
-    }
-    @JsonProperty("myinfo")
-    @RequestMapping("/forum/fetch/myself")
-    public String myinfo(@RequestParam String name, HttpServletRequest request) {
-        return UserProcess.fetchMyinfo(name,request);
-    }
-
     @PostMapping("/qo/alive/upload")
     public void getAlive(@RequestBody String data){
         JSONObject Heartbeat = new JSONObject(data);
@@ -143,21 +136,6 @@ public class ApiApplication implements ErrorController {
     public String getTime(@RequestParam(name = "username", required = true)String username) {
         return UserProcess.getTime(username).toString();
     }
-    @RequestMapping("/qo/query/resetpassword")
-    public ResponseEntity<String> resetPassword(String username, String hash, int deviceid, String newPassword, HttpServletRequest request) throws Exception {
-        if (deviceid == 77560 && Objects.equals(UserProcess.queryHash(hash), username) && !Objects.equals(UserProcess.queryHash(hash), null)) {
-            if (UserProcess.changeHash(username, hashSHA256(newPassword))) {
-                Logger.log("[PASSWORD] ip " + IPUtil.getIpAddr(request) + " queried resetPassword and changed username " + username + "'s password.",Logger.LogLevel.INFO);
-                return ReturnInterface.success("SUCCESS");
-            }
-        } else if(deviceid != 77560) {
-            return ReturnInterface.failed("Deviceid Mismatched");
-        } else if(!Objects.equals(UserProcess.queryHash(hash), username)){
-            return ReturnInterface.failed("Network Err");
-        }
-        Logger.log("ip " + IPUtil.getIpAddr(request) + " queried resetPassword and wanted to change username " + username + "'s password. but unsuccessful", Logger.LogLevel.INFO);
-        return  ReturnInterface.failed("FAILED");
-    }
     @RequestMapping("/app/latest")
     public String update(){
         JSONObject returnObj = new JSONObject();
@@ -198,22 +176,6 @@ public class ApiApplication implements ErrorController {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.IMAGE_PNG);
         return new ResponseEntity<>(imageResource, headers, HttpStatus.OK);
-    }
-    @RequestMapping("/forum/register")
-    public ResponseEntity<String> register(@RequestParam(name = "username", required = true) String username, @RequestParam(name = "password", required = true) String password, @RequestParam(name = "token", required = true) String token, HttpServletRequest request) throws Exception{
-        if(Objects.equals(token, token(username,1700435)) && !UserProcess.queryForum(username)){
-            try {
-                UserProcess.regforum(username, password);
-            } catch (NullPointerException e){
-                e.printStackTrace();
-            } catch (Exception ex){
-                ex.printStackTrace();
-            }
-            Logger.log(IPUtil.getIpAddr(request) + "[register]" + username + " registered.", Logger.LogLevel.INFO);
-            return ReturnInterface.success("SUCCESS");
-        }
-        Logger.log(IPUtil.getIpAddr(request) + "[register]" + username + " registered but failed.", Logger.LogLevel.INFO);
-        return ReturnInterface.denied("FAILED");
     }
     @GetMapping("/qo/download/status")
     public ResponseEntity<String> returnStatus() {
@@ -259,19 +221,6 @@ public class ApiApplication implements ErrorController {
     @PostMapping("/qo/delete/user")
     public ResponseEntity<String> exec(@RequestParam String appname, @RequestParam String minecraftUser) throws ExecutionException, InterruptedException {
         return UserProcess.delMinecraftUser(appname,minecraftUser);
-    }
-    @RequestMapping("/qo/upload/link")
-    public ResponseEntity<String> link(String forum, String name){
-        String output = UserProcess.Link(forum,name);
-        return ReturnInterface.success(output);
-    }
-    @RequestMapping("/qo/download/link")
-    public ResponseEntity<String> downloadLink(String name){
-        if (UserProcess.queryLink(name) != null && !Objects.equals(UserProcess.queryLink(name), "EMPTY")){
-            return ReturnInterface.success(UserProcess.queryLink(name));
-        } else {
-            return ReturnInterface.failed("NOT FOUND");
-        }
     }
     @RequestMapping("/qo/download/registry")
     public static String GetData(String name){

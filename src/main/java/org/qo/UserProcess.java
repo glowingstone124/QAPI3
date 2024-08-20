@@ -76,64 +76,6 @@ public class UserProcess {
         Logger.log(IPUtil.getIpAddr(request) + " username " + name + " qureied firstlogin but unsuccessful.", INFO);
         return responseJson.toString();
     }
-    public static String fetchMyinfo(String name, HttpServletRequest request) {
-        String date;
-        Boolean premium;
-        Boolean donate;
-        try (Connection connection = ConnectionPool.getConnection();
-             PreparedStatement preparedStatement = connection.prepareStatement("SELECT * FROM forum WHERE username = ?")) {
-            preparedStatement.setString(1, name);
-            try (ResultSet resultSet = preparedStatement.executeQuery()) {
-                if (resultSet.next()) {
-                    date = resultSet.getString("date");
-                    premium = resultSet.getBoolean("premium");
-                    donate = resultSet.getBoolean("donate");
-                    String linkto = resultSet.getString("linkto");
-                    JSONObject responseJson = new JSONObject();
-                    responseJson.put("date", date);
-                    responseJson.put("premium", premium);
-                    responseJson.put("donate", donate);
-                    responseJson.put("code", 0);
-                    responseJson.put("linkto", linkto);
-                    responseJson.put("username", name);
-                    Logger.log(IPUtil.getIpAddr(request) + "username " + name + " qureied myinfo.", INFO);
-                    return responseJson.toString();
-                } else {
-                    // No rows found for the given username”
-                    JSONObject responseJson = new JSONObject();
-                    responseJson.put("code", -1);
-                    Logger.log(IPUtil.getIpAddr(request) + "username " + name + " qureied myinfo, but unsuccessful.", INFO);
-                    return responseJson.toString();
-                }
-            }
-        } catch (SQLException e) {
-            e.printStackTrace();
-            JSONObject responseJson = new JSONObject();
-            Logger.log("username " + name + " qureied myinfo, but unsuccessful.", INFO);
-            responseJson.put("code", -1);
-            return responseJson.toString();
-        }
-    }
-
-    public static String getDatabaseInfo(String type) {
-        JSONObject sqlObject = null;
-        try {
-            sqlObject = new JSONObject(Files.readString(Path.of(SQL_CONFIGURATION)));
-        } catch (IOException e) {
-            Logger.log("ERROR: SQL CONFIG NOT FOUND", ERROR);
-        }
-        switch (type) {
-            case "password":
-                return sqlObject.getString("password");
-            case "username":
-                return sqlObject.getString("username");
-            case "url":
-                return sqlObject.getString("url");
-            default:
-                return null;
-        }
-    }
-
     public static String getServerStats() throws IOException {
         JSONArray statusArray = new JSONArray(Files.readString(Path.of("stat.json")));
         for (int i = 0; i < statusArray.length(); i++) {
@@ -196,42 +138,6 @@ public class UserProcess {
 
         return result;
     }
-
-    public static boolean queryForum(String username) throws Exception {
-        boolean resultExists = false;
-
-        try (Connection connection = ConnectionPool.getConnection()) {
-            String selectQuery = "SELECT * FROM forum WHERE username = ?";
-            Logger.log(selectQuery, INFO);
-
-            try (PreparedStatement preparedStatement = connection.prepareStatement(selectQuery)) {
-                preparedStatement.setString(1, username);
-
-                try (ResultSet resultSet = preparedStatement.executeQuery()) {
-                    resultExists = resultSet.next();
-                }
-            }
-        }
-        return resultExists;
-    }
-
-    public static String queryHash(String hash) throws Exception {
-        String jsonContent = new String(Files.readAllBytes(Path.of(CODE)), StandardCharsets.UTF_8);
-        JSONObject codeObject = new JSONObject(jsonContent);
-
-        if (codeObject.has(hash)) {
-            String username = codeObject.getString(hash);
-            String finalOutput = username;
-            // codeObject.remove(hash);
-            Files.write(Path.of(CODE), codeObject.toString().getBytes(StandardCharsets.UTF_8));
-            System.out.println(username);
-            return finalOutput;
-        } else {
-            System.out.println("mismatched");
-            return null;
-        }
-    }
-
     public static String queryReg(String name) {
         if(Operation.exists("users:" +name, QO_REG_DATABASE)) {
            JsonObject retObj = (JsonObject) JsonParser.parseString(Objects.requireNonNull(Operation.get(name, QO_REG_DATABASE)));
@@ -284,37 +190,6 @@ public class UserProcess {
         responseJson.put("code", 1);
         responseJson.put("username", -1);
         return responseJson.toString();
-    }
-    public static void regforum(String username, String password) {
-        virtualThreadExecutor.execute(new Runnable() {
-            @Override
-            public void run() {
-                Calendar calendar = Calendar.getInstance();
-                int year = calendar.get(Calendar.YEAR);
-                int month = calendar.get(Calendar.MONTH) + 1;
-                int day = calendar.get(Calendar.DAY_OF_MONTH);
-                String date = year + "-" + month + "-" + day;
-                String EncryptedPswd = hashSHA256(password);
-                try (Connection connection = ConnectionPool.getConnection()) {
-                    String insertQuery = "INSERT INTO forum (username, date, password, premium, donate, firstLogin, linkto, id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
-                    try (PreparedStatement preparedStatement = connection.prepareStatement(insertQuery)) {
-                        preparedStatement.setString(1, username);
-                        preparedStatement.setString(2, date);
-                        preparedStatement.setString(3, EncryptedPswd);
-                        preparedStatement.setBoolean(4, false);
-                        preparedStatement.setBoolean(5, false);
-                        preparedStatement.setBoolean(6, true);
-                        preparedStatement.setString(7, "EMPTY");
-                        preparedStatement.setInt(8, 0);
-                        preparedStatement.executeUpdate();
-                    } catch (SQLException e) {
-                        e.printStackTrace();
-                    }
-                } catch (SQLException e) {
-                    e.printStackTrace();
-                }
-            }
-        });
     }
     public static ResponseEntity<String> regMinecraftUser(String name, Long uid, HttpServletRequest request, String password) throws ExecutionException, InterruptedException {
         CompletableFuture<ResponseEntity<String>> future = CompletableFuture.supplyAsync(() -> {
@@ -459,35 +334,6 @@ public class UserProcess {
         }
     }
 
-    public static String Link(String forum, String name) {
-        try (Connection connection = ConnectionPool.getConnection()) {
-            String query = "SELECT linkto FROM forum WHERE username = ?";
-            try (PreparedStatement preparedStatement = connection.prepareStatement(query)) {
-                preparedStatement.setString(1, forum);
-                try (ResultSet resultSet = preparedStatement.executeQuery()) {
-                    if (resultSet.next()) {
-                        String resultname = resultSet.getString("linkto");
-                        if (Objects.equals(resultname, "EMPTY")) {
-                            String updateQuery = "UPDATE forum SET linkto = ? WHERE username = ?";
-                            try (PreparedStatement updateStatement = connection.prepareStatement(updateQuery)) {
-                                updateStatement.setString(1, name);
-                                updateStatement.setString(2, forum);
-                                updateStatement.executeUpdate();
-                                return "DONE";
-                            }
-                        } else {
-                            return "ERROR: Already Linked";
-                        }
-                    }
-                }
-            }
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-        return "failed";
-    }
-
-
     public static String queryLink(String forum) {
         try (Connection connection = ConnectionPool.getConnection()) {
             String query = "SELECT linkto FROM forum WHERE username = ?";
@@ -518,74 +364,6 @@ public class UserProcess {
         }
         return false;
     }
-
-    public static boolean dumplicateUID(long uid) {
-        try (Connection connection = ConnectionPool.getConnection()) {
-            String query = "SELECT * FROM users WHERE uid = ?";
-            try (PreparedStatement preparedStatement = connection.prepareStatement(query)) {
-                preparedStatement.setLong(1, uid);
-                try (ResultSet resultSet = preparedStatement.executeQuery()) {
-                    return resultSet.next();
-                }
-            }
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-        return false;
-    }
-
-    public static boolean changeHash(String username, String hash) {
-        boolean success = false;
-        try (Connection connection = ConnectionPool.getConnection()) {
-            String query = "UPDATE forum SET password = ? WHERE username = ?";
-            try (PreparedStatement preparedStatement = connection.prepareStatement(query)) {
-                preparedStatement.setString(1, hash);
-                preparedStatement.setString(2, username);
-                int rowsUpdated = preparedStatement.executeUpdate();
-                if (rowsUpdated > 0) {
-                    success = true;
-                }
-            }
-        } catch (SQLException e) {
-            e.printStackTrace();
-        }
-        return success;
-    }
-
-    public static ResponseEntity<String> userLogin(String username, String password, HttpServletRequest request) {
-        String hashedPassword = hashSHA256(password);
-        String userKey = "app:" + username;
-        if (Operation.exists(userKey, QOAPP_REG_DATABASE) && MessageDigest.isEqual(Operation.get(userKey, QOAPP_REG_DATABASE).getBytes(), hashedPassword.getBytes())) {
-            Logger.log(IPUtil.getIpAddr(request) + " " + username + " login successful.", INFO);
-            return ReturnInterface.success("成功");
-        }
-        try (Connection connection = ConnectionPool.getConnection()) {
-            String query = "SELECT username,password FROM forum WHERE username = ?";
-            try (PreparedStatement preparedStatement = connection.prepareStatement(query)) {
-                preparedStatement.setString(1, username);
-                try (ResultSet resultSet = preparedStatement.executeQuery()) {
-                    if (resultSet.next()) {
-                        String storedHashedPassword = resultSet.getString("password");
-                        if (MessageDigest.isEqual(hashedPassword.getBytes(), storedHashedPassword.getBytes())) {
-                            Operation.insert(userKey, storedHashedPassword, QOAPP_REG_DATABASE);
-                            Logger.log(IPUtil.getIpAddr(request) + " " + username + " login successful.", ERROR);
-                            return ReturnInterface.success("成功");
-                        } else {
-                            Logger.log("username " + username + " login failed.", ERROR);
-                        }
-                    } else {
-                        Logger.log("username " + username + " login failed.", ERROR);
-                        return ReturnInterface.denied("登录失败");
-                    }
-                }
-            }
-        } catch (SQLException e) {
-            e.printStackTrace();
-            return ReturnInterface.failed("internal error");
-        }
-        return ReturnInterface.failed("internal error");
-    }
-
     public static String operateEco(String username, int value, opEco operation) {
         String updateSql = "UPDATE users SET economy = economy - ? WHERE username = ?";
         try (Connection connection = ConnectionPool.getConnection()) {

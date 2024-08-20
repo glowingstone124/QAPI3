@@ -132,3 +132,55 @@ class UserORM : CrudDao<Users> {
     }
 
 }
+class SQLQuery {
+    var columns: String = "*"
+    var table: String = ""
+    var condition: String = ""
+
+    fun select(vararg columns: String) {
+        this.columns = if (columns.isEmpty()) "*" else columns.joinToString(", ")
+    }
+
+    fun FROM(table: String) {
+        this.table = table
+    }
+
+    fun WHERE(condition: String) {
+        this.condition = condition
+    }
+
+    fun execute() {
+        val sql = "SELECT $columns FROM $table WHERE $condition"
+        ConnectionPool.getConnection().use { connection ->
+            connection.prepareStatement(sql).use { statement ->
+                statement.executeQuery().use { resultSet ->
+                    while (resultSet.next()) {
+                        val rowData = (1..resultSet.metaData.columnCount).joinToString(", ") {
+                            resultSet.getString(it) ?: "NULL"
+                        }
+                        println(rowData)
+                    }
+                }
+            }
+        }
+    }
+}
+
+fun SELECT(init: SQLQuery.() -> Unit): SQLQuery {
+    return SQLQuery().apply(init)
+}
+
+fun main() {
+    ConnectionPool.init()
+    SELECT {
+        select()
+        FROM("users")
+        WHERE("username = 'glowingstone124'")
+    }.execute()
+
+    SELECT {
+        select("id", "name", "frozen")
+        FROM("users")
+        WHERE("username = 'glowingstone124'")
+    }.execute()
+}

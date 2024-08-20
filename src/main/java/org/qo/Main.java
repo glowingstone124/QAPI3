@@ -1,6 +1,8 @@
 package org.qo;
 import org.qo.mcsmanager.InstanceUtil;
+import org.qo.orm.ORMKt;
 import org.qo.redis.Configuration;
+import org.qo.server.SystemInfo;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.ConfigurableApplicationContext;
@@ -22,6 +24,8 @@ import static org.qo.Logger.LogLevel.*;
 @SpringBootApplication
 public class Main {
     public static void main(String[] args) throws Exception {
+        SystemInfo si = new SystemInfo();
+        si.printSystemInfo();
         if (args.length != 0) {
             for (String arg : args) {
                 if (arg.equals("--disable-redis")) {
@@ -30,6 +34,7 @@ public class Main {
             }
         }
         ConnectionPool.init();
+
         //Mail mail = new Mail();
         //if (!mail.test()){
             //Logger.log("Mail function doesn't work properly. With following exception:", ERROR);
@@ -39,11 +44,11 @@ public class Main {
         org.qo.redis.Configuration.init();
         Funcs.Start();
         Funcs.ShowDic();
+        InstanceUtil iu = new InstanceUtil();
+        iu.run();
         Logger.log("API Started.", INFO);
         SpringApplication.run(ApiApplication.class, args);
         Logger.startLogWriter("log.log", 3000);
-        InstanceUtil iu = new InstanceUtil();
-        iu.run();
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             Logger.log("API shutdown.", INFO);
         }));
@@ -65,7 +70,7 @@ public class Main {
     @Bean
     public CorsFilter corsFilter() {
         CorsConfiguration config = new CorsConfiguration();
-        config.setAllowCredentials(false);
+        config.setAllowCredentials(Boolean.FALSE);
         config.addAllowedOrigin("*");
         config.addAllowedHeader("*");
         config.addAllowedMethod("*");
