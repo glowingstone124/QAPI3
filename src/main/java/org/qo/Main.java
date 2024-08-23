@@ -52,7 +52,6 @@ public class Main {
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             Logger.log("API shutdown.", INFO);
         }));
-
     }
     @Bean
     public WebMvcConfigurer corsConfigurer() {

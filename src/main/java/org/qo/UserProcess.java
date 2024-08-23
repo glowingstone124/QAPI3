@@ -10,31 +10,23 @@ import org.qo.datas.Mapping.*;
 import org.json.JSONObject;
 import org.qo.mail.Mail;
 import org.qo.mail.MailPreset;
-import org.qo.redis.Configuration;
 import org.qo.redis.Operation;
 import org.qo.server.AvatarCache;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 
 import java.io.*;
-import java.math.BigInteger;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.sql.*;
-import java.text.SimpleDateFormat;
 import java.util.*;
-import java.util.Date;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.ExecutionException;
 
 import static org.qo.Logger.LogLevel.*;
-import static org.qo.Algorithm.hashSHA256;
 import static org.qo.redis.Configuration.*;
 
 @Service
@@ -295,9 +287,9 @@ public class UserProcess {
         String apiURL = "https://api.mojang.com/users/profiles/minecraft/" + name;
         String avatarURL = "https://playerdb.co/api/player/minecraft/";
         if (!AvatarCache.has(name)) {
-            JSONObject uuidobj = new JSONObject(Request.sendGetRequest(apiURL));
+            JSONObject uuidobj = new JSONObject(request.sendGetRequest(apiURL));
             String uuid = uuidobj.getString("id");
-            JSONObject playerUUIDobj = new JSONObject(Request.sendGetRequest(avatarURL + uuid));
+            JSONObject playerUUIDobj = new JSONObject(request.sendGetRequest(avatarURL + uuid));
             if (playerUUIDobj.getBoolean("success")) {
                 JSONObject player = playerUUIDobj.getJSONObject("data").getJSONObject("player");
                 JSONObject returnObject = new JSONObject();

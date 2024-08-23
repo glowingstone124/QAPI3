@@ -1,6 +1,6 @@
 package org.qo.server;
 
-import org.qo.Request;
+import org.qo.request;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -17,6 +17,6 @@ public class AvatarCache {
         return Files.exists(Path.of(CachePath + name + ".png"));
     }
     public static void cache(String url, String name) throws Exception{
-        Request.Download(url,CachePath + name);
+        request.Download(url,CachePath + name);
     }
 }
