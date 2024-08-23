@@ -86,15 +86,6 @@ public class ApiApplication implements ErrorController {
         returnObj.put("code", -1);
         return returnObj.toString();
     }
-    @PostMapping("/qo/upload/github")
-    public void HandleGithub(@RequestBody String req){
-        JSONObject body = new JSONObject(req);
-    }
-    @PostMapping("/qo/apihook")
-    public String webhook(@RequestBody String data) {
-        System.out.println(data);
-        return null;
-    }
     @PostMapping("/qo/alive/upload")
     public void getAlive(@RequestBody String data){
         JSONObject Heartbeat = new JSONObject(data);
@@ -123,11 +114,6 @@ public class ApiApplication implements ErrorController {
         aliveJSON.put("stat", serverAlive);
         return aliveJSON.toString();
     }
-    @RequestMapping("/api/isFirstLogin")
-    public String firstLogin(@RequestParam(name = "name", required = true) String name, HttpServletRequest request){
-        return UserProcess.firstLoginSearch(name,request);
-    }
-
     @PostMapping("/qo/upload/gametimerecord")
     public void parser(@RequestParam(name = "name", required = true) String name,@RequestParam(name = "time", required = true) int time){
         UserProcess.handleTime(name,time);
@@ -210,17 +196,9 @@ public class ApiApplication implements ErrorController {
         statObj.addProperty("result", UserProcess.validateMinecraftUser(token,request,uid));
         return new ResponseEntity<>(statObj.toString(), headers, HttpStatus.OK);
     }
-    @RequestMapping("/qo/download/memorial")
-    public static String downloadMemorial() throws IOException {
-        return UserProcess.downloadMemorial();
-    }
     @RequestMapping("/qo/download/avatar")
     public String avartarTrans(@RequestParam() String name) throws Exception {
         return UserProcess.AvatarTrans(name);
-    }
-    @PostMapping("/qo/delete/user")
-    public ResponseEntity<String> exec(@RequestParam String appname, @RequestParam String minecraftUser) throws ExecutionException, InterruptedException {
-        return UserProcess.delMinecraftUser(appname,minecraftUser);
     }
     @RequestMapping("/qo/download/registry")
     public static String GetData(String name){

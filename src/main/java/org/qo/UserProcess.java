@@ -31,7 +31,6 @@ import static org.qo.redis.Configuration.*;
 
 @Service
 public class UserProcess {
-    public static final String SQL_CONFIGURATION = "data/sql/info.json";
     public static final String CODE_CONFIGURATION = "data/code.json";
     public static ConcurrentLinkedDeque<registry_verify_class> verify_list = new ConcurrentLinkedDeque<>();
     public static ArrayList<Key> inventoryViewList = new ArrayList<>();
@@ -39,35 +38,6 @@ public class UserProcess {
     public static UserORM userORM = new UserORM();
     static PoolUtils pu = new PoolUtils();
     public static VirtualThreadExecutor virtualThreadExecutor = new VirtualThreadExecutor("SQLExec");
-    public static String firstLoginSearch(String name, HttpServletRequest request) {
-        try (Connection connection = ConnectionPool.getConnection();
-             PreparedStatement preparedStatement = connection.prepareStatement("SELECT * FROM forum WHERE username = ?")) {
-            preparedStatement.setString(1, name);
-            try (ResultSet resultSet = preparedStatement.executeQuery()) {
-                if (resultSet.next()) {
-                    Boolean first = resultSet.getBoolean("firstLogin");
-                    JSONObject responseJson = new JSONObject();
-                    responseJson.put("code", 0);
-                    responseJson.put("first", first);
-                    return responseJson.toString();
-                }
-            }
-            String updateQuery = "UPDATE forum SET firstLogin = ? WHERE username = ?";
-            try (PreparedStatement apreparedStatement = connection.prepareStatement(updateQuery)) {
-                apreparedStatement.setBoolean(1, false);
-                apreparedStatement.setString(2, name);
-                Logger.log(IPUtil.getIpAddr(request) + " username " + name + " qureied firstlogin.", INFO);
-                int rowsAffected = apreparedStatement.executeUpdate();
-            }
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-        JSONObject responseJson = new JSONObject();
-        responseJson.put("code", 1);
-        responseJson.put("first", -1);
-        Logger.log(IPUtil.getIpAddr(request) + " username " + name + " qureied firstlogin but unsuccessful.", INFO);
-        return responseJson.toString();
-    }
     public static String getServerStats() throws IOException {
         JSONArray statusArray = new JSONArray(Files.readString(Path.of("stat.json")));
         for (int i = 0; i < statusArray.length(); i++) {
@@ -215,7 +185,6 @@ public class UserProcess {
                 Logger.log(name + " registered from " + IPUtil.getIpAddr(request), INFO);
                 Mail mail = new Mail();
                 mail.send(uid + "@qq.com", "感谢您注册QO2账号", MailPreset.register);
-                UserProcess.insertIp(IPUtil.getIpAddr(request));
                 return ReturnInterface.success("Success!");
             } else {
                 return ReturnInterface.failed("FAILED");
@@ -272,17 +241,6 @@ public class UserProcess {
             }
         });
     }
-
-    public static ResponseEntity<String> delMinecraftUser(String appname,String mcname) throws ExecutionException, InterruptedException {
-        CompletableFuture<ResponseEntity<String>> future = CompletableFuture.supplyAsync(() -> {
-            if (queryLink(appname).equals(mcname) && !Objects.equals(queryLink(appname), "EMPTY")){
-                deleteMinecraftUser(appname);
-                return ReturnInterface.success("SUCCESS.");
-            }
-            return ReturnInterface.denied("USERNAME NOT MATCH!");
-        });
-        return future.get();
-    }
     public static String AvatarTrans(String name) throws Exception {
         String apiURL = "https://api.mojang.com/users/profiles/minecraft/" + name;
         String avatarURL = "https://playerdb.co/api/player/minecraft/";
@@ -309,79 +267,11 @@ public class UserProcess {
         returnObject.put("name", name);
         return returnObject.toString();
     }
-
-    public static String downloadMemorial() throws IOException {
-        String filePath = "data/memorial.json";
-
-        try (BufferedReader br = new BufferedReader(new FileReader(filePath))) {
-            StringBuilder content = new StringBuilder();
-            String line;
-            while ((line = br.readLine()) != null) {
-                content.append(line);
-            }
-            return content.toString();
-        } catch (IOException e) {
-            e.printStackTrace();
-            throw e;
-        }
-    }
-
-    public static String queryLink(String forum) {
-        try (Connection connection = ConnectionPool.getConnection()) {
-            String query = "SELECT linkto FROM forum WHERE username = ?";
-            try (PreparedStatement preparedStatement = connection.prepareStatement(query)) {
-                preparedStatement.setString(1, forum);
-                try (ResultSet resultSet = preparedStatement.executeQuery()) {
-                    if (resultSet.next()) {
-                        return resultSet.getString("linkto");
-                    }
-                }
-            }
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-        return null;
-    }
-
-    public static boolean insertIp(String ip) {
-        try (Connection connection = ConnectionPool.getConnection()) {
-            String query = "INSERT INTO iptable (ip) VALUES (?)";
-            try (PreparedStatement preparedStatement = connection.prepareStatement(query)) {
-                preparedStatement.setString(1, ip);
-                int rowsAffected = preparedStatement.executeUpdate();
-                return rowsAffected > 0;
-            }
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-        return false;
-    }
-    public static String operateEco(String username, int value, opEco operation) {
-        String updateSql = "UPDATE users SET economy = economy - ? WHERE username = ?";
-        try (Connection connection = ConnectionPool.getConnection()) {
-            if (operation ==  opEco.ADD) {
-                updateSql = "UPDATE users SET economy = economy + ? WHERE username = ?";
-            }
-            try (PreparedStatement preparedStatement = connection.prepareStatement(updateSql)) {
-                preparedStatement.setInt(1, value);
-                preparedStatement.setString(2, username);
-                int rowsUpdated = preparedStatement.executeUpdate();
-                if (rowsUpdated > 0) {
-                    return "success";
-                } else {
-                    return "failed";
-                }
-            }
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-        return "failed";
-    }
-
     /**
      * @param ip       登录ip
      * @param username 登录用户名
      */
+    @Deprecated
     public static void insertLoginIP(String ip, String username) throws Exception {
         virtualThreadExecutor.execute(new Runnable() {
             @Override
@@ -410,6 +300,7 @@ public class UserProcess {
     /**
      * @param username 查询用户名
      */
+    @Deprecated
     public static String getLatestLoginIP(String username) {
         String query = "SELECT ip FROM loginip WHERE username = ?";
         try (Connection connection = ConnectionPool.getConnection();
