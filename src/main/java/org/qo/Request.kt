@@ -33,7 +33,7 @@ object Request {
         }
         return result
     }
-    fun sendGetRequest(target: String, data: String): String {
+    fun sendGetRequest(target: String): String {
         var result = ""
         runBlocking(Dispatchers.IO) {
             val url: URI = URI.create(target)
