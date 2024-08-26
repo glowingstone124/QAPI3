@@ -13,8 +13,9 @@ import java.security.SecureRandom;
 @Service
 public class Funcs {
     private static final String CHARACTERS = "abcdefghijklmnopqrstuvwxyz0123456789";
+    @Deprecated
     public static void ShowDic(){
-        System.out.println("Api Dictionary: \n" + "SQL CONF:" + UserProcess.SQL_CONFIGURATION + "\n" + "RECOVERY CODE:" + UserProcess.CODE + "\n" + "LOG FILE: log.log\n" + "INTRODUCTION MENU: forum/introductions \n" + "MEMORIAL: data/memorial.json");
+        System.out.println("Api Dictionary: \n");
     }
     public static void Start() {
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
