@@ -24,8 +24,8 @@ import static org.qo.Logger.LogLevel.*;
 @SpringBootApplication
 public class Main {
     public static void main(String[] args) throws Exception {
-        SystemInfo si = new SystemInfo();
-        si.printSystemInfo();
+        //SystemInfo si = new SystemInfo();
+        //si.printSystemInfo();
         if (args.length != 0) {
             for (String arg : args) {
                 if (arg.equals("--disable-redis")) {
