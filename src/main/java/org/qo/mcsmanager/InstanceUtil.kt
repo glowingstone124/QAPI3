@@ -18,7 +18,7 @@ class InstanceUtil {
     val api_endpoint = "https://api.purpurmc.org/v2/purpur/$target_main_version"
     val instance_config_location = "D:/MCSManager-v10-windows-x64/mcsmanager/daemon/data/InstanceConfig/"
     var instance_folder_location: String = "cwd"
-
+    val request = Request()
     fun readConfig() {
         val fullPath = Path.of(instance_config_location, "$instance_id.json")
         val config = JsonParser.parseString(Files.readString(fullPath))
@@ -37,14 +37,14 @@ class InstanceUtil {
     }
 
     fun compare() {
-        val latest_ver = JsonParser.parseString(Request.sendGetRequest(api_endpoint)).asJsonObject.get("builds").asJsonObject.get("latest").asInt
+        val latest_ver = JsonParser.parseString(request.sendGetRequest(api_endpoint)).asJsonObject.get("builds").asJsonObject.get("latest").asInt
         println("Latest version from API: $latest_ver")
         if (latest_ver > revision_version) {
             if (revision_version == 0) {
                 println("Unable to get local game version")
                 return
             }
-            Request.Download("$api_endpoint/$latest_ver/download", instance_folder_location)
+            request.Download("$api_endpoint/$latest_ver/download", instance_folder_location)
             revision_version = latest_ver
             println("Downloaded new version: $revision_version")
             Logger.log("Downloaded new version: $latest_ver", Logger.LogLevel.INFO)

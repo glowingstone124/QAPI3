@@ -34,6 +34,7 @@ public class UserProcess {
     public static final String CODE_CONFIGURATION = "data/code.json";
     public static ConcurrentLinkedDeque<registry_verify_class> verify_list = new ConcurrentLinkedDeque<>();
     public static ArrayList<Key> inventoryViewList = new ArrayList<>();
+    public static Request request = new Request();
     public static String CODE = "null";
     public static UserORM userORM = new UserORM();
     static PoolUtils pu = new PoolUtils();

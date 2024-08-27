@@ -12,7 +12,7 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
 
-object Request {
+class Request {
     fun sendPostRequest(target: String, data: String): String {
         var result = ""
         runBlocking(Dispatchers.IO) {

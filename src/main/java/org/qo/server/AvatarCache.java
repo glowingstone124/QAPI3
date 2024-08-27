@@ -1,12 +1,13 @@
 package org.qo.server;
 
-import org.qo.request;
+import org.qo.Request;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
 public class AvatarCache {
+    private static Request request = new Request();
     public static final String CachePath = "avatars/";
     public static void init() throws IOException {
         if (!Files.exists(Path.of(CachePath))){

@@ -84,12 +84,4 @@ public class Main {
         registrationBean.addUrlPatterns("/*");
         return registrationBean;
     }
-    @Bean
-    public FilterRegistrationBean<IPBlockFilter> ipBlockFilter() {
-        FilterRegistrationBean<IPBlockFilter> registration = new FilterRegistrationBean<>();
-        registration.setFilter(new IPBlockFilter());
-        registration.addUrlPatterns("/*");
-        registration.setOrder(1);
-        return registration;
-    }
 }
