@@ -38,3 +38,7 @@ build/
 ### APPLICATION YML ###
 src/main/resources/application.properties
 src/main/resources/druid.properties
+
+gradle
+log.log
+local.gradle

@@ -54,6 +54,7 @@ public class UserProcess {
         }
         return statusArray.toString();
     }
+
     public static void handleTime(String name, int time) {
         try (Connection connection = ConnectionPool.getConnection()) {
             String checkQuery = "SELECT playtime FROM users WHERE username=?";

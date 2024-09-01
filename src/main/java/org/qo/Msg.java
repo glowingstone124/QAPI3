@@ -25,6 +25,7 @@ public class Msg {
     }
 
     public static void put(String msg) {
+
         try (FileWriter fw = new FileWriter("chathistory.txt", StandardCharsets.UTF_8, true)) {
             fw.write(msg + "\n");
         } catch (IOException e) {

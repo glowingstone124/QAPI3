@@ -12,6 +12,7 @@ import org.jetbrains.annotations.Nullable;
 import org.json.JSONObject;
 import org.qo.redis.Operation;
 import org.qo.server.Documents;
+import org.qo.server.Nodes;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.web.servlet.error.ErrorController;
@@ -45,6 +46,7 @@ import static org.qo.UserProcess.*;
 public class ApiApplication implements ErrorController {
     public static String status = "no old status found";
     public static String serverStatus;
+    private Nodes nodes = new Nodes();
     public static int serverAlive;
     public static long PackTime;
     public static int requests = 0;
@@ -205,11 +207,10 @@ public class ApiApplication implements ErrorController {
         return UserProcess.queryReg(name);
     }
     @PostMapping("/qo/msglist/upload")
-    public void handleMsg(@RequestBody String data,@RequestParam(name="auth",required = true) String auth) throws Exception {
-        Funcs fc = new Funcs();
-        if (fc.verify(auth, Funcs.Perms.CHATSYNC)) {
-            Msg.put(data);
-        }
+    public ResponseEntity<String> handleMsg(@RequestBody String data) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        return nodes.validate_message(data) ? new ResponseEntity<>( "success", headers,HttpStatus.OK) : new ResponseEntity<>( "failed", headers,HttpStatus.BAD_REQUEST);
     }
     @GetMapping("/qo/msglist/download")
     public String returnMsg(){
