@@ -42,3 +42,5 @@ src/main/resources/druid.properties
 gradle
 log.log
 local.gradle
+
+nodes.json

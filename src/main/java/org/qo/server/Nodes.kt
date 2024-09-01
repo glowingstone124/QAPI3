@@ -1,24 +1,29 @@
 package org.qo.server
 
-import kotlinx.serialization.*
-import kotlinx.serialization.json.*
+import com.google.gson.Gson
+import com.google.gson.annotations.SerializedName
+import com.google.gson.reflect.TypeToken
 import org.qo.Logger
 import org.qo.Msg
-import org.springframework.stereotype.Service
-import java.nio.file.Files
-import java.nio.file.Path
-import java.nio.file.Paths
+import java.io.FileReader
 import java.io.IOException
 
-@Serializable
-data class Node(val name: String, val id: Int, val role: Role, val token: String) {
+data class Node(
+    @SerializedName("name") val name: String,
+    @SerializedName("id") val id: Int,
+    @SerializedName("role") val role: Role,
+    @SerializedName("token") val token: String
+) {
     fun validate(id: Int, token: String): Boolean {
         return id == this.id && token == this.token
     }
 }
 
-@Serializable
-data class MessageIn(val message: String, val from: Int, val token: String)
+data class MessageIn(
+    @SerializedName("message") val message: String,
+    @SerializedName("from") val from: Int,
+    @SerializedName("token") val token: String
+)
 
 enum class Role {
     SERVER,
@@ -27,10 +32,12 @@ enum class Role {
 }
 
 class Nodes {
-    val SERVER_NODES = "nodes.json"
-    val nodes_data: List<Node> = try {
-        val jsonContent = Files.readString(Paths.get(SERVER_NODES))
-        Json.decodeFromString(jsonContent)
+    private val SERVER_NODES = "nodes.json"
+    private val gson = Gson()
+    private val nodesData: List<Node> = try {
+        val reader = FileReader(SERVER_NODES)
+        val nodeListType = object : TypeToken<List<Node>>() {}.type
+        gson.fromJson(reader, nodeListType)
     } catch (e: IOException) {
         Logger.log("No nodes data found.", Logger.LogLevel.ERROR)
         emptyList()
@@ -38,16 +45,16 @@ class Nodes {
 
     fun validate_message(input: String): Boolean {
         return try {
-            val jsonContent = Json.decodeFromString<MessageIn>(input)
-            nodes_data.any { node ->
-                if (node.validate(jsonContent.from, jsonContent.token)) {
-                    Msg.put("[${node.name}] ${jsonContent.message}")
+            val messageIn = gson.fromJson(input, MessageIn::class.java)
+            nodesData.any { node ->
+                if (node.validate(messageIn.from, messageIn.token)) {
+                    Msg.put("[${node.name}] ${messageIn.message}")
                     true
                 } else {
                     false
                 }
             }
-        } catch (e: SerializationException) {
+        } catch (e: com.google.gson.JsonSyntaxException) {
             Logger.log("Invalid message format: ${e.message}", Logger.LogLevel.ERROR)
             false
         }
