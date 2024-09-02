@@ -182,7 +182,10 @@ public class ApiApplication implements ErrorController {
     }
 
     @RequestMapping("/qo/upload/registry")
-    public static ResponseEntity<String> InsertData(@RequestParam(name = "name", required = true)String name,@RequestParam(name = "uid", required = true) Long uid, @RequestParam(name = "password", required = true) String password, HttpServletRequest request) throws Exception {
+    public ResponseEntity<String> InsertData(@RequestParam(name = "name", required = true)String name,@RequestParam(name = "uid", required = true) Long uid, @RequestParam(name = "password", required = true) String password, HttpServletRequest request) throws Exception {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        if (ua.isCLIToolRequest(request)) return new ResponseEntity<>( "failed", headers,HttpStatus.BAD_REQUEST);
         return UserProcess.regMinecraftUser(name, uid, request, password);
     }
     @RequestMapping("/qo/upload/confirmation")
@@ -202,9 +205,10 @@ public class ApiApplication implements ErrorController {
         return UserProcess.queryReg(name);
     }
     @PostMapping("/qo/msglist/upload")
-    public ResponseEntity<String> handleMsg(@RequestBody String data) {
+    public ResponseEntity<String> handleMsg(@RequestBody String data, HttpServletRequest request) {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
+        if (ua.isCLIToolRequest(request)) return new ResponseEntity<>( "failed", headers,HttpStatus.BAD_REQUEST);
         return nodes.validate_message(data) ? new ResponseEntity<>( "success", headers,HttpStatus.OK) : new ResponseEntity<>( "failed", headers,HttpStatus.BAD_REQUEST);
     }
     @GetMapping("/qo/msglist/download")
@@ -265,9 +269,10 @@ public class ApiApplication implements ErrorController {
         return new ResponseEntity<>(UserProcess.queryReg(qq), headers, HttpStatus.OK);
     }
     @GetMapping("/qo/game/login")
-    public ResponseEntity<String> login(@RequestParam String username, @RequestParam String password) throws NoSuchAlgorithmException {
+    public ResponseEntity<String> login(@RequestParam String username, @RequestParam String password, HttpServletRequest request) throws NoSuchAlgorithmException {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
+        if (ua.isCLIToolRequest(request)) return new ResponseEntity<>( "failed", headers,HttpStatus.BAD_REQUEST);
         JsonObject retObj = new JsonObject();
         retObj.addProperty("result", verifyPasswd(username, password));
         return new ResponseEntity<>(retObj.toString(), headers, HttpStatus.OK);
