@@ -23,6 +23,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.stereotype.Controller;
+import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.*;
 
 import java.io.*;
@@ -51,11 +53,13 @@ public class ApiApplication implements ErrorController {
     public static long PackTime;
     public static int requests = 0;
     private Funcs fc;
+    private UAUtil ua;
     public SseService sseService;
     @Autowired
-    public ApiApplication(SseService sseService, Funcs fc) {
+    public ApiApplication(SseService sseService, Funcs fc, UAUtil uaUtil) {
         this.sseService = sseService;
         this.fc = fc;
+        this.ua = uaUtil;
     }
     @PostConstruct
     public void init() {
@@ -77,15 +81,6 @@ public class ApiApplication implements ErrorController {
         JSONObject returnObj = new JSONObject();
         returnObj.put("code",0);
         returnObj.put("build", "202402241454");
-        return returnObj.toString();
-    }
-    @RequestMapping("/error")
-    public String error(HttpServletResponse response){
-        JSONObject returnObj = new JSONObject();
-        long timeStamp = System.currentTimeMillis();
-        returnObj.put("timestamp", timeStamp);
-        returnObj.put("error", response.getStatus());
-        returnObj.put("code", -1);
         return returnObj.toString();
     }
     @PostMapping("/qo/alive/upload")
