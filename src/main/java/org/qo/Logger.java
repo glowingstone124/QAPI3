@@ -1,6 +1,7 @@
 package org.qo;
 
 import org.jetbrains.annotations.Nullable;
+import org.qo.mail.Mail;
 
 import java.io.BufferedWriter;
 import java.io.FileWriter;
@@ -13,7 +14,10 @@ import java.util.Timer;
 import java.util.TimerTask;
 
 public class Logger {
+    private static Mail mail = new Mail();
+
     private static List<String> logBuffer = new ArrayList<>();
+    private static List<String> logMsgs = new ArrayList<>();
     private static final Object lock = new Object();
     public static void log(String message, @Nullable Object level) {
         String logEntry = null;
@@ -29,6 +33,7 @@ public class Logger {
         if (logEntry != null) {
             synchronized (lock) {
                 logBuffer.add(logEntry);
+                logMsgs.add(logEntry);
             }
         }
     }
@@ -37,7 +42,9 @@ public class Logger {
     public static void startLogWriter(String logFilePath, long intervalMillis) {
         Timer timer = new Timer(true);
         timer.schedule(new LogWriterTask(logFilePath), intervalMillis, intervalMillis);
+        timer.schedule(new MailTask(),0, 3600000);
     }
+
     public enum LogLevel {
         INFO, WARNING, ERROR, UNKNOWN
     }
@@ -71,6 +78,18 @@ public class Logger {
                     e.printStackTrace();
                 }
             }
+        }
+    }
+    private static class MailTask extends TimerTask {
+
+        @Override
+        public void run() {
+            StringBuilder result = new StringBuilder();
+            logMsgs.forEach(item -> {
+                result.append(item).append("\n");
+            });
+            mail.send("hanserofficial@outllok.com", "LOG report", result.toString());
+            logMsgs.clear();
         }
     }
 }
