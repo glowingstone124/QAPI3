@@ -3,6 +3,7 @@ package org.qo.tracks
 import com.google.gson.JsonObject
 import org.json.JSONArray
 import org.json.JSONObject
+import org.qo.Msg
 import org.qo.ReturnInterface
 import org.springframework.boot.autoconfigure.SpringBootApplication
 import org.springframework.http.ResponseEntity
@@ -40,6 +41,6 @@ open class Controller {
             sb.append("说明: $msg")
             sb.append("-----------------------------------")
         }
-
+        Msg.put(sb.toString())
     }
 }
