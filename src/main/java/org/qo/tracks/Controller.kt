@@ -1,5 +1,7 @@
 package org.qo.tracks
 
+import com.google.gson.JsonObject
+import org.json.JSONArray
 import org.json.JSONObject
 import org.qo.ReturnInterface
 import org.springframework.boot.autoconfigure.SpringBootApplication
@@ -16,8 +18,28 @@ import org.springframework.web.bind.annotation.RestController
 @RequestMapping("/hooks")
 open class Controller {
     @PostMapping("/accept")
-    fun accept(@RequestBody obj: String){
+    fun accept(@RequestBody obj: String) {
         val githubEvent: JSONObject = JSONObject(obj)
         println(githubEvent)
+        if (githubEvent.has("action")) {
+            // @TODO action validate
+            return;
+        }
+        val repoName =githubEvent.getJSONObject("repository").getString("name")
+        val commitsArr: JSONArray = githubEvent.getJSONArray("commits")
+        val sender = githubEvent.getJSONObject("sender").getString("login")
+        val sb:StringBuilder = StringBuilder()
+        sb.append("===========Github Update===========")
+        sb.append("用户：$sender 上传了 ${commitsArr.length()} 个commit到仓库 $repoName")
+        sb.append("--------------Summery--------------")
+        commitsArr.forEach {
+            it as JSONObject
+            val msg = it.getString("message")
+            val author = it.getJSONObject("author").getString("username")
+            sb.append("作者：$author")
+            sb.append("说明: $msg")
+            sb.append("-----------------------------------")
+        }
+
     }
 }
