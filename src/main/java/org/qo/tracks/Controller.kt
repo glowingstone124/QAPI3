@@ -23,7 +23,6 @@ open class Controller {
         val githubEvent: JSONObject = JSONObject(obj)
         println(githubEvent)
         if (githubEvent.has("action")) {
-            // @TODO action validate
             return;
         }
         val repoName =githubEvent.getJSONObject("repository").getString("name")
