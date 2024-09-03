@@ -25,6 +25,7 @@ import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.SynchronousQueue;
 
 import static org.qo.Logger.LogLevel.*;
 import static org.qo.redis.Configuration.*;
@@ -38,6 +39,7 @@ public class UserProcess {
     public static String CODE = "null";
     public static UserORM userORM = new UserORM();
     static PoolUtils pu = new PoolUtils();
+    static SynchronousQueue<String> onlinePlayers = new SynchronousQueue<>();
     public static VirtualThreadExecutor virtualThreadExecutor = new VirtualThreadExecutor("SQLExec");
     public static String getServerStats() throws IOException {
         JSONArray statusArray = new JSONArray(Files.readString(Path.of("stat.json")));
@@ -116,11 +118,11 @@ public class UserProcess {
                     Long uid = resultSet.getLong("uid");
                     Boolean frozen = resultSet.getBoolean("frozen");
                     int eco = resultSet.getInt("economy");
-
                     JSONObject responseJson = new JSONObject();
                     responseJson.put("frozen", frozen);
                     responseJson.put("qq", uid);
                     responseJson.put("economy", eco);
+                    responseJson.put("online", Operation.exists("online" + name, QO_ONLINE_DATABASE));
                     Operation.insert("user:" + name, responseJson.toString(), QO_REG_DATABASE);
                     responseJson.put("code", 0);
                     return responseJson.toString();
@@ -218,31 +220,6 @@ public class UserProcess {
         return false;
     }
 
-
-    public static void deleteMinecraftUser(String name) {
-        virtualThreadExecutor.execute(new Runnable() {
-            @Override
-            public void run() {
-                if (name != null && !name.trim().isEmpty()) {
-                    try (Connection connection = ConnectionPool.getConnection()) {
-                        String deleteQuery = "DELETE FROM users WHERE username = ?";
-                        try (PreparedStatement preparedStatement = connection.prepareStatement(deleteQuery)) {
-                            preparedStatement.setString(1, name);
-                            int rowsAffected = preparedStatement.executeUpdate();
-                            if (rowsAffected > 0) {
-                                System.out.println("User " + name + " deleted successfully!");
-                            }
-                        }
-                    } catch (Exception e) {
-                        e.printStackTrace();
-                        System.out.println("FAILED");
-                    }
-                } else {
-                    System.out.println("Invalid username!");
-                }
-            }
-        });
-    }
     public static String AvatarTrans(String name) throws Exception {
         String apiURL = "https://api.mojang.com/users/profiles/minecraft/" + name;
         String avatarURL = "https://playerdb.co/api/player/minecraft/";
