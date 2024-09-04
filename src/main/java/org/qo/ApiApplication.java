@@ -167,6 +167,20 @@ public class ApiApplication implements ErrorController {
         }
     }
 
+    /**
+     * Inserts user data into the system.
+     *
+     * @param name The name of the user. This parameter is required.
+     * @param uid The unique identifier for the user. This parameter is required.
+     * @param password The password for the user. This parameter is required.
+     * @param request The HTTP servlet request. This is used to determine request details such as user agent.
+     *
+     * @return A ResponseEntity containing a JSON response. If the request is identified as coming from a CLI tool,
+     * the response will indicate failure with a HTTP status of BAD_REQUEST. Otherwise, the response will be processed
+     * by the UserProcess.regMinecraftUser method.
+     *
+     * @throws Exception If an error occurs during the processing of the user data.
+     */
     @RequestMapping("/qo/upload/registry")
     public ResponseEntity<String> InsertData(@RequestParam(name = "name", required = true)String name,@RequestParam(name = "uid", required = true) Long uid, @RequestParam(name = "password", required = true) String password, HttpServletRequest request) throws Exception {
         HttpHeaders headers = new HttpHeaders();

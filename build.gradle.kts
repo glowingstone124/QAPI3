@@ -21,6 +21,7 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter")
     implementation("org.springframework.boot:spring-boot-starter-quartz")
     implementation("redis.clients:jedis:3.6.3")
+    implementation("org.mockito:mockito-core:5.13.0")
     implementation("org.json:json:20231013")
     implementation("javax.servlet:javax.servlet-api:4.0.1")
     implementation("org.xerial:sqlite-jdbc:3.34.0")

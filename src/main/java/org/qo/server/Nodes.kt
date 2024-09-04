@@ -34,7 +34,7 @@ enum class Role {
 class Nodes {
     private val SERVER_NODES = "nodes.json"
     private val gson = Gson()
-    private val nodesData: List<Node> = try {
+    var nodesData: List<Node> = try {
         val reader = FileReader(SERVER_NODES)
         val nodeListType = object : TypeToken<List<Node>>() {}.type
         gson.fromJson(reader, nodeListType)

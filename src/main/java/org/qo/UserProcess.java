@@ -387,6 +387,14 @@ public class UserProcess {
         };
         return false;
     }
+    /**
+     * Computes a securely hashed password with an optional formatted prefix.
+     *
+     * @param password The plaintext password to be hashed.
+     * @param formatted Flag indicating if the result should include the "$SHA$<salt>$" prefix.
+     * @return The hashed password, optionally formatted with a prefix.
+     * @throws NoSuchAlgorithmException If the SHA-256 algorithm is not available.
+     */
     public static String computePassword(String password, boolean formatted) throws NoSuchAlgorithmException {
         String salt = Algorithm.generateRandomString(16);
         if (formatted) {
