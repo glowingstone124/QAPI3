@@ -42,7 +42,7 @@ public class Logger {
     public static void startLogWriter(String logFilePath, long intervalMillis) {
         Timer timer = new Timer(true);
         timer.schedule(new LogWriterTask(logFilePath), intervalMillis, intervalMillis);
-        timer.schedule(new MailTask(),0, 3600000);
+        //timer.schedule(new MailTask(),0, 3600000);
     }
 
     public enum LogLevel {
@@ -88,7 +88,7 @@ public class Logger {
             logMsgs.forEach(item -> {
                 result.append(item).append("\n");
             });
-            mail.send("hanserofficial@outllok.com", "LOG report", result.toString());
+            mail.send("hanserofficial@outlook.com", "LOG report", result.toString());
             logMsgs.clear();
         }
     }

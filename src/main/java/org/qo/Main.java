@@ -1,6 +1,5 @@
 package org.qo;
 import org.qo.mcsmanager.InstanceUtil;
-import org.qo.orm.ORMKt;
 import org.qo.redis.Configuration;
 import org.qo.server.SystemInfo;
 import org.springframework.boot.SpringApplication;
