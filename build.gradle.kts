@@ -43,3 +43,32 @@ tasks.withType<Test> {
     useJUnitPlatform()
 }
 
+tasks.register("buildAndCopy") {
+    // 指定该任务的依赖为 build 任务
+    dependsOn("build")
+
+    doLast {
+        val buildDir = buildDir.resolve("libs")
+        val outputDir = File("/opt/server/api")
+        val targetJarName = "QAPI3-1.0-SNAPSHOT.jar"
+
+        if (!outputDir.exists()) {
+            outputDir.mkdirs()
+        }
+        val targetJarFile = buildDir.resolve(targetJarName)
+
+        if (targetJarFile.exists()) {
+            val destinationFile = outputDir.resolve(targetJarFile.name)
+
+            if (destinationFile.exists()) {
+                destinationFile.delete()
+                println("删除了文件: ${destinationFile.absolutePath}")
+            }
+
+            targetJarFile.copyTo(destinationFile)
+            println("复制了文件: ${targetJarFile.absolutePath} 到 ${destinationFile.absolutePath}")
+        } else {
+            println("文件 $targetJarName 未找到在目录: ${buildDir.absolutePath}")
+        }
+    }
+}
