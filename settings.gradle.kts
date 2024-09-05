@@ -1,1 +1,1 @@
-rootProject.name = "SpringbootQOapi"
+rootProject.name = "QAPI3"
