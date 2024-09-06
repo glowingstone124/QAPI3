@@ -3,6 +3,7 @@ package org.qo;
 import com.google.gson.JsonObject;
 import jakarta.annotation.PostConstruct;
 import jakarta.servlet.http.HttpServletRequest;
+import org.apache.coyote.Response;
 import org.json.JSONObject;
 import org.qo.server.Nodes;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -41,10 +42,12 @@ public class ApiApplication implements ErrorController {
     private Funcs fc;
     private UAUtil ua;
     public SseService sseService;
+    private ReturnInterface ri;
     @Autowired
-    public ApiApplication(SseService sseService, Funcs fc, UAUtil uaUtil) {
+    public ApiApplication(SseService sseService, Funcs fc, UAUtil uaUtil, ReturnInterface ri) {
         this.sseService = sseService;
         this.fc = fc;
+        this.ri = ri;
         this.ua = uaUtil;
     }
     @PostConstruct
@@ -63,11 +66,11 @@ public class ApiApplication implements ErrorController {
         requests++;
     }
     @RequestMapping("/")
-    public String root() {
+    public ResponseEntity<String> root() {
         JSONObject returnObj = new JSONObject();
         returnObj.put("code",0);
         returnObj.put("build", "202409052002");
-        return returnObj.toString();
+        return ri.GeneralHttpHeader(returnObj.toString());
     }
     @PostMapping("/qo/alive/upload")
     public void getAlive(@RequestBody String data){
@@ -102,27 +105,26 @@ public class ApiApplication implements ErrorController {
         UserProcess.handleTime(name,time);
     }
     @GetMapping("/qo/download/getgametime")
-    public String getTime(@RequestParam(name = "username", required = true)String username) {
-        return UserProcess.getTime(username).toString();
+    public ResponseEntity<String> getTime(@RequestParam(name = "username", required = true)String username) {
+        return ri.GeneralHttpHeader(UserProcess.getTime(username).toString());
     }
     @RequestMapping("/app/latest")
-    public String update(){
+    public ResponseEntity<String> update(){
         JSONObject returnObj = new JSONObject();
         returnObj.put("version", 9);
         returnObj.put("die", false);
-        return returnObj.toString();
+        return ri.GeneralHttpHeader(returnObj.toString());
     }
     @RequestMapping("/qo/time")
     public ResponseEntity<String> timedate() {
         long timeStamp = System.currentTimeMillis();
-        return ReturnInterface.success(String.valueOf(timeStamp));
+        return ri.success(String.valueOf(timeStamp));
     }
     @PostMapping("/qo/upload/status")
-    public String handlePost(@RequestBody String data) {
+    public void handlePost(@RequestBody String data) {
         if (data != null) {
             status = data;
         }
-        return null;
     }
     @PostMapping("/qo/online")
     public void handleOnlineRequest(@RequestParam String name){
@@ -197,12 +199,12 @@ public class ApiApplication implements ErrorController {
         return new ResponseEntity<>(statObj.toString(), headers, HttpStatus.OK);
     }
     @RequestMapping("/qo/download/avatar")
-    public String avartarTrans(@RequestParam() String name) throws Exception {
-        return UserProcess.AvatarTrans(name);
+    public ResponseEntity<String> avartarTrans(@RequestParam() String name) throws Exception {
+        return ri.GeneralHttpHeader(UserProcess.AvatarTrans(name));
     }
     @RequestMapping("/qo/download/registry")
-    public static String GetData(String name){
-        return UserProcess.queryReg(name);
+    public ResponseEntity<String> GetData(String name){
+        return ri.GeneralHttpHeader(UserProcess.queryReg(name));
     }
     @PostMapping("/qo/msglist/upload")
     public ResponseEntity<String> handleMsg(@RequestBody String data, HttpServletRequest request) {
@@ -212,12 +214,12 @@ public class ApiApplication implements ErrorController {
         return nodes.validate_message(data) ? new ResponseEntity<>( "success", headers,HttpStatus.OK) : new ResponseEntity<>( "failed", headers,HttpStatus.BAD_REQUEST);
     }
     @GetMapping("/qo/msglist/download")
-    public String returnMsg(){
-        return Msg.get().toString();
+    public ResponseEntity<String> returnMsg(){
+        return ri.GeneralHttpHeader(Msg.get().toString());
     }
     @GetMapping("/qo/webmsg/download")
-    public String returnWeb(){
-        return Msg.webGet();
+    public ResponseEntity<String> returnWeb(){
+        return ri.GeneralHttpHeader(Msg.webGet());
     }
     @PostMapping("/qo/loginip/upload")
     public void handleLogin(@RequestParam(name = "ip", required = true) String ip,@RequestParam(name = "auth", required = true) String auth, @RequestParam(name="username",required = true) String username) throws Exception {
@@ -230,9 +232,9 @@ public class ApiApplication implements ErrorController {
     public ResponseEntity<String> getLogin(@RequestParam(name="username",required = true) String username){
         String result = getLatestLoginIP(username);
         if (result.equals("undefined")){
-            return ReturnInterface.denied("请求的用户没有历史ip记录");
+            return ri.denied("请求的用户没有历史ip记录");
         } else {
-            return ReturnInterface.success(result);
+            return ri.success(result);
         }
     }
     @GetMapping("/qo/inventory/request")

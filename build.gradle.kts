@@ -44,7 +44,6 @@ tasks.withType<Test> {
 }
 
 tasks.register("buildAndCopy") {
-    // 指定该任务的依赖为 build 任务
     dependsOn("build")
 
     doLast {

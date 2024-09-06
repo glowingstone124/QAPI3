@@ -37,6 +37,7 @@ public class UserProcess {
     public static ArrayList<Key> inventoryViewList = new ArrayList<>();
     public static Request request = new Request();
     public static String CODE = "null";
+    private static ReturnInterface ri = new ReturnInterface();
     public static UserORM userORM = new UserORM();
     static PoolUtils pu = new PoolUtils();
     static SynchronousQueue<String> onlinePlayers = new SynchronousQueue<>();
@@ -189,9 +190,9 @@ public class UserProcess {
                 Logger.log(name + " registered from " + IPUtil.getIpAddr(request), INFO);
                 Mail mail = new Mail();
                 mail.send(uid + "@qq.com", "感谢您注册QO2账号", MailPreset.register);
-                return ReturnInterface.success("Success!");
+                return ri.success("Success!");
             } else {
-                return ReturnInterface.failed("FAILED");
+                return ri.failed("FAILED");
             }
         });
         return future.get();

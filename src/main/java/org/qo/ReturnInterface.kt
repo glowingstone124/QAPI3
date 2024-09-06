@@ -1,57 +1,51 @@
-package org.qo;
+package org.qo
 
-import com.google.gson.JsonObject;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.MediaType;
-import org.springframework.http.ResponseEntity;
+import com.google.gson.JsonObject
+import org.springframework.http.HttpHeaders
+import org.springframework.http.HttpStatus
+import org.springframework.http.MediaType
+import org.springframework.http.ResponseEntity
+import org.springframework.stereotype.Service
 
-public class ReturnInterface {
-    /*
-    public static String failed(String input) {
-        JsonObject returnObject = new JsonObject();
-        returnObject.addProperty("code", -1);
-        returnObject.addProperty("message", input);
-        return returnObject.toString();
+@Service
+class ReturnInterface {
+    fun GeneralHttpHeader(input: String): ResponseEntity<String> {
+        val headers = HttpHeaders().apply {
+            contentType = MediaType.APPLICATION_JSON
+        }
+        return ResponseEntity(input, headers, HttpStatus.OK)
     }
 
-    public static String success(String input) {
-        JsonObject returnObject = new JsonObject();
-        returnObject.addProperty("code", 0);
-        returnObject.addProperty("message", input);
-        return returnObject.toString();
+    fun failed(input: String): ResponseEntity<String> {
+        val returnObject = JsonObject().apply {
+            addProperty("code", -1)
+            addProperty("message", input)
+        }
+        val headers = HttpHeaders().apply {
+            contentType = MediaType.APPLICATION_JSON
+        }
+        return ResponseEntity(returnObject.toString(), headers, HttpStatus.NOT_ACCEPTABLE)
     }
 
-    public static String denied(String input) {
-        JsonObject returnObject = new JsonObject();
-        returnObject.addProperty("code", 1);
-        returnObject.addProperty("message", input);
-        return returnObject.toString();
-    }
-     */
-    public static ResponseEntity<String> failed(String input){
-        JsonObject returnObject = new JsonObject();
-        returnObject.addProperty("code", -1);
-        returnObject.addProperty("message", input);
-        HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(MediaType.APPLICATION_JSON);
-        return new ResponseEntity<>(returnObject.toString(), headers, HttpStatus.NOT_ACCEPTABLE);
-    }
-    public static ResponseEntity<String>  success(String input) {
-        JsonObject returnObject = new JsonObject();
-        returnObject.addProperty("code", 0);
-        returnObject.addProperty("message", input);
-        HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(MediaType.APPLICATION_JSON);
-        return new ResponseEntity<>(returnObject.toString(), headers, HttpStatus.OK);
+    fun success(input: String): ResponseEntity<String> {
+        val returnObject = JsonObject().apply {
+            addProperty("code", 0)
+            addProperty("message", input)
+        }
+        val headers = HttpHeaders().apply {
+            contentType = MediaType.APPLICATION_JSON
+        }
+        return ResponseEntity(returnObject.toString(), headers, HttpStatus.OK)
     }
 
-    public static ResponseEntity<String>  denied(String input) {
-        JsonObject returnObject = new JsonObject();
-        returnObject.addProperty("code", 1);
-        returnObject.addProperty("message", input);
-        HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(MediaType.APPLICATION_JSON);
-        return new ResponseEntity<>(returnObject.toString(), headers, HttpStatus.FORBIDDEN);
+    fun denied(input: String): ResponseEntity<String> {
+        val returnObject = JsonObject().apply {
+            addProperty("code", 1)
+            addProperty("message", input)
+        }
+        val headers = HttpHeaders().apply {
+            contentType = MediaType.APPLICATION_JSON
+        }
+        return ResponseEntity(returnObject.toString(), headers, HttpStatus.FORBIDDEN)
     }
 }
