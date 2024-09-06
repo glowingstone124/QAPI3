@@ -3,6 +3,7 @@ package org.qo;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import jakarta.servlet.http.HttpServletRequest;
+import kotlinx.coroutines.Dispatchers;
 import org.apache.tomcat.util.threads.VirtualThreadExecutor;
 import org.json.JSONArray;
 import org.qo.orm.UserORM;
@@ -12,6 +13,7 @@ import org.qo.mail.Mail;
 import org.qo.mail.MailPreset;
 import org.qo.redis.Operation;
 import org.qo.server.AvatarCache;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 
@@ -39,9 +41,14 @@ public class UserProcess {
     public static String CODE = "null";
     private static ReturnInterface ri = new ReturnInterface();
     public static UserORM userORM = new UserORM();
-    static PoolUtils pu = new PoolUtils();
+    private static CoroutineAdapter ca;
+
+    @Autowired
+    public UserProcess(CoroutineAdapter ca) {
+        this.ca = ca;
+    }
+
     static SynchronousQueue<String> onlinePlayers = new SynchronousQueue<>();
-    public static VirtualThreadExecutor virtualThreadExecutor = new VirtualThreadExecutor("SQLExec");
     public static String getServerStats() throws IOException {
         JSONArray statusArray = new JSONArray(Files.readString(Path.of("stat.json")));
         for (int i = 0; i < statusArray.length(); i++) {
@@ -50,7 +57,7 @@ public class UserProcess {
             String date = event.getString("date");
             String author = event.getString("author");
             String summary = event.getString("summary");
-            if (summary == null || author == null || date == null || title == null){
+            if (summary == null || author == null || date == null || title == null) {
                 Logger.log("INVALID Status Message found.", ERROR);
                 return null;
             }
@@ -59,26 +66,31 @@ public class UserProcess {
     }
 
     public static void handleTime(String name, int time) {
-        try (Connection connection = ConnectionPool.getConnection()) {
-            String checkQuery = "SELECT playtime FROM users WHERE username=?";
-            try (PreparedStatement checkStatement = connection.prepareStatement(checkQuery)) {
-                checkStatement.setString(1, name);
-                try (ResultSet resultSet = checkStatement.executeQuery()) {
-                    if (resultSet.next()) {
-                        int existingTime = resultSet.getInt("playtime");
-                        int updatedTime = existingTime + time;
-                        String updateQuery = "UPDATE users SET playtime=? WHERE username=?";
-                        try (PreparedStatement updateStatement = connection.prepareStatement(updateQuery)) {
-                            updateStatement.setInt(1, updatedTime);
-                            updateStatement.setString(2, name);
-                            updateStatement.executeUpdate();
+        if (time <= 0) {
+            return;
+        }
+        ca.push(() -> {
+            try (Connection connection = ConnectionPool.getConnection()) {
+                String checkQuery = "SELECT playtime FROM users WHERE username=?";
+                try (PreparedStatement checkStatement = connection.prepareStatement(checkQuery)) {
+                    checkStatement.setString(1, name);
+                    try (ResultSet resultSet = checkStatement.executeQuery()) {
+                        if (resultSet.next()) {
+                            int existingTime = resultSet.getInt("playtime");
+                            int updatedTime = existingTime + time;
+                            String updateQuery = "UPDATE users SET playtime=? WHERE username=?";
+                            try (PreparedStatement updateStatement = connection.prepareStatement(updateQuery)) {
+                                updateStatement.setInt(1, updatedTime);
+                                updateStatement.setString(2, name);
+                                updateStatement.executeUpdate();
+                            }
                         }
                     }
                 }
+            } catch (SQLException e) {
+                Logger.log("experienced SQL exception while doing handleTime(): " + e.getMessage(), ERROR);
             }
-        } catch (SQLException e) {
-            e.printStackTrace();
-        }
+        }, Dispatchers.getIO());
     }
 
     public static JSONObject getTime(String username) {
@@ -105,11 +117,12 @@ public class UserProcess {
 
         return result;
     }
+
     public static String queryReg(String name) {
-        if(Operation.exists("users:" +name, QO_REG_DATABASE)) {
-           JsonObject retObj = (JsonObject) JsonParser.parseString(Objects.requireNonNull(Operation.get(name, QO_REG_DATABASE)));
-           retObj.addProperty("code", 0);
-           return retObj.toString();
+        if (Operation.exists("users:" + name, QO_REG_DATABASE)) {
+            JsonObject retObj = (JsonObject) JsonParser.parseString(Objects.requireNonNull(Operation.get(name, QO_REG_DATABASE)));
+            retObj.addProperty("code", 0);
+            return retObj.toString();
         }
         try (Connection connection = ConnectionPool.getConnection();
              PreparedStatement preparedStatement = connection.prepareStatement("SELECT uid,frozen,economy FROM users WHERE username = ?")) {
@@ -137,13 +150,13 @@ public class UserProcess {
         responseJson.put("qq", -1);
         return responseJson.toString();
     }
-    
+
     public static String queryReg(long qq) {
         UserORM userORM = new UserORM();
         Users user = userORM.read(qq);
         JSONObject responseJson = new JSONObject();
         if (user != null) {
-            String username  = user.getUsername();
+            String username = user.getUsername();
             Boolean frozen = user.getFrozen();
             int eco = user.getEconomy();
             long playtime = user.getPlaytime();
@@ -158,9 +171,10 @@ public class UserProcess {
         responseJson.put("username", -1);
         return responseJson.toString();
     }
+
     public static ResponseEntity<String> regMinecraftUser(String name, Long uid, HttpServletRequest request, String password) throws ExecutionException, InterruptedException {
-        CompletableFuture<ResponseEntity<String>> future = CompletableFuture.supplyAsync(() -> {
-            if (Objects.equals(userORM.read(uid), null)&& name != null && uid != null) {
+        CompletableFuture<ResponseEntity<String>> future = ca.run(() -> {
+            if (Objects.equals(userORM.read(uid), null) && name != null && uid != null) {
                 try {
                     userORM.create(new Users(
                             name,
@@ -174,19 +188,19 @@ public class UserProcess {
                     ));
                     String token = Algorithm.generateRandomString(16);
                     Msg.put("用户 " + uid + "注册了一个账号：" + name + "，若非本人操作请忽略，确认账号请在消息发出后2小时内输入/approve-register " + token);
-                    verify_list.add(new registry_verify_class(name,token,uid,System.currentTimeMillis()));
+                    verify_list.add(new registry_verify_class(name, token, uid, System.currentTimeMillis()));
                 } catch (NoSuchAlgorithmException e) {
                     throw new RuntimeException(e);
                 }
-                pu.submit(() -> {
+                ca.push(() -> {
                     JsonObject playerJson = new JsonObject();
                     playerJson.addProperty("qq", uid);
                     playerJson.addProperty("code", 0);
                     playerJson.addProperty("frozen", false);
                     playerJson.addProperty("pro", 0);
-                    playerJson.addProperty("playtime",  0);
+                    playerJson.addProperty("playtime", 0);
                     Operation.insert("user:" + name, playerJson.toString(), QO_REG_DATABASE);
-                });
+                }, Dispatchers.getIO());
                 Logger.log(name + " registered from " + IPUtil.getIpAddr(request), INFO);
                 Mail mail = new Mail();
                 mail.send(uid + "@qq.com", "感谢您注册QO2账号", MailPreset.register);
@@ -194,15 +208,16 @@ public class UserProcess {
             } else {
                 return ri.failed("FAILED");
             }
-        });
+        }, Dispatchers.getIO());
         return future.get();
     }
+
     public static boolean validateMinecraftUser(String token, HttpServletRequest request, Long uid) {
         Iterator<registry_verify_class> iterator = verify_list.iterator();
         while (iterator.hasNext()) {
             registry_verify_class item = iterator.next();
             if (Objects.equals(item.token, token) && Objects.equals(item.uid, uid) && System.currentTimeMillis() - item.expiration < 7200000) {
-                pu.submit(() -> {
+                ca.push(() -> {
                     String sql = "UPDATE users SET frozen = false WHERE uid = ?";
                     try (Connection connection = ConnectionPool.getConnection();
                          PreparedStatement statement = connection.prepareStatement(sql)) {
@@ -211,7 +226,7 @@ public class UserProcess {
                     } catch (SQLException e) {
                         e.printStackTrace();
                     }
-                });
+                }, Dispatchers.getIO());
                 return true;
             } else if (System.currentTimeMillis() - item.expiration > 7200000) {
                 iterator.remove();
@@ -247,34 +262,33 @@ public class UserProcess {
         returnObject.put("name", name);
         return returnObject.toString();
     }
+
     /**
      * @param ip       登录ip
      * @param username 登录用户名
      */
     @Deprecated
     public static void insertLoginIP(String ip, String username) throws Exception {
-        virtualThreadExecutor.execute(new Runnable() {
-            @Override
-            public void run() {
-                String query = "SELECT username, uid FROM users WHERE username = ?";
-                String insert = "INSERT INTO iptable (username, ip) VALUES (?, ?)";
-                try (Connection connection = ConnectionPool.getConnection();
-                     PreparedStatement preparedStatement = connection.prepareStatement(query)) {
-                    preparedStatement.setString(1, username);
-                    try (ResultSet resultSet = preparedStatement.executeQuery()) {
-                        if (resultSet.next()) {
-                            try (PreparedStatement preparedStatement1 = connection.prepareStatement(insert)) {
-                                preparedStatement1.setString(1, username);
-                                preparedStatement1.setString(2, ip);
-                                preparedStatement1.executeUpdate();
-                            }
+        ca.push(() -> {
+            String query = "SELECT username, uid FROM users WHERE username = ?";
+            String insert = "INSERT INTO iptable (username, ip) VALUES (?, ?)";
+            try (Connection connection = ConnectionPool.getConnection();
+                 PreparedStatement preparedStatement = connection.prepareStatement(query)) {
+                preparedStatement.setString(1, username);
+                try (ResultSet resultSet = preparedStatement.executeQuery()) {
+                    if (resultSet.next()) {
+                        try (PreparedStatement preparedStatement1 = connection.prepareStatement(insert)) {
+                            preparedStatement1.setString(1, username);
+                            preparedStatement1.setString(2, ip);
+                            preparedStatement1.executeUpdate();
                         }
                     }
-                } catch (Exception e) {
-                    e.printStackTrace();
                 }
+            } catch (Exception e) {
+                e.printStackTrace();
             }
-        });
+
+        }, Dispatchers.getIO());
     }
 
     /**
@@ -296,6 +310,7 @@ public class UserProcess {
         }
         return "error";
     }
+
     public static boolean insertInventoryViewRequest(String key, String viewer, String sender) {
         Key request = new Key();
         request.viewer = viewer;
@@ -316,20 +331,22 @@ public class UserProcess {
         inventoryViewList.add(request);
         return true;
     }
-    public static void approveInventoryViewRequest(String secret){
+
+    public static void approveInventoryViewRequest(String secret) {
         for (Key obj : inventoryViewList) {
             if (Objects.equals(obj.key, secret)) {
                 obj.approve = true;
             }
         }
     }
-    public static String InventoryViewStatus(String key){
+
+    public static String InventoryViewStatus(String key) {
         JsonObject retObj = new JsonObject();
         int appr = 1;
         String viewer = "";
         for (Key obj : inventoryViewList) {
-            if (Objects.equals(obj.key, key)){
-                if (obj.approve){
+            if (Objects.equals(obj.key, key)) {
+                if (obj.approve) {
                     appr = 0;
                 }
                 viewer = obj.viewer;
@@ -339,11 +356,13 @@ public class UserProcess {
         retObj.addProperty("viewer", viewer);
         return retObj.toString();
     }
+
     public enum opEco {
         ADD,
         SUB,
         MINUS
     }
+
     public static class Key {
         String viewer;
         String provider;
@@ -367,31 +386,36 @@ public class UserProcess {
             return result;
         }
     }
-    public static void handlePlayerOnline(String name){
-        if (!Operation.exists("online" + name, QO_ONLINE_DATABASE)){
+
+    public static void handlePlayerOnline(String name) {
+        if (!Operation.exists("online" + name, QO_ONLINE_DATABASE)) {
             Operation.insert("online" + name, "true", QO_ONLINE_DATABASE);
         }
     }
-    public static void handlePlayerOffline(String name){
-        if (Operation.exists("online" + name, QO_ONLINE_DATABASE)){
-           Operation.delete("online" + name, QO_ONLINE_DATABASE);
+
+    public static void handlePlayerOffline(String name) {
+        if (Operation.exists("online" + name, QO_ONLINE_DATABASE)) {
+            Operation.delete("online" + name, QO_ONLINE_DATABASE);
         }
     }
+
     public static boolean verifyPasswd(String username, String password) throws NoSuchAlgorithmException {
         Users user = userORM.read(username);
         if (user == null) {
             return false;
         }
         String user_salt = user.getPassword().split("\\$")[2];
-        if (Algorithm.hash(Algorithm.hash(password, MessageDigest.getInstance("SHA-256")) + user_salt ,  MessageDigest.getInstance("SHA-256")).equals(user.getPassword().split("\\$")[3])){
+        if (Algorithm.hash(Algorithm.hash(password, MessageDigest.getInstance("SHA-256")) + user_salt, MessageDigest.getInstance("SHA-256")).equals(user.getPassword().split("\\$")[3])) {
             return true;
-        };
+        }
+        ;
         return false;
     }
+
     /**
      * Computes a securely hashed password with an optional formatted prefix.
      *
-     * @param password The plaintext password to be hashed.
+     * @param password  The plaintext password to be hashed.
      * @param formatted Flag indicating if the result should include the "$SHA$<salt>$" prefix.
      * @return The hashed password, optionally formatted with a prefix.
      * @throws NoSuchAlgorithmException If the SHA-256 algorithm is not available.
@@ -399,10 +423,11 @@ public class UserProcess {
     public static String computePassword(String password, boolean formatted) throws NoSuchAlgorithmException {
         String salt = Algorithm.generateRandomString(16);
         if (formatted) {
-            return "$SHA$" + salt + "$" +Algorithm.hash(Algorithm.hash(password, MessageDigest.getInstance("SHA-256")) + salt, MessageDigest.getInstance("SHA-256"));
+            return "$SHA$" + salt + "$" + Algorithm.hash(Algorithm.hash(password, MessageDigest.getInstance("SHA-256")) + salt, MessageDigest.getInstance("SHA-256"));
         }
         return Algorithm.hash(Algorithm.hash(password, MessageDigest.getInstance("SHA-256")) + salt, MessageDigest.getInstance("SHA-256"));
     }
+
     public static class registry_verify_class {
         String username;
         String token;
