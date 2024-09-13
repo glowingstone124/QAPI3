@@ -42,12 +42,14 @@ public class UserProcess {
     public static UserORM userORM = new UserORM();
     private static CoroutineAdapter ca;
     private static Redis redis = new Redis();
+
     @Autowired
     public UserProcess(CoroutineAdapter ca) {
         this.ca = ca;
     }
 
     static SynchronousQueue<String> onlinePlayers = new SynchronousQueue<>();
+
     public static String getServerStats() throws IOException {
         JSONArray statusArray = new JSONArray(Files.readString(Path.of("stat.json")));
         for (int i = 0; i < statusArray.length(); i++) {
@@ -118,33 +120,25 @@ public class UserProcess {
     }
 
     public static String queryReg(String name) {
+        JSONObject responseJson = new JSONObject();
         if (redis.exists("users:" + name, QO_REG_DATABASE)) {
             JsonObject retObj = (JsonObject) JsonParser.parseString(Objects.requireNonNull(redis.get(name, QO_REG_DATABASE)));
             retObj.addProperty("code", 0);
             return retObj.toString();
         }
-        try (Connection connection = ConnectionPool.getConnection();
-             PreparedStatement preparedStatement = connection.prepareStatement("SELECT uid,frozen,economy FROM users WHERE username = ?")) {
-            preparedStatement.setString(1, name);
-            try (ResultSet resultSet = preparedStatement.executeQuery()) {
-                if (resultSet.next()) {
-                    Long uid = resultSet.getLong("uid");
-                    Boolean frozen = resultSet.getBoolean("frozen");
-                    int eco = resultSet.getInt("economy");
-                    JSONObject responseJson = new JSONObject();
-                    responseJson.put("frozen", frozen);
-                    responseJson.put("qq", uid);
-                    responseJson.put("economy", eco);
-                    responseJson.put("online", redis.exists("online" + name, QO_ONLINE_DATABASE));
-                    redis.insert("user:" + name, responseJson.toString(), QO_REG_DATABASE);
-                    responseJson.put("code", 0);
-                    return responseJson.toString();
-                }
-            }
-        } catch (Exception e) {
-            e.printStackTrace();
+        Users result = userORM.read(name);
+        if (result != null) {
+            Long uid = result.getUid();
+            Boolean frozen = result.getFrozen();
+            int eco = result.getEconomy();
+            responseJson.put("frozen", frozen);
+            responseJson.put("qq", uid);
+            responseJson.put("economy", eco);
+            responseJson.put("online", redis.exists("online" + name, QO_ONLINE_DATABASE));
+            redis.insert("user:" + name, responseJson.toString(), QO_REG_DATABASE);
+            responseJson.put("code", 0);
+            return responseJson.toString();
         }
-        JSONObject responseJson = new JSONObject();
         responseJson.put("code", 1);
         responseJson.put("qq", -1);
         return responseJson.toString();
