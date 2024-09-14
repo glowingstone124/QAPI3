@@ -2,7 +2,6 @@ package org.qo.redis
 
 import org.qo.Logger
 import org.qo.redis.Configuration.pool
-import redis.clients.jedis.Jedis
 import redis.clients.jedis.exceptions.JedisConnectionException
 import redis.clients.jedis.exceptions.JedisDataException
 
@@ -13,7 +12,7 @@ class Redis{
             return
         }
         try {
-            pool.resource.use { jedis ->
+            pool!!.resource.use { jedis ->
                 jedis.select(database)
                 jedis.set(key, value)
                 jedis.expire(key, Configuration.EXPIRE_TIME)
@@ -30,7 +29,7 @@ class Redis{
             return null
         }
         return try {
-            pool.resource.use { jedis ->
+            pool!!.resource.use { jedis ->
                 jedis.select(database)
                 jedis.get(key)
             }
@@ -48,7 +47,7 @@ class Redis{
             return false
         }
         return try {
-            pool.resource.use { jedis ->
+            pool!!.resource.use { jedis ->
                 jedis.select(database)
                 jedis.exists(key)
             }
@@ -66,9 +65,9 @@ class Redis{
             return
         }
         try {
-            pool.resource.use { jedis ->
-                jedis.select(database)
-                jedis.del(key)
+            pool?.resource.use { jedis ->
+                jedis?.select(database)
+                jedis?.del(key)
             }
         } catch (e: JedisConnectionException) {
             Logger.log("ERROR: ${e.message}", Logger.LogLevel.ERROR)

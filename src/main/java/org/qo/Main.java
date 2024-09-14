@@ -1,10 +1,8 @@
 package org.qo;
 import org.qo.mcsmanager.InstanceUtil;
 import org.qo.redis.Configuration;
-import org.qo.server.SystemInfo;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
-import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.web.cors.CorsConfiguration;
@@ -14,9 +12,6 @@ import org.springframework.web.servlet.config.annotation.*;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 
-
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
 
 import static org.qo.Logger.LogLevel.*;
 @EnableScheduling
@@ -28,7 +23,7 @@ public class Main {
         if (args.length != 0) {
             for (String arg : args) {
                 if (arg.equals("--disable-redis")) {
-                    Configuration.EnableRedis = false;
+                    Configuration.INSTANCE.setEnableRedis(false);
                 }
             }
         }
@@ -40,7 +35,7 @@ public class Main {
            // Logger.log("", ERROR);
         //}
 
-        org.qo.redis.Configuration.init();
+        Configuration.INSTANCE.init();
         Funcs.Start();
         Funcs.ShowDic();
         InstanceUtil iu = new InstanceUtil();
