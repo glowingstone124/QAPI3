@@ -6,7 +6,10 @@ import org.springframework.stereotype.Service
 @Service
 class UAUtil {
     fun isCLIToolRequest(request: HttpServletRequest): Boolean {
-        val userAgent = request.getHeader("User-Agent")
+        val userAgent: String? = request.getHeader("User-Agent")
+        if (userAgent == null) {
+            return false;
+        }
         return userAgent.contains("curl") || userAgent.contains("postman") || userAgent.contains("apifox")
     }
 }

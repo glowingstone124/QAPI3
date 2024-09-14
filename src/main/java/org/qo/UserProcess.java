@@ -10,6 +10,7 @@ import org.qo.datas.Mapping.*;
 import org.json.JSONObject;
 import org.qo.mail.Mail;
 import org.qo.mail.MailPreset;
+import org.qo.redis.DatabaseType;
 import org.qo.redis.Redis;
 import org.qo.server.AvatarCache;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -121,8 +122,8 @@ public class UserProcess {
 
     public static String queryReg(String name) {
         JSONObject responseJson = new JSONObject();
-        if (redis.exists("users:" + name, QO_REG_DATABASE)) {
-            JsonObject retObj = (JsonObject) JsonParser.parseString(Objects.requireNonNull(redis.get(name, QO_REG_DATABASE)));
+        if (redis.exists("users:" + name, DatabaseType.QO_REG_DATABASE.getValue())) {
+            JsonObject retObj = (JsonObject) JsonParser.parseString(Objects.requireNonNull(redis.get(name, DatabaseType.QO_REG_DATABASE.getValue())));
             retObj.addProperty("code", 0);
             return retObj.toString();
         }
@@ -134,8 +135,8 @@ public class UserProcess {
             responseJson.put("frozen", frozen);
             responseJson.put("qq", uid);
             responseJson.put("economy", eco);
-            responseJson.put("online", redis.exists("online" + name, QO_ONLINE_DATABASE));
-            redis.insert("user:" + name, responseJson.toString(), QO_REG_DATABASE);
+            responseJson.put("online", redis.exists("online" + name, DatabaseType.QO_ONLINE_DATABASE.getValue()));
+            redis.insert("user:" + name, responseJson.toString(), DatabaseType.QO_REG_DATABASE.getValue());
             responseJson.put("code", 0);
             return responseJson.toString();
         }
@@ -192,7 +193,7 @@ public class UserProcess {
                     playerJson.addProperty("frozen", false);
                     playerJson.addProperty("pro", 0);
                     playerJson.addProperty("playtime", 0);
-                    redis.insert("user:" + name, playerJson.toString(), QO_REG_DATABASE);
+                    redis.insert("user:" + name, playerJson.toString(), DatabaseType.QO_REG_DATABASE.getValue());
                 }, Dispatchers.getIO());
                 Logger.log(name + " registered from " + IPUtil.getIpAddr(request), INFO);
                 Mail mail = new Mail();
@@ -381,14 +382,14 @@ public class UserProcess {
     }
 
     public static void handlePlayerOnline(String name) {
-        if (!redis.exists("online" + name, QO_ONLINE_DATABASE)) {
-            redis.insert("online" + name, "true", QO_ONLINE_DATABASE);
+        if (!redis.exists("online" + name, DatabaseType.QO_ONLINE_DATABASE.getValue())) {
+            redis.insert("online" + name, "true", DatabaseType.QO_ONLINE_DATABASE.getValue());
         }
     }
 
     public static void handlePlayerOffline(String name) {
-        if (redis.exists("online" + name, QO_ONLINE_DATABASE)) {
-            redis.delete("online" + name, QO_ONLINE_DATABASE);
+        if (redis.exists("online" + name, DatabaseType.QO_ONLINE_DATABASE.getValue())) {
+            redis.delete("online" + name, DatabaseType.QO_ONLINE_DATABASE.getValue());
         }
     }
 

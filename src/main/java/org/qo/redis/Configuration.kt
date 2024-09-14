@@ -15,9 +15,6 @@ object Configuration {
     val PATH = "data/redis/config.json"
     var EnableRedis = true
     var pool: JedisPool? = null
-    val QO_REG_DATABASE = 0
-    val QOAPP_REG_DATABASE = 1
-    val QO_ONLINE_DATABASE = 2
     val EXPIRE_TIME = 2 * 60 * 60L // 2 Hours
 
     @Throws(IOException::class)
@@ -78,5 +75,16 @@ object Configuration {
 
     fun close() {
         pool?.close()
+    }
+}
+enum class DatabaseType(val value: Int) {
+    QO_REG_DATABASE(0),
+    QOAPP_REG_DATABASE(1),
+    QO_ONLINE_DATABASE(2);
+
+    companion object {
+        fun fromInt(value: Int): DatabaseType? {
+            return DatabaseType.entries.find { it.value == value }
+        }
     }
 }
