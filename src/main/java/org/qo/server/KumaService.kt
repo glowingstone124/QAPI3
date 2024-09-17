@@ -23,7 +23,7 @@ import java.nio.file.Files;
 class KumaService {
     val KUMA_NODE_CONFIGURATION = "data/kuma.json";
     val NODES: HashMap<String, String> = HashMap();
-    fun init() {
+    init {
         if (!File(KUMA_NODE_CONFIGURATION).exists() || !File(KUMA_NODE_CONFIGURATION).isFile ) {
             createDefaultConfig();
             Logger.log("Could not found Kuma Config. Adding....", LogLevel.WARNING)

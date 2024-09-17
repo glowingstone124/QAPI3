@@ -1,6 +1,7 @@
 package org.qo;
 import org.qo.mcsmanager.InstanceUtil;
 import org.qo.redis.Configuration;
+import org.qo.server.KumaService;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.Bean;
@@ -34,7 +35,6 @@ public class Main {
             //Logger.log("Mail function doesn't work properly. With following exception:", ERROR);
            // Logger.log("", ERROR);
         //}
-
         Configuration.INSTANCE.init();
         Funcs.Start();
         Funcs.ShowDic();
