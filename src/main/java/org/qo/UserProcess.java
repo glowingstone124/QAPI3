@@ -181,7 +181,7 @@ public class UserProcess {
                             computePassword(password, true)
                     ));
                     String token = Algorithm.generateRandomString(16);
-                    Msg.put("用户 " + uid + "注册了一个账号：" + name + "，若非本人操作请忽略，确认账号请在消息发出后2小时内输入/approve-register " + token);
+                    Msg.Companion.put("用户 " + uid + "注册了一个账号：" + name + "，若非本人操作请忽略，确认账号请在消息发出后2小时内输入/approve-register " + token);
                     verify_list.add(new registry_verify_class(name, token, uid, System.currentTimeMillis()));
                 } catch (NoSuchAlgorithmException e) {
                     throw new RuntimeException(e);
