@@ -1,51 +1,75 @@
-package org.qo;
+package org.qo
 
-import com.google.gson.JsonArray;
-import com.google.gson.JsonObject;
+import com.google.gson.JsonArray
+import com.google.gson.JsonObject
+import kotlinx.coroutines.*
+import org.json.JSONArray
+import org.springframework.http.MediaType
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter
+import java.io.FileWriter
+import java.nio.charset.StandardCharsets
+import java.util.concurrent.LinkedBlockingQueue
 
-import java.io.FileWriter;
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.LinkedBlockingQueue;
+class Msg {
+    companion object {
+        const val MAX_QUEUE_SIZE = 300
+        val msgQueue = LinkedBlockingQueue<String>(MAX_QUEUE_SIZE)
 
-public class Msg {
-    private static final int MAX_QUEUE_SIZE = 300;
-    private static BlockingQueue<String> msgQueue = new LinkedBlockingQueue<>(MAX_QUEUE_SIZE);
+        suspend fun sse(): SseEmitter {
+            val emitter = SseEmitter(0L)
+            val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+            scope.launch {
+                try {
+                    if (!msgQueue.isEmpty()) {
+                        val jsonArr = msgQueue.take()
+                        emitter.send(JsonObject().apply {
+                            addProperty("messages", jsonArr)
+                        }, MediaType.APPLICATION_JSON)
+                    }
+                    while (true) {
+                        val jsonArr = msgQueue.take()
+                        emitter.send(JsonObject().apply {
+                            addProperty("messages", jsonArr)
+                        }, MediaType.APPLICATION_JSON)
+                    }
+                } catch (e: Exception) {
+                    emitter.completeWithError(e)
+                }
+            }
 
-    public static String webGet() {
-        JsonObject returnObj = new JsonObject();
-        if (msgQueue.isEmpty()) {
-            returnObj.addProperty("code", 400);
-        } else {
-            returnObj.addProperty("code", 0);
-            returnObj.addProperty("content", msgQueue.peek());
+            return emitter
         }
-        return returnObj.toString();
-    }
-
-    public static void put(String msg) {
-
-        try (FileWriter fw = new FileWriter("chathistory.txt", StandardCharsets.UTF_8, true)) {
-            fw.write(msg + "\n");
-        } catch (IOException e) {
-            e.printStackTrace();
+        fun webGet(): String {
+            return JsonObject().apply {
+                if (msgQueue.isEmpty()) {
+                    addProperty("code", 400)
+                } else {
+                    addProperty("code", 0)
+                    addProperty("content", msgQueue.peek())
+                }
+            }.toString()
         }
-
-        if (msgQueue.size() >= MAX_QUEUE_SIZE) {
-            msgQueue.poll();
+        fun put(msg: String) {
+            FileWriter("chathistory.txt", StandardCharsets.UTF_8).use { writer ->
+                writer.write(msg)
+                if (msgQueue.remainingCapacity() == 0) {
+                    msgQueue.poll()
+                }
+                msgQueue.offer(msg)
+            }
         }
-        msgQueue.offer(msg);
-    }
-
-    public static JsonObject get() {
-        JsonObject jsonObject = new JsonObject();
-        JsonArray jsonArray = new JsonArray();
-        for (String msg : msgQueue) {
-            jsonArray.add(msg);
+        fun get(): JsonObject {
+            return JsonObject().apply {
+                add("messages", msgQueue.toJsonArray())
+                addProperty("empty", msgQueue.isEmpty())
+            }
         }
-        jsonObject.add("messages", jsonArray);
-        jsonObject.addProperty("empty", jsonArray.isEmpty());
-        return jsonObject;
+        fun <T> LinkedBlockingQueue<T>.toJsonArray(): JsonArray {
+            val arr = JsonArray()
+            this.forEach { item ->
+                arr.add(item.toString())
+            }
+            return arr
+        }
     }
 }

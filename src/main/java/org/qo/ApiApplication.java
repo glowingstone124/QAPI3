@@ -35,7 +35,6 @@ import static org.qo.UserProcess.*;
 public class ApiApplication implements ErrorController {
     public static String status = "no old status found";
     public static String serverStatus;
-    private Nodes nodes = new Nodes();
     public static int serverAlive;
     public static long PackTime;
     public static int requests = 0;
@@ -89,7 +88,7 @@ public class ApiApplication implements ErrorController {
                 serverAlive = 1;
 
                 Logger.log("Server Stopped at "+ PackTime, Logger.LogLevel.INFO);
-                Msg.put("服务器停止于"+ uselessthings);
+                Msg.Companion.put("服务器停止于"+ uselessthings);
             }
             default -> serverAlive = -1;
         }
@@ -206,20 +205,9 @@ public class ApiApplication implements ErrorController {
     public ResponseEntity<String> GetData(String name){
         return ri.GeneralHttpHeader(UserProcess.queryReg(name));
     }
-    @PostMapping("/qo/msglist/upload")
-    public ResponseEntity<String> handleMsg(@RequestBody String data, HttpServletRequest request) {
-        HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(MediaType.APPLICATION_JSON);
-        if (ua.isCLIToolRequest(request)) return new ResponseEntity<>( "failed", headers,HttpStatus.BAD_REQUEST);
-        return nodes.validate_message(data) ? new ResponseEntity<>( "success", headers,HttpStatus.OK) : new ResponseEntity<>( "failed", headers,HttpStatus.BAD_REQUEST);
-    }
-    @GetMapping("/qo/msglist/download")
-    public ResponseEntity<String> returnMsg(){
-        return ri.GeneralHttpHeader(Msg.get().toString());
-    }
     @GetMapping("/qo/webmsg/download")
     public ResponseEntity<String> returnWeb(){
-        return ri.GeneralHttpHeader(Msg.webGet());
+        return ri.GeneralHttpHeader(Msg.Companion.webGet());
     }
     @PostMapping("/qo/loginip/upload")
     public void handleLogin(@RequestParam(name = "ip", required = true) String ip,@RequestParam(name = "auth", required = true) String auth, @RequestParam(name="username",required = true) String username) throws Exception {
@@ -244,7 +232,7 @@ public class ApiApplication implements ErrorController {
         String key = Funcs.generateRandomString(32);
         JsonObject retObj = new JsonObject();
         if (UserProcess.insertInventoryViewRequest(name,from,key)){
-            Msg.put(from+"发起了一个新的物品栏访问请求到"+name+ "。如果批准请输入/approve + 32位密钥");
+            Msg.Companion.put(from+"发起了一个新的物品栏访问请求到"+name+ "。如果批准请输入/approve + 32位密钥");
             retObj.addProperty("key", key);
             retObj.addProperty("code", 0);
         } else {

@@ -9,6 +9,12 @@ import org.springframework.stereotype.Service
 
 @Service
 class ReturnInterface {
+    fun GeneralHttpHeader(input: String, type: HttpStatus = HttpStatus.OK): ResponseEntity<String> {
+        val headers = HttpHeaders().apply {
+            contentType = MediaType.APPLICATION_JSON
+        }
+        return ResponseEntity(input, headers, type)
+    }
     fun GeneralHttpHeader(input: String): ResponseEntity<String> {
         val headers = HttpHeaders().apply {
             contentType = MediaType.APPLICATION_JSON

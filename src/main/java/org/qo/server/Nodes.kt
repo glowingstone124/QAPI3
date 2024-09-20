@@ -5,6 +5,7 @@ import com.google.gson.annotations.SerializedName
 import com.google.gson.reflect.TypeToken
 import org.qo.Logger
 import org.qo.Msg
+import org.springframework.stereotype.Service
 import java.io.FileReader
 import java.io.IOException
 
@@ -30,6 +31,7 @@ enum class Role {
     ROOT_NODE,
     CHILD_NODE
 }
+@Service
 
 class Nodes {
     private val SERVER_NODES = "nodes.json"
