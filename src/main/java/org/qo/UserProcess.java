@@ -132,10 +132,12 @@ public class UserProcess {
             Long uid = result.getUid();
             Boolean frozen = result.getFrozen();
             int eco = result.getEconomy();
+            long playtime = result.getPlaytime();
             responseJson.put("frozen", frozen);
             responseJson.put("qq", uid);
             responseJson.put("economy", eco);
             responseJson.put("online", redis.exists("online" + name, DatabaseType.QO_ONLINE_DATABASE.getValue()));
+            responseJson.put("playtime", playtime);
             redis.insert("user:" + name, responseJson.toString(), DatabaseType.QO_REG_DATABASE.getValue());
             responseJson.put("code", 0);
             return responseJson.toString();
