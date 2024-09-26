@@ -2,14 +2,20 @@ package org.qo
 
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.Runnable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import org.springframework.stereotype.Component
 import org.springframework.stereotype.Service
 import java.util.concurrent.Callable
 import java.util.concurrent.CompletableFuture
+import kotlin.time.Duration
+
 @Component
 class CoroutineAdapter {
 
@@ -32,5 +38,23 @@ class CoroutineAdapter {
             }
         }
         return future
+    }
+
+    fun setInterval(func: Runnable, interval: Duration, dispatcher: CoroutineDispatcher): Job {
+        val scope = CoroutineScope(dispatcher + SupervisorJob())
+        return scope.launch {
+            while (isActive) {
+                delay(interval)
+                try {
+                    func.run()
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+        }
+    }
+
+    fun clearInterval(job: Job) {
+        job.cancel()
     }
 }
