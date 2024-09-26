@@ -28,7 +28,7 @@ jobs:
       run: echo "TIMESTAMP=$(date +%Y%m%d%H%M%S)" >> $GITHUB_ENV
 
     - name: Upload JAR as Artifact
-      uses: actions/upload-artifact@v2
+      uses: actions/upload-artifact@v4
       with:
-        name: testbuild_${{ env.TIMESTAMP }}
+        pattern: QAPI
         path: build/libs/SpringbootQOapi-1.0-SNAPSHOT.jar
