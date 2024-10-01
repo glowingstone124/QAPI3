@@ -48,3 +48,10 @@ class SseService(private val eventPublisher: ApplicationEventPublisher) {
         eventPublisher.publishEvent(sseEvent)
     }
 }
+
+object newClass {
+    @JvmStatic
+    fun staticFunction() {
+
+    }
+}

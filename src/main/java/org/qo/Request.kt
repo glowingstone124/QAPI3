@@ -1,61 +1,91 @@
 package org.qo
 
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.*
 import java.io.BufferedReader
 import java.io.DataOutputStream
+import java.io.IOException
 import java.io.InputStreamReader
 import java.net.HttpURLConnection
 import java.net.URI
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
+import java.util.concurrent.CompletableFuture
 
 class Request {
-    fun sendPostRequest(target: String, data: String): String {
-        var result = ""
-        runBlocking(Dispatchers.IO) {
-            val url: URI = URI.create(target)
-            val connection: HttpURLConnection = url.toURL().openConnection() as HttpURLConnection
-            connection.requestMethod = "POST"
-            connection.doInput = true
-            connection.doOutput = true
-            connection.setRequestProperty("Content-Type", "application/json; charset=utf-8")
-            DataOutputStream(connection.outputStream).use {
-                it.writeBytes(data)
-            }
-            if (connection.responseCode == HttpURLConnection.HTTP_OK) {
-                BufferedReader(InputStreamReader(connection.inputStream)).use {
-                    result = it.readText()
+    private val coroutineScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+
+    fun sendPostRequest(target: String, data: String): CompletableFuture<String> {
+        val result = CompletableFuture<String>()
+        coroutineScope.launch {
+            try {
+                val url = URI.create(target).toURL()
+                val connection = (url.openConnection() as HttpURLConnection).apply {
+                    requestMethod = "POST"
+                    doInput = true
+                    doOutput = true
+                    setRequestProperty("Content-Type", "application/json; charset=utf-8")
                 }
+
+                DataOutputStream(connection.outputStream).use {
+                    it.writeBytes(data)
+                }
+
+                if (connection.responseCode == HttpURLConnection.HTTP_OK) {
+                    BufferedReader(InputStreamReader(connection.inputStream)).use {
+                        result.complete(it.readText())
+                    }
+                } else {
+                    result.completeExceptionally(IOException("Failed to send POST request: ${connection.responseCode}"))
+                }
+            } catch (e: Exception) {
+                result.completeExceptionally(e)
             }
         }
         return result
     }
-    fun sendGetRequest(target: String): String {
-        var result = ""
-        runBlocking(Dispatchers.IO) {
-            val url: URI = URI.create(target)
-            val connection: HttpURLConnection = url.toURL().openConnection() as HttpURLConnection
-            connection.requestMethod = "GET"
-            connection.doInput = true
-            connection.doOutput = true
-            connection.setRequestProperty("Content-Type", "application/json; charset=utf-8")
-            if (connection.responseCode == HttpURLConnection.HTTP_OK) {
-                BufferedReader(InputStreamReader(connection.inputStream)).use {
-                    result = it.readText()
+
+    fun sendGetRequest(target: String): CompletableFuture<String> {
+        val result = CompletableFuture<String>()
+        coroutineScope.launch {
+            try {
+                val url = URI.create(target).toURL()
+                val connection = (url.openConnection() as HttpURLConnection).apply {
+                    requestMethod = "GET"
+                    doInput = true
+                    setRequestProperty("Content-Type", "application/json; charset=utf-8")
                 }
+
+                if (connection.responseCode == HttpURLConnection.HTTP_OK) {
+                    BufferedReader(InputStreamReader(connection.inputStream)).use {
+                        result.complete(it.readText())
+                    }
+                } else {
+                    result.completeExceptionally(IOException("Failed to send GET request: ${connection.responseCode}"))
+                }
+            } catch (e: Exception) {
+                result.completeExceptionally(e)
             }
         }
         return result
     }
-    fun Download(url:String, path:String) {
-        val url:URI = URI.create(url)
-        val connection: HttpURLConnection = url.toURL().openConnection() as HttpURLConnection
-        connection.inputStream.use {
-            val targetPath = Path.of(path)
-            Files.copy(it, targetPath, StandardCopyOption.REPLACE_EXISTING)
+
+    fun download(url: String, path: String): CompletableFuture<Unit> {
+        val result = CompletableFuture<Unit>()
+        coroutineScope.launch {
+            try {
+                val targetUrl = URI.create(url).toURL()
+                val connection = targetUrl.openConnection() as HttpURLConnection
+
+                connection.inputStream.use { input ->
+                    val targetPath = Path.of(path)
+                    Files.copy(input, targetPath, StandardCopyOption.REPLACE_EXISTING)
+                    result.complete(Unit)
+                }
+            } catch (e: Exception) {
+                result.completeExceptionally(e)
+            }
         }
+        return result
     }
 }

@@ -21,8 +21,6 @@ public class AvatarCache {
         return Files.exists(Path.of(CachePath + name + ".png"));
     }
     public static void cache(String url, String name) throws Exception{
-        ca.push(()-> {
-            request.Download(url,CachePath + name);
-        }, Dispatchers.getIO());
+        request.download(url,CachePath + name);
     }
 }

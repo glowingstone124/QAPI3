@@ -37,14 +37,14 @@ class InstanceUtil {
     }
 
     fun compare() {
-        val latest_ver = JsonParser.parseString(request.sendGetRequest(api_endpoint)).asJsonObject.get("builds").asJsonObject.get("latest").asInt
+        val latest_ver = JsonParser.parseString(request.sendGetRequest(api_endpoint).get()).asJsonObject.get("builds").asJsonObject.get("latest").asInt
         println("Latest version from API: $latest_ver")
         if (latest_ver > revision_version) {
             if (revision_version == 0) {
                 println("Unable to get local game version")
                 return
             }
-            request.Download("$api_endpoint/$latest_ver/download", instance_folder_location)
+            request.download("$api_endpoint/$latest_ver/download", instance_folder_location)
             revision_version = latest_ver
             println("Downloaded new version: $revision_version")
             Logger.log("Downloaded new version: $latest_ver", Logger.LogLevel.INFO)

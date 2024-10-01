@@ -5,6 +5,8 @@ import org.qo.server.KumaService;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.Bean;
+import org.springframework.scheduling.annotation.Async;
+import org.springframework.scheduling.annotation.EnableAsync;
 import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
@@ -17,6 +19,7 @@ import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import static org.qo.Logger.LogLevel.*;
 @EnableScheduling
 @SpringBootApplication
+@EnableAsync
 public class Main {
     public static void main(String[] args) throws Exception {
         //SystemInfo si = new SystemInfo();
@@ -35,6 +38,7 @@ public class Main {
             //Logger.log("Mail function doesn't work properly. With following exception:", ERROR);
            // Logger.log("", ERROR);
         //}
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> Logger.log("API shutdown.", INFO)));
         Configuration.INSTANCE.init();
         Funcs.Start();
         Funcs.ShowDic();
@@ -43,9 +47,6 @@ public class Main {
         Logger.log("API Started.", INFO);
         SpringApplication.run(ApiApplication.class, args);
         Logger.startLogWriter("log.log", 3000);
-        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-            Logger.log("API shutdown.", INFO);
-        }));
     }
     @Bean
     public WebMvcConfigurer corsConfigurer() {
@@ -70,12 +71,5 @@ public class Main {
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", config);
         return new CorsFilter(source);
-    }
-    @Bean
-    public FilterRegistrationBean<Filter> filter() {
-        FilterRegistrationBean<Filter> registrationBean = new FilterRegistrationBean<>();
-        registrationBean.setFilter(new Filter());
-        registrationBean.addUrlPatterns("/*");
-        return registrationBean;
     }
 }
