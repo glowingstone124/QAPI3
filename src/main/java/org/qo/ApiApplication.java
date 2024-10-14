@@ -71,7 +71,7 @@ public class ApiApplication implements ErrorController {
     public ResponseEntity<String> root() {
         JSONObject returnObj = new JSONObject();
         returnObj.put("code",0);
-        returnObj.put("build", "202409052002");
+        returnObj.put("build", "202410141215");
         return ri.GeneralHttpHeader(returnObj.toString());
     }
     @PostMapping("/qo/alive/upload")
