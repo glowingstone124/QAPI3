@@ -236,9 +236,9 @@ public class UserProcess {
         String apiURL = "https://api.mojang.com/users/profiles/minecraft/" + name;
         String avatarURL = "https://playerdb.co/api/player/minecraft/";
         if (!AvatarCache.has(name)) {
-            JSONObject uuidobj = new JSONObject(request.sendGetRequest(apiURL));
+            JSONObject uuidobj = new JSONObject(request.sendGetRequest(apiURL).get());
             String uuid = uuidobj.getString("id");
-            JSONObject playerUUIDobj = new JSONObject(request.sendGetRequest(avatarURL + uuid));
+            JSONObject playerUUIDobj = new JSONObject(request.sendGetRequest(avatarURL + uuid).get());
             if (playerUUIDobj.getBoolean("success")) {
                 JSONObject player = playerUUIDobj.getJSONObject("data").getJSONObject("player");
                 JSONObject returnObject = new JSONObject();
