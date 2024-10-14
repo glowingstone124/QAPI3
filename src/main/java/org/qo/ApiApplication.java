@@ -1,6 +1,7 @@
 package org.qo;
 
 import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import jakarta.annotation.PostConstruct;
 import jakarta.servlet.http.HttpServletRequest;
 import org.apache.coyote.Response;
@@ -33,7 +34,7 @@ import static org.qo.UserProcess.*;
 @RestController
 @SpringBootApplication
 public class ApiApplication implements ErrorController {
-    public static String status = "no old status found";
+    //public static String status = "no old status found";
     public static String serverStatus;
     public static int serverAlive;
     public static long PackTime;
@@ -42,12 +43,14 @@ public class ApiApplication implements ErrorController {
     private UAUtil ua;
     public SseService sseService;
     private ReturnInterface ri;
+    private Status status;
     @Autowired
-    public ApiApplication(SseService sseService, Funcs fc, UAUtil uaUtil, ReturnInterface ri) {
+    public ApiApplication(SseService sseService, Funcs fc, UAUtil uaUtil, ReturnInterface ri, Status status) {
         this.sseService = sseService;
         this.fc = fc;
         this.ri = ri;
         this.ua = uaUtil;
+        this.status = status;
     }
     @PostConstruct
     public void init() {
@@ -121,9 +124,10 @@ public class ApiApplication implements ErrorController {
     }
     @PostMapping("/qo/upload/status")
     public void handlePost(@RequestBody String data) {
-        if (data != null) {
-            status = data;
-        }
+        //if (data != null) {
+        //    status = data;
+        //}
+        status.upload(data);
     }
     @PostMapping("/qo/online")
     public void handleOnlineRequest(@RequestParam String name){
@@ -151,7 +155,7 @@ public class ApiApplication implements ErrorController {
     public ResponseEntity<String> returnStatus() {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
-        if (status.equals("no old status found")) {
+        /*if (status.equals("no old status found")) {
             JSONObject plObj = new JSONObject();
             plObj.put("code", 1);
             plObj.put("reason", "no old status found");
@@ -166,6 +170,8 @@ public class ApiApplication implements ErrorController {
             }
             return new ResponseEntity<>(statObj.toString(), headers, HttpStatus.OK);
         }
+         */
+        return new ResponseEntity<>(status.download().toString(), headers, HttpStatus.OK);
     }
 
     /**
