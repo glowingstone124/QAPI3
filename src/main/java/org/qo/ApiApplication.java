@@ -205,6 +205,9 @@ public class ApiApplication implements ErrorController {
     }
     @RequestMapping("/qo/download/avatar")
     public ResponseEntity<String> avartarTrans(@RequestParam() String name) throws Exception {
+        if (name == null || name.isEmpty()) {
+            return ri.GeneralHttpHeader("no input");
+        }
         return ri.GeneralHttpHeader(UserProcess.AvatarTrans(name));
     }
     @RequestMapping("/qo/download/registry")
