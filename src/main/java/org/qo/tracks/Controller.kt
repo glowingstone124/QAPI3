@@ -3,13 +3,11 @@ package org.qo.tracks
 import org.json.JSONArray
 import org.json.JSONObject
 import org.qo.Msg
-import org.springframework.boot.autoconfigure.SpringBootApplication
 import org.springframework.web.bind.annotation.*
 
 @RestController
-@SpringBootApplication
 @RequestMapping("/hooks")
-open class Controller {
+class Controller {
 
     @PostMapping("/accept")
     fun accept(@RequestBody obj: String) {
