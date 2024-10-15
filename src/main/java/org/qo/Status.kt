@@ -26,17 +26,19 @@ class Status {
     )
 
     fun upload(input: String, header: String) {
-        val result = nodes.getServerFromToken(header)
+        /*val result = nodes.getServerFromToken(header)
         if (result == Pair("", 0)) {
             return
         }
         input.takeIf { it.isNotBlank() }?.let {
             statusMap[result.second] = input.asJsonObject()
-        }
+        }*
+         */
+        currentStatus = input.asJsonObject()
     }
 
     fun download(server: String?): JsonObject {
-        if (server.isNullOrEmpty()) {
+        /*if (server.isNullOrEmpty()) {
             if (statusMap[1]!!.has("timestamp") && System.currentTimeMillis() - currentStatus.get("timestamp").asLong >= 3000L) {
                 currentStatus.addProperty(
                     "reason",
@@ -64,6 +66,9 @@ class Status {
             }
         }
         return statusMap[currentServer.second]!!.apply { addProperty("totalcount", userORM.count()) }
+
+         */
+        return currentStatus.apply { addProperty("totalcount", userORM.count()) }
     }
     fun countOnline(): Int {
         return statusMap.values.count { it.has("code") && it.get("code").asInt == 0 }
