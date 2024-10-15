@@ -32,7 +32,6 @@ enum class Role {
     CHILD_NODE
 }
 @Service
-
 class Nodes {
     private val SERVER_NODES = "nodes.json"
     private val gson = Gson()
@@ -61,4 +60,14 @@ class Nodes {
             false
         }
     }
+    fun getServerFromToken(input: String): Pair<String, Int> {
+        nodesData.forEach {
+            if (it.token == input) {
+                return Pair(it.name, it.id)
+            }
+        }
+        return Pair("", 0)
+    }
+
+
 }
