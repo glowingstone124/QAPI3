@@ -6,6 +6,7 @@ import jakarta.annotation.PostConstruct;
 import jakarta.servlet.http.HttpServletRequest;
 import org.apache.coyote.Response;
 import org.json.JSONObject;
+import org.qo.server.MessageIn;
 import org.qo.server.Nodes;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
@@ -39,18 +40,20 @@ public class ApiApplication implements ErrorController {
     public static int serverAlive;
     public static long PackTime;
     public static int requests = 0;
+    private final Nodes nodes;
     private Funcs fc;
     private UAUtil ua;
     public SseService sseService;
     private ReturnInterface ri;
     private Status status;
     @Autowired
-    public ApiApplication(SseService sseService, Funcs fc, UAUtil uaUtil, ReturnInterface ri, Status status) {
+    public ApiApplication(SseService sseService, Funcs fc, UAUtil uaUtil, ReturnInterface ri, Status status, Nodes nodes) {
         this.sseService = sseService;
         this.fc = fc;
         this.ri = ri;
         this.ua = uaUtil;
         this.status = status;
+        this.nodes = nodes;
     }
     @PostConstruct
     public void init() {
@@ -72,10 +75,11 @@ public class ApiApplication implements ErrorController {
         JSONObject returnObj = new JSONObject();
         returnObj.put("code",0);
         returnObj.put("build", "202410141215");
+        returnObj.put("online", status.countOnline() + " server(s)");
         return ri.GeneralHttpHeader(returnObj.toString());
     }
     @PostMapping("/qo/alive/upload")
-    public void getAlive(@RequestBody String data){
+    public void getAlive(@RequestBody String data, @RequestHeader("Authorization") String header){
         JSONObject Heartbeat = new JSONObject(data);
         PackTime = Heartbeat.getLong("timestamp");
         long currentTime = new Date().getTime();
@@ -123,11 +127,11 @@ public class ApiApplication implements ErrorController {
         return ri.success(String.valueOf(timeStamp));
     }
     @PostMapping("/qo/upload/status")
-    public void handlePost(@RequestBody String data) {
+    public void handlePost(@RequestBody String data, @RequestHeader("Authorization") String header) {
         //if (data != null) {
         //    status = data;
         //}
-        status.upload(data);
+        status.upload(data, header);
     }
     @PostMapping("/qo/online")
     public void handleOnlineRequest(@RequestParam String name){
@@ -152,7 +156,7 @@ public class ApiApplication implements ErrorController {
         return new ResponseEntity<>(imageResource, headers, HttpStatus.OK);
     }
     @GetMapping("/qo/download/status")
-    public ResponseEntity<String> returnStatus() {
+    public ResponseEntity<String> returnStatus(String token) {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
         /*if (status.equals("no old status found")) {
@@ -171,7 +175,7 @@ public class ApiApplication implements ErrorController {
             return new ResponseEntity<>(statObj.toString(), headers, HttpStatus.OK);
         }
          */
-        return new ResponseEntity<>(status.download().toString(), headers, HttpStatus.OK);
+        return new ResponseEntity<>(status.download(token).toString(), headers, HttpStatus.OK);
     }
 
     /**
