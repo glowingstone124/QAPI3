@@ -37,7 +37,7 @@ class Status {
     }
 
     fun countOnline(): Int {
-        return statusMap.values.count { it.has("code") && it.get("code").asInt == 0 }
+        return statusMap.size
     }
 }
 
