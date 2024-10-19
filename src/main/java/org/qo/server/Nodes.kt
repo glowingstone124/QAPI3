@@ -60,14 +60,12 @@ class Nodes {
             false
         }
     }
-    fun getServerFromToken(input: String): Pair<String, Int> {
+    fun getServerFromToken(input: String): Int {
         nodesData.forEach {
             if (it.token == input) {
-                return Pair(it.name, it.id)
+                return it.id
             }
         }
-        return Pair("", 0)
+        return -1
     }
-
-
 }
