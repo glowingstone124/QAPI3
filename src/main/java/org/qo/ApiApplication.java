@@ -1,12 +1,9 @@
 package org.qo;
 
 import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
 import jakarta.annotation.PostConstruct;
 import jakarta.servlet.http.HttpServletRequest;
-import org.apache.coyote.Response;
 import org.json.JSONObject;
-import org.qo.server.MessageIn;
 import org.qo.server.Nodes;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
@@ -44,7 +41,7 @@ public class ApiApplication implements ErrorController {
     private Funcs fc;
     private UAUtil ua;
     public SseService sseService;
-    private ReturnInterface ri;
+    private final ReturnInterface ri;
     private Status status;
     @Autowired
     public ApiApplication(SseService sseService, Funcs fc, UAUtil uaUtil, ReturnInterface ri, Status status, Nodes nodes) {
@@ -215,7 +212,7 @@ public class ApiApplication implements ErrorController {
         return ri.GeneralHttpHeader(UserProcess.AvatarTrans(name));
     }
     @RequestMapping("/qo/download/registry")
-    public ResponseEntity<String> GetData(String name){
+    public ResponseEntity<String> GetData(@RequestParam(required = true) String name){
         return ri.GeneralHttpHeader(UserProcess.queryReg(name));
     }
     @GetMapping("/qo/webmsg/download")

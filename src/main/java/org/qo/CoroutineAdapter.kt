@@ -2,16 +2,13 @@ package org.qo
 
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.Runnable
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import org.springframework.stereotype.Component
-import org.springframework.stereotype.Service
 import java.util.concurrent.Callable
 import java.util.concurrent.CompletableFuture
 import kotlin.time.Duration
