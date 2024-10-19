@@ -4,6 +4,8 @@ import com.google.gson.JsonObject;
 import jakarta.annotation.PostConstruct;
 import jakarta.servlet.http.HttpServletRequest;
 import org.json.JSONObject;
+import org.qo.redis.Configuration;
+import org.qo.redis.Redis;
 import org.qo.server.Nodes;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
@@ -27,6 +29,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.Date;
 
+import static org.qo.Database.SQLAvliable;
 import static org.qo.UserProcess.*;
 
 @RestController
@@ -73,6 +76,8 @@ public class ApiApplication implements ErrorController {
         returnObj.put("code",0);
         returnObj.put("build", "202410141215");
         returnObj.put("online", status.countOnline() + " server(s)");
+        returnObj.put("sql", SQLAvliable());
+        returnObj.put("redis", Configuration.INSTANCE.getEnableRedis());
         return ri.GeneralHttpHeader(returnObj.toString());
     }
     @PostMapping("/qo/alive/upload")
