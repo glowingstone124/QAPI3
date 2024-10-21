@@ -29,7 +29,6 @@ dependencies {
     implementation("org.commonmark:commonmark:0.20.0")
     implementation("com.mysql:mysql-connector-j:8.4.0")
     implementation("org.jetbrains:annotations:23.0.0")
-    implementation("org.postgresql:postgresql:42.7.2")
     implementation("com.alibaba:druid:1.2.22")
     implementation("com.sun.mail:javax.mail:1.6.2")
     implementation("org.springframework.boot:spring-boot-starter-actuator")
