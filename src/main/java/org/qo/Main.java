@@ -1,11 +1,9 @@
 package org.qo;
-import org.qo.mcsmanager.InstanceUtil;
 import org.qo.redis.Configuration;
-import org.qo.server.KumaService;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.Bean;
-import org.springframework.scheduling.annotation.Async;
+
 import org.springframework.scheduling.annotation.EnableAsync;
 import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.web.cors.CorsConfiguration;
@@ -13,7 +11,6 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 import org.springframework.web.filter.CorsFilter;
 import org.springframework.web.servlet.config.annotation.*;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
-import org.springframework.boot.web.servlet.FilterRegistrationBean;
 
 
 import static org.qo.Logger.LogLevel.*;
@@ -42,8 +39,6 @@ public class Main {
         Configuration.INSTANCE.init();
         Funcs.Start();
         Funcs.ShowDic();
-        InstanceUtil iu = new InstanceUtil();
-        iu.run();
         Logger.log("API Started.", INFO);
         SpringApplication.run(ApiApplication.class, args);
         Logger.startLogWriter("log.log", 3000);

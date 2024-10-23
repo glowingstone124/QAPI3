@@ -8,8 +8,15 @@ import org.qo.ConnectionPool
 import java.sql.PreparedStatement
 import java.sql.ResultSet
 
-class UserORM : CrudDao<Users> {
-
+class UserORM : CrudDao<Users>{
+    fun count(): Long {
+        return ConnectionPool.getConnection().use { connection ->
+            connection.prepareStatement(COUNT_USERS_SQL).use { stmt ->
+                val rs = stmt.executeQuery()
+                if (rs.next()) rs.getLong("total") else 0L
+            }
+        }
+    }
     companion object {
         private const val INSERT_USER_SQL =
             "INSERT INTO users (username, uid, frozen, remain, economy, signed, playtime, password) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
@@ -17,8 +24,8 @@ class UserORM : CrudDao<Users> {
         private const val SELECT_USER_BY_USERNAME_SQL = "SELECT * FROM users WHERE username = ?"
         private const val DELETE_USER_BY_ID_SQL = "DELETE FROM users WHERE uid = ?"
         private const val DELETE_USER_BY_USERNAME_SQL = "DELETE FROM users WHERE username = ?"
+        private const val COUNT_USERS_SQL = "SELECT COUNT(*) AS total FROM users"
     }
-
     override fun create(user: Users): Long = runBlocking {
         withContext(Dispatchers.IO) {
             return@withContext ConnectionPool.getConnection().use { connection ->
@@ -99,7 +106,6 @@ class UserORM : CrudDao<Users> {
                 is Long -> DELETE_USER_BY_ID_SQL to { stmt: PreparedStatement -> stmt.setLong(1, input) }
                 is String -> DELETE_USER_BY_USERNAME_SQL to { stmt: PreparedStatement -> stmt.setString(1, input) }
                 else -> throw IllegalArgumentException("Input must be either a String or a Long")
-
             }
             return@withContext ConnectionPool.getConnection().use { connection ->
                 connection.prepareStatement(sql).use { stmt ->
