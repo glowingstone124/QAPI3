@@ -36,6 +36,8 @@ import static org.qo.redis.Configuration.*;
 public class UserProcess {
     public static final String CODE_CONFIGURATION = "data/code.json";
     public static ConcurrentLinkedDeque<registry_verify_class> verify_list = new ConcurrentLinkedDeque<>();
+    public static ConcurrentLinkedDeque<password_verify_class> pwdupd_list = new ConcurrentLinkedDeque<>();
+
     public static ArrayList<Key> inventoryViewList = new ArrayList<>();
     public static Request request = new Request();
     public static String CODE = "null";
@@ -208,6 +210,39 @@ public class UserProcess {
         return future.get();
     }
 
+    public static ResponseEntity<String> updatePassword(Long uid, String newPassword) throws ExecutionException, InterruptedException {
+        CompletableFuture<ResponseEntity<String>> future = ca.run(() -> {
+            Users user = userORM.read(uid);
+            if (Objects.nonNull(user)) {
+                String token = Algorithm.generateRandomString(16);
+                Msg.Companion.put("用户 " + uid + "更改了账号：" + user.getUsername() + "的密码，若非本人操作请忽略，确认账号请在消息发出后2小时内输入/update-password " + token);
+                pwdupd_list.add(new password_verify_class(newPassword, token, uid, System.currentTimeMillis() ));
+                return ri.success("请求已提交。");
+            } else {
+                return ri.failed("用户不存在！");
+            }
+        }, Dispatchers.getIO());
+        return future.get();
+    }
+
+    private static void doUpdatePassword(Long uid, String newPassword) {
+        try {
+            String encryptedPassword = computePassword(newPassword, true);
+            userORM.updatePassword(uid, encryptedPassword);
+        } catch (NoSuchAlgorithmException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    public static boolean validatePasswordUpdateRequest(String token, Long uid) {
+        for (password_verify_class classObj : pwdupd_list) {
+            if (Objects.equals(classObj.token, token) && Objects.equals(classObj.uid, uid) && System.currentTimeMillis() - classObj.expiration < 7200000) {
+                doUpdatePassword(uid, classObj.password);
+                return true;
+            }
+        }
+        return false;
+    }
     public static boolean validateMinecraftUser(String token, HttpServletRequest request, Long uid) {
         Iterator<registry_verify_class> iterator = verify_list.iterator();
         while (iterator.hasNext()) {
@@ -432,6 +467,20 @@ public class UserProcess {
 
         public registry_verify_class(String username, String token, Long uid, Long expiration) {
             this.username = username;
+            this.token = token;
+            this.uid = uid;
+            this.expiration = expiration;
+        }
+    }
+
+    public static class password_verify_class {
+        String password;
+        String token;
+        Long uid;
+        Long expiration;
+
+        public password_verify_class(String password, String token, Long uid, Long expiration) {
+            this.password = password;
             this.token = token;
             this.uid = uid;
             this.expiration = expiration;

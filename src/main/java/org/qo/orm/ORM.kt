@@ -1,14 +1,16 @@
 package org.qo.orm
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import org.qo.datas.Mapping.Users
 import org.qo.ConnectionPool
+import org.qo.UserProcess.computePassword
 import java.sql.PreparedStatement
 import java.sql.ResultSet
 
-class UserORM : CrudDao<Users>{
+class UserORM : CrudDao<Users> {
     fun count(): Long {
         return ConnectionPool.getConnection().use { connection ->
             connection.prepareStatement(COUNT_USERS_SQL).use { stmt ->
@@ -17,6 +19,7 @@ class UserORM : CrudDao<Users>{
             }
         }
     }
+
     companion object {
         private const val INSERT_USER_SQL =
             "INSERT INTO users (username, uid, frozen, remain, economy, signed, playtime, password) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
@@ -26,6 +29,7 @@ class UserORM : CrudDao<Users>{
         private const val DELETE_USER_BY_USERNAME_SQL = "DELETE FROM users WHERE username = ?"
         private const val COUNT_USERS_SQL = "SELECT COUNT(*) AS total FROM users"
     }
+
     override fun create(user: Users): Long = runBlocking {
         withContext(Dispatchers.IO) {
             return@withContext ConnectionPool.getConnection().use { connection ->
@@ -52,6 +56,23 @@ class UserORM : CrudDao<Users>{
                     val rs = stmt.executeQuery()
                     if (rs.next()) mapResultSetToUser(rs) else null
                 }
+            }
+        }
+    }
+    fun updatePassword(uid: Long, newPassword: String): Boolean = runBlocking {
+        withContext(Dispatchers.IO) {
+            try {
+                val sql = "UPDATE users SET password = ? WHERE uid = ?"
+                return@withContext ConnectionPool.getConnection().use { connection ->
+                    connection.prepareStatement(sql).use { stmt ->
+                        stmt.setString(1, newPassword)
+                        stmt.setLong(2, uid)
+                        stmt.executeUpdate() > 0
+                    }
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+                return@withContext false
             }
         }
     }
@@ -140,15 +161,17 @@ class UserORM : CrudDao<Users>{
         )
     }
 
-    private suspend fun setParamValues(stmt: PreparedStatement, values: MutableList<Any?>) = withContext(Dispatchers.IO) {
-        for ((index, value) in values.withIndex()) {
-            when (value) {
-                is String -> stmt.setString(index + 1, value)
-                is Boolean -> stmt.setBoolean(index + 1, value)
-                is Int -> stmt.setInt(index + 1, value)
-                is Long -> stmt.setLong(index + 1, value)
-                else -> throw IllegalArgumentException("Unsupported data type")
+    private suspend fun setParamValues(stmt: PreparedStatement, values: MutableList<Any?>) =
+        withContext(Dispatchers.IO) {
+            for ((index, value) in values.withIndex()) {
+                when (value) {
+                    is String -> stmt.setString(index + 1, value)
+                    is Boolean -> stmt.setBoolean(index + 1, value)
+                    is Int -> stmt.setInt(index + 1, value)
+                    is Long -> stmt.setLong(index + 1, value)
+                    else -> throw IllegalArgumentException("Unsupported data type")
+                }
             }
         }
-    }
+
 }
