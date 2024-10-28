@@ -172,6 +172,12 @@ public class UserProcess {
 
     public static ResponseEntity<String> regMinecraftUser(String name, Long uid, HttpServletRequest request, String password) throws ExecutionException, InterruptedException {
         CompletableFuture<ResponseEntity<String>> future = ca.run(() -> {
+            if (userORM.read(name) != null) {
+                return ri.failed("username already exist");
+            }
+            if (userORM.read(uid) != null) {
+                return ri.failed("qq already exist");
+            }
             if (Objects.equals(userORM.read(uid), null) && name != null && uid != null) {
                 try {
                     userORM.create(new Users(
