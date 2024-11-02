@@ -30,6 +30,7 @@ object SQL {
             if (urlInfo == null) {
                 throw IllegalArgumentException("Invalid JDBC URL format: ${sqlInfo.url}")
             }
+            println("Parsed URL Info: $urlInfo")
 
             _configuration = MySqlConnectionConfiguration.builder()
                 .username(sqlInfo.username)
