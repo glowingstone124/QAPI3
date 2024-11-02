@@ -13,6 +13,7 @@ class Status() {
 
     init {
         nodes = Nodes()
+        userORM = UserORM()
     }
 
     var fallbackStatus = JsonObject().apply {
