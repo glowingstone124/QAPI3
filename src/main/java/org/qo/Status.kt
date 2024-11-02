@@ -7,12 +7,11 @@ import org.qo.server.Nodes
 import org.springframework.stereotype.Service
 
 @Service
-class Status {
+class Status() {
     lateinit var userORM: UserORM
     lateinit var nodes: Nodes
 
     init {
-        userORM = UserORM()
         nodes = Nodes()
     }
 

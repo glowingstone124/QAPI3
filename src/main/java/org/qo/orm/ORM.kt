@@ -8,10 +8,12 @@ import kotlinx.coroutines.withContext
 import org.qo.datas.Mapping.Users
 import org.qo.ConnectionPool
 import org.qo.UserProcess.computePassword
+import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.stereotype.Service
 import java.sql.PreparedStatement
 import java.sql.ResultSet
 
-class UserORM : CrudDao<Users> {
+class UserORM() : CrudDao<Users>  {
     fun count(): Long = runBlocking {
         /*return ConnectionPool.getConnection().use { connection ->
             connection.prepareStatement(COUNT_USERS_SQL).use { stmt ->

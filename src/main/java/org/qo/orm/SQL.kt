@@ -3,8 +3,13 @@ package org.qo.orm
 import com.google.gson.Gson
 import io.asyncer.r2dbc.mysql.MySqlConnectionConfiguration
 import io.asyncer.r2dbc.mysql.MySqlConnectionFactory
+import io.r2dbc.spi.ConnectionFactories
+import io.r2dbc.spi.ConnectionFactoryOptions
 import kotlinx.coroutines.reactive.awaitFirst
 import kotlinx.coroutines.reactive.awaitSingle
+import org.qo.orm.SQL.configuration
+import org.springframework.context.annotation.Bean
+import org.springframework.context.annotation.Configuration
 import java.nio.file.Files
 import java.nio.file.Paths
 
@@ -48,4 +53,12 @@ object SQL {
     data class SQLInfo(val username: String, val password: String, val url: String)
 
     suspend fun getConnection() = connectionFactory.create().awaitSingle()
+}
+
+@Configuration
+class DBConfig {
+    @Bean
+    fun connectionFactory(): MySqlConnectionFactory {
+        return MySqlConnectionFactory.from(configuration)
+    }
 }
