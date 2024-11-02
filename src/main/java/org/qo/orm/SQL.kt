@@ -3,20 +3,25 @@ package org.qo.orm
 import com.google.gson.Gson
 import io.asyncer.r2dbc.mysql.MySqlConnectionConfiguration
 import io.asyncer.r2dbc.mysql.MySqlConnectionFactory
-import io.r2dbc.spi.ConnectionFactories
-import io.r2dbc.spi.ConnectionFactoryOptions
-import kotlinx.coroutines.reactive.awaitFirst
 import kotlinx.coroutines.reactive.awaitSingle
-import org.qo.orm.SQL.configuration
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import java.nio.file.Files
 import java.nio.file.Paths
 
 object SQL {
-    lateinit var configuration: MySqlConnectionConfiguration
-    val connectionFactory = MySqlConnectionFactory.from(configuration)
-    init {
+    private lateinit var _configuration: MySqlConnectionConfiguration
+    val configuration: MySqlConnectionConfiguration
+        get() {
+            if (!::_configuration.isInitialized) {
+                initialize()
+            }
+            return _configuration
+        }
+
+    val connectionFactory: MySqlConnectionFactory by lazy { MySqlConnectionFactory.from(configuration) }
+
+    private fun initialize() {
         try {
             val content = Files.readString(Paths.get("data/sql/info.json"))
             val sqlInfo = Gson().fromJson(content, SQLInfo::class.java)
@@ -26,7 +31,7 @@ object SQL {
                 throw IllegalArgumentException("Invalid JDBC URL format: ${sqlInfo.url}")
             }
 
-            configuration = MySqlConnectionConfiguration.builder()
+            _configuration = MySqlConnectionConfiguration.builder()
                 .username(sqlInfo.username)
                 .password(sqlInfo.password)
                 .host(urlInfo.first)
@@ -39,7 +44,7 @@ object SQL {
         }
     }
 
-    fun parseJdbcUrl(jdbcUrl: String): Triple<String, Int, String>? {
+    private fun parseJdbcUrl(jdbcUrl: String): Triple<String, Int, String>? {
         val regex = Regex("jdbc:mysql://([^:/]+)(?::(\\d+))?/(\\w+)")
         val matchResult = regex.matchEntire(jdbcUrl)
         return matchResult?.let {
@@ -57,8 +62,9 @@ object SQL {
 
 @Configuration
 class DBConfig {
+
     @Bean
     fun connectionFactory(): MySqlConnectionFactory {
-        return MySqlConnectionFactory.from(configuration)
+        return SQL.connectionFactory
     }
 }
