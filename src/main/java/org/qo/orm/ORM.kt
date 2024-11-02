@@ -2,6 +2,7 @@ package org.qo.orm
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.reactive.awaitSingle
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import org.qo.datas.Mapping.Users
@@ -11,13 +12,17 @@ import java.sql.PreparedStatement
 import java.sql.ResultSet
 
 class UserORM : CrudDao<Users> {
-    fun count(): Long {
-        return ConnectionPool.getConnection().use { connection ->
+    fun count(): Long = runBlocking {
+        /*return ConnectionPool.getConnection().use { connection ->
             connection.prepareStatement(COUNT_USERS_SQL).use { stmt ->
                 val rs = stmt.executeQuery()
                 if (rs.next()) rs.getLong("total") else 0L
             }
-        }
+        }*/
+        val result = SQL.getConnection().createStatement(COUNT_USERS_SQL).execute().awaitSingle()
+        result.map { row, _ ->
+            row.get("total", Long::class.java) ?: 0L
+        }.awaitSingle()
     }
 
     companion object {
