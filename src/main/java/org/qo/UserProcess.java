@@ -131,6 +131,7 @@ public class UserProcess {
         }
         Users result = userORM.read(name);
         if (result != null) {
+            boolean temp = result.getTemp();
             Long uid = result.getUid();
             Boolean frozen = result.getFrozen();
             int eco = result.getEconomy();
@@ -140,8 +141,10 @@ public class UserProcess {
             responseJson.put("economy", eco);
             responseJson.put("online", redis.exists("online" + name, DatabaseType.QO_ONLINE_DATABASE.getValue()));
             responseJson.put("playtime", playtime);
+            responseJson.put("temp", temp);
             redis.insert("user:" + name, responseJson.toString(), DatabaseType.QO_REG_DATABASE.getValue());
             responseJson.put("code", 0);
+            if (temp) responseJson.put("code", 2);
             return responseJson.toString();
         }
         responseJson.put("code", 1);
