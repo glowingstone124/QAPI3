@@ -206,7 +206,6 @@ public class ApiApplication implements ErrorController {
         if (ua.isCLIToolRequest(request)) return new ResponseEntity<>("failed", headers, HttpStatus.BAD_REQUEST);
         return UserProcess.regMinecraftUser(name, uid, request, password);
     }
-
     @RequestMapping("/qo/upload/confirmation")
     public static ResponseEntity<String> verifyReg(@RequestParam String token, HttpServletRequest request, @RequestParam Long uid, @RequestParam int task) {
         HttpHeaders headers = new HttpHeaders();

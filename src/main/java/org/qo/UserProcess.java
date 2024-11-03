@@ -188,6 +188,8 @@ public class UserProcess {
                             0,
                             false,
                             0,
+                            false,
+                            0,
                             computePassword(password, true)
                     ));
                     String token = Algorithm.generateRandomString(16);

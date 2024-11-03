@@ -29,7 +29,7 @@ class UserORM() : CrudDao<Users>  {
 
     companion object {
         private const val INSERT_USER_SQL =
-            "INSERT INTO users (username, uid, frozen, remain, economy, signed, playtime, password) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+            "INSERT INTO users (username, uid, frozen, remain, economy, signed, playtime, password, temp, invite) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         private const val SELECT_USER_BY_ID_SQL = "SELECT * FROM users WHERE uid = ?"
         private const val SELECT_USER_BY_USERNAME_SQL = "SELECT * FROM users WHERE username = ?"
         private const val DELETE_USER_BY_ID_SQL = "DELETE FROM users WHERE uid = ?"
@@ -116,6 +116,14 @@ class UserORM() : CrudDao<Users>  {
                 fields.add("password = ?")
                 values.add(it)
             }
+            user.temp?.let {
+                fields.add("temp = ?")
+                values.add(it)
+            }
+            user.invite?.let {
+                fields.add("invite = ?")
+                values.add(it)
+            }
             if (fields.isEmpty()) return@withContext false
             val sql = "UPDATE users SET ${fields.joinToString(", ")} WHERE uid = ?"
             values.add(user.uid)
@@ -147,12 +155,14 @@ class UserORM() : CrudDao<Users>  {
     private suspend fun setStatementParams(stmt: PreparedStatement, user: Users) = withContext(Dispatchers.IO) {
         stmt.setString(1, user.username)
         stmt.setLong(2, user.uid)
-        stmt.setBoolean(3, user.frozen ?: false)
+        stmt.setBoolean(3, user.frozen == true)
         stmt.setInt(4, user.remain ?: 3)
         stmt.setInt(5, user.economy ?: 0)
-        stmt.setBoolean(6, user.signed ?: false)
+        stmt.setBoolean(6, user.signed == true)
         stmt.setInt(7, user.playtime ?: 0)
         stmt.setString(8, user.password)
+        stmt.setBoolean(9, user.temp == true)
+        stmt.setInt(10, user.invite ?: 0)
     }
 
     private suspend fun mapResultSetToUser(rs: ResultSet): Users = withContext(Dispatchers.IO) {
@@ -164,7 +174,9 @@ class UserORM() : CrudDao<Users>  {
             economy = rs.getInt("economy"),
             signed = rs.getBoolean("signed"),
             playtime = rs.getInt("playtime"),
-            password = rs.getString("password")
+            password = rs.getString("password"),
+            temp = rs.getBoolean("temp"),
+            invite = rs.getInt("invite")
         )
     }
 

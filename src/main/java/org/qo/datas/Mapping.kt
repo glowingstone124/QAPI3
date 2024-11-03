@@ -10,6 +10,8 @@ class Mapping {
         val economy: Int? = 0,
         val signed: Boolean? = false,
         val playtime: Int? = 0,
+        val temp: Boolean?,
+        val invite: Int?,
         var password: String
     ) {
         override fun equals(other: Any?): Boolean {
