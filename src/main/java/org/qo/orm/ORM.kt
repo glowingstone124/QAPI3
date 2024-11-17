@@ -14,18 +14,36 @@ import java.sql.PreparedStatement
 import java.sql.ResultSet
 
 class UserORM() : CrudDao<Users>  {
-    fun count(): Long = runBlocking {
-        /*return ConnectionPool.getConnection().use { connection ->
-            connection.prepareStatement(COUNT_USERS_SQL).use { stmt ->
-                val rs = stmt.executeQuery()
-                if (rs.next()) rs.getLong("total") else 0L
+
+    object UserCache {
+        private var cachedValue: Long? = null
+        private var lastUpdated: Long = 0
+        private const val CACHE_EXPIRATION_TIME = 5 * 60 * 1000L  // 5 MIN
+        fun getCachedValue(): Long? {
+            val currentTime = System.currentTimeMillis()
+            if (cachedValue != null && currentTime - lastUpdated < CACHE_EXPIRATION_TIME) {
+                return cachedValue
             }
-        }*/
+            return null
+        }
+        fun updateCache(value: Long) {
+            cachedValue = value
+            lastUpdated = System.currentTimeMillis()
+        }
+    }
+    fun count(): Long = runBlocking {
+        val cachedValue = UserCache.getCachedValue()
+        if (cachedValue != null) {
+            return@runBlocking cachedValue
+        }
         val result = SQL.getConnection().createStatement(COUNT_USERS_SQL).execute().awaitSingle()
-        result.map { row, _ ->
+        val count = result.map { row, _ ->
             row.get("total", Long::class.java) ?: 0L
         }.awaitSingle()
+        UserCache.updateCache(count)
+        return@runBlocking count
     }
+
 
     companion object {
         private const val INSERT_USER_SQL =
