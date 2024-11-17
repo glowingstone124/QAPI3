@@ -30,8 +30,10 @@ class LeaveMessageController(private val service: LeaveMessageService) {
 		val result = withContext(Dispatchers.IO) {
 			service.getTargetReceivers(receiver)
 		}
-		return returnInterface.GeneralHttpHeader(Gson().toJson(result))
+		val jsonResponse = if (result.isEmpty()) "[]" else Gson().toJson(result)
+		return returnInterface.GeneralHttpHeader(jsonResponse)
 	}
+	
 }
 
 data class returnStat(val code:Int)
