@@ -1,6 +1,6 @@
 package org.qo.mmdb
 
-import org.qo.mmdb.Init.Companion.reader
+import org.qo.mmdb.Init.reader
 import java.net.InetAddress
 
 object Query {
