@@ -9,13 +9,11 @@ import java.io.IOException
 import java.nio.file.Path
 import kotlin.io.path.exists
 
-class Init {
-	companion object {
-		val geoip_db_url = "https://cdn.jsdelivr.net/gh/Hackl0us/GeoIP2-CN@release/Country.mmdb"
-		val geoip_db_local = "Country.mmdb"
-		var geoip_enabled = false
-		lateinit var reader: DatabaseReader
-	}
+object Init {
+	val geoip_db_url = "https://cdn.jsdelivr.net/gh/Hackl0us/GeoIP2-CN@release/Country.mmdb"
+	val geoip_db_local = "Country.mmdb"
+	var geoip_enabled = false
+	lateinit var reader: DatabaseReader
 
 	fun init() {
 		Logger.log("GeoIP database loading...", INFO)

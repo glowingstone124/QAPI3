@@ -1,4 +1,5 @@
 package org.qo;
+import org.qo.mmdb.Init;
 import org.qo.redis.Configuration;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
@@ -38,6 +39,7 @@ public class Main {
         Runtime.getRuntime().addShutdownHook(new Thread(() -> Logger.log("API shutdown.", INFO)));
         Configuration.INSTANCE.init();
         Funcs.Start();
+        Init.INSTANCE.init();
         Funcs.ShowDic();
         Logger.log("API Started.", INFO);
         SpringApplication.run(ApiApplication.class, args);
