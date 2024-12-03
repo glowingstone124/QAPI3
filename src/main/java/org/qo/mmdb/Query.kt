@@ -6,11 +6,9 @@ import java.net.InetAddress
 object Query {
 	fun getIpInfo(ip: String): IPInfo {
 		val ip = InetAddress.getByName(ip)
-		val response = reader.city(ip)
+		val response = reader.country(ip)
 		return IPInfo(
 			response.country.names["zh-CN"],
-			response.mostSpecificSubdivision.names["zh-CN"],
-			response.city.names["zh-CN"]
 		)
 	}
 }
