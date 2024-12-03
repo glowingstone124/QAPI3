@@ -287,7 +287,9 @@ public class ApiApplication implements ErrorController {
         headers.setContentType(MediaType.APPLICATION_JSON);
         if (ua.isCLIToolRequest(request)) return new ResponseEntity<>("failed", headers, HttpStatus.BAD_REQUEST);
         JsonObject retObj = new JsonObject();
-        retObj.addProperty("result", verifyPasswd(username, password));
+        var result = performLogin(username, password);
+        retObj.addProperty("result", result.getFirst());
+        retObj.addProperty("token", result.getSecond());
         return new ResponseEntity<>(retObj.toString(), headers, HttpStatus.OK);
     }
 }

@@ -3,8 +3,10 @@ package org.qo;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import jakarta.servlet.http.HttpServletRequest;
+import kotlin.Pair;
 import kotlinx.coroutines.Dispatchers;
 import org.json.JSONArray;
+import org.qo.loginService.Login;
 import org.qo.orm.UserORM;
 import org.qo.datas.Mapping.*;
 import org.json.JSONObject;
@@ -42,6 +44,7 @@ public class UserProcess {
     public static Request request = new Request();
     public static String CODE = "null";
     private static ReturnInterface ri = new ReturnInterface();
+    private static Login login = new Login();
     public static UserORM userORM = new UserORM();
     private static CoroutineAdapter ca;
     private static Redis redis = new Redis();
@@ -183,18 +186,7 @@ public class UserProcess {
             }
             if (Objects.equals(userORM.read(uid), null) && name != null && uid != null) {
                 try {
-                    userORM.create(new Users(
-                            name,
-                            uid,
-                            true,
-                            3,
-                            0,
-                            false,
-                            0,
-                            false,
-                            0,
-                            computePassword(password, true)
-                    ));
+                    userORM.create(new Users(name, uid, true, 3, 0, false, 0, false, 0, computePassword(password, true)));
                     String token = Algorithm.generateRandomString(16);
                     Msg.Companion.put("用户 " + uid + "注册了一个账号：" + name + "，若非本人操作请忽略，确认账号请在消息发出后2小时内输入/approve-register " + token);
                     verify_list.add(new registry_verify_class(name, token, uid, System.currentTimeMillis()));
@@ -227,7 +219,7 @@ public class UserProcess {
             if (Objects.nonNull(user)) {
                 String token = Algorithm.generateRandomString(16);
                 Msg.Companion.put("用户 " + uid + "更改了账号：" + user.getUsername() + "的密码，若非本人操作请忽略，确认账号请在消息发出后2小时内输入/update-password " + token);
-                pwdupd_list.add(new password_verify_class(newPassword, token, uid, System.currentTimeMillis() ));
+                pwdupd_list.add(new password_verify_class(newPassword, token, uid, System.currentTimeMillis()));
                 return ri.success("请求已提交。");
             } else {
                 return ri.failed("用户不存在！");
@@ -254,6 +246,7 @@ public class UserProcess {
         }
         return false;
     }
+
     public static boolean validateMinecraftUser(String token, HttpServletRequest request, Long uid) {
         Iterator<registry_verify_class> iterator = verify_list.iterator();
         while (iterator.hasNext()) {
@@ -261,8 +254,7 @@ public class UserProcess {
             if (Objects.equals(item.token, token) && Objects.equals(item.uid, uid) && System.currentTimeMillis() - item.expiration < 7200000) {
                 ca.push(() -> {
                     String sql = "UPDATE users SET frozen = false WHERE uid = ?";
-                    try (Connection connection = ConnectionPool.getConnection();
-                         PreparedStatement statement = connection.prepareStatement(sql)) {
+                    try (Connection connection = ConnectionPool.getConnection(); PreparedStatement statement = connection.prepareStatement(sql)) {
                         statement.setLong(1, uid);
                         statement.executeUpdate();
                     } catch (SQLException e) {
@@ -314,8 +306,7 @@ public class UserProcess {
         ca.push(() -> {
             String query = "SELECT username, uid FROM users WHERE username = ?";
             String insert = "INSERT INTO iptable (username, ip) VALUES (?, ?)";
-            try (Connection connection = ConnectionPool.getConnection();
-                 PreparedStatement preparedStatement = connection.prepareStatement(query)) {
+            try (Connection connection = ConnectionPool.getConnection(); PreparedStatement preparedStatement = connection.prepareStatement(query)) {
                 preparedStatement.setString(1, username);
                 try (ResultSet resultSet = preparedStatement.executeQuery()) {
                     if (resultSet.next()) {
@@ -339,8 +330,7 @@ public class UserProcess {
     @Deprecated
     public static String getLatestLoginIP(String username) {
         String query = "SELECT ip FROM loginip WHERE username = ?";
-        try (Connection connection = ConnectionPool.getConnection();
-             PreparedStatement preparedStatement = connection.prepareStatement(query)) {
+        try (Connection connection = ConnectionPool.getConnection(); PreparedStatement preparedStatement = connection.prepareStatement(query)) {
             preparedStatement.setString(1, username);
             try (ResultSet resultSet = preparedStatement.executeQuery()) {
                 if (resultSet.next()) {
@@ -400,9 +390,7 @@ public class UserProcess {
     }
 
     public enum opEco {
-        ADD,
-        SUB,
-        MINUS
+        ADD, SUB, MINUS
     }
 
     public static class Key {
@@ -441,17 +429,18 @@ public class UserProcess {
         }
     }
 
-    public static boolean verifyPasswd(String username, String password) throws NoSuchAlgorithmException {
+    public static Pair<Boolean, String> performLogin(String username, String password) throws NoSuchAlgorithmException {
         Users user = userORM.read(username);
         if (user == null) {
-            return false;
+            return new Pair<>(false, null);
         }
         String user_salt = user.getPassword().split("\\$")[2];
         if (Algorithm.hash(Algorithm.hash(password, MessageDigest.getInstance("SHA-256")) + user_salt, MessageDigest.getInstance("SHA-256")).equals(user.getPassword().split("\\$")[3])) {
-            return true;
+            String token = login.generateToken(64);
+            login.insertInto(token, username);
+            return new Pair<>(true, token);
         }
-        ;
-        return false;
+        return new Pair<>(false, null);
     }
 
     /**
