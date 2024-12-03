@@ -120,7 +120,7 @@ public class ApiApplication implements ErrorController {
 
     @PostMapping("/qo/upload/gametimerecord")
     public void parser(@RequestParam(name = "name", required = true) String name, @RequestParam(name = "time", required = true) int time) {
-        UserProcess.handleTime(name, time);
+        handleTime(name, time);
     }
 
     @GetMapping("/qo/download/getgametime")
@@ -152,19 +152,19 @@ public class ApiApplication implements ErrorController {
 
     @PostMapping("/qo/online")
     public void handleOnlineRequest(@RequestParam String name) {
-        UserProcess.handlePlayerOnline(name);
+        handlePlayerOnline(name);
     }
 
     @PostMapping("/qo/offline")
     public void handleOffRequest(@RequestParam String name) {
-        UserProcess.handlePlayerOffline(name);
+        handlePlayerOffline(name);
     }
 
     @GetMapping("/qo/download/stats")
     public ResponseEntity<String> getServerStatus() throws IOException {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
-        return new ResponseEntity<>(UserProcess.getServerStats(), headers, HttpStatus.OK);
+        return new ResponseEntity<>(getServerStats(), headers, HttpStatus.OK);
     }
 
     @GetMapping("/qo/download/statpic")
@@ -205,7 +205,7 @@ public class ApiApplication implements ErrorController {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
         if (ua.isCLIToolRequest(request)) return new ResponseEntity<>("failed", headers, HttpStatus.BAD_REQUEST);
-        return UserProcess.regMinecraftUser(name, uid, request, password);
+        return regMinecraftUser(name, uid, request, password);
     }
     @RequestMapping("/qo/upload/confirmation")
     public static ResponseEntity<String> verifyReg(@RequestParam String token, HttpServletRequest request, @RequestParam Long uid, @RequestParam int task) {
@@ -214,10 +214,10 @@ public class ApiApplication implements ErrorController {
         JsonObject statObj = new JsonObject();
         switch (task) {
             case 0:
-                statObj.addProperty("result", UserProcess.validateMinecraftUser(token, request, uid));
+                statObj.addProperty("result", validateMinecraftUser(token, request, uid));
                 break;
             case 1:
-                statObj.addProperty("result", UserProcess.validatePasswordUpdateRequest(token, uid));
+                statObj.addProperty("result", validatePasswordUpdateRequest(token, uid));
                 break;
             default:
                 statObj.addProperty("result", false);
@@ -228,19 +228,19 @@ public class ApiApplication implements ErrorController {
 
     @PostMapping("/qo/upload/password")
     public static ResponseEntity<String> requestUpdatePassword(@RequestParam long uid, @RequestParam String password) throws ExecutionException, InterruptedException {
-        return UserProcess.updatePassword(uid, password);
+        return updatePassword(uid, password);
     }
     @RequestMapping("/qo/download/avatar")
     public ResponseEntity<String> avartarTrans(@RequestParam() String name) throws Exception {
         if (name == null || name.isEmpty()) {
             return ri.GeneralHttpHeader("no input");
         }
-        return ri.GeneralHttpHeader(UserProcess.AvatarTrans(name));
+        return ri.GeneralHttpHeader(AvatarTrans(name));
     }
 
     @RequestMapping("/qo/download/registry")
     public ResponseEntity<String> GetData(@RequestParam(required = true) String name) {
-        return ri.GeneralHttpHeader(UserProcess.queryReg(name));
+        return ri.GeneralHttpHeader(queryReg(name));
     }
 
     @GetMapping("/qo/webmsg/download")
@@ -271,14 +271,14 @@ public class ApiApplication implements ErrorController {
     public ResponseEntity<String> queryPlayerName(@RequestParam long qq) {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
-        return new ResponseEntity<>(UserProcess.queryReg(qq), headers, HttpStatus.OK);
+        return new ResponseEntity<>(queryReg(qq), headers, HttpStatus.OK);
     }
 
     @GetMapping("/qo/download/ip")
     public ResponseEntity<String> queryIp(@RequestParam String ip) {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
-        return new ResponseEntity<>(Query.INSTANCE.getIpInfo(ip).humanReadable(), headers, HttpStatus.OK);
+        return new ResponseEntity<>((String.valueOf(Query.INSTANCE.isCN(ip))), headers, HttpStatus.OK);
     }
 
     @GetMapping("/qo/game/login")
