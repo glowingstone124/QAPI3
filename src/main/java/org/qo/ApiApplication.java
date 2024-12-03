@@ -4,6 +4,7 @@ import com.google.gson.JsonObject;
 import jakarta.annotation.PostConstruct;
 import jakarta.servlet.http.HttpServletRequest;
 import org.json.JSONObject;
+import org.qo.mmdb.Query;
 import org.qo.redis.Configuration;
 import org.qo.redis.Redis;
 import org.qo.server.Nodes;
@@ -271,6 +272,13 @@ public class ApiApplication implements ErrorController {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
         return new ResponseEntity<>(UserProcess.queryReg(qq), headers, HttpStatus.OK);
+    }
+
+    @GetMapping("/qo/download/ip")
+    public ResponseEntity<String> queryIp(@RequestParam String ip) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        return new ResponseEntity<>(Query.INSTANCE.getIpInfo(ip).humanReadable(), headers, HttpStatus.OK);
     }
 
     @GetMapping("/qo/game/login")

@@ -14,6 +14,8 @@ repositories {
 }
 
 dependencies {
+    implementation("com.maxmind.geoip2:geoip2:4.2.1")
+
     implementation("org.jetbrains.kotlin:kotlin-reflect")
     implementation("org.jetbrains.kotlin:kotlin-stdlib")
     implementation("org.springframework.boot:spring-boot-starter-web")
