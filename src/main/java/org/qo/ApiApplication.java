@@ -4,6 +4,7 @@ import com.google.gson.JsonObject;
 import jakarta.annotation.PostConstruct;
 import jakarta.servlet.http.HttpServletRequest;
 import org.json.JSONObject;
+import org.qo.loginService.Login;
 import org.qo.mmdb.Query;
 import org.qo.redis.Configuration;
 import org.qo.redis.Redis;
@@ -48,14 +49,15 @@ public class ApiApplication implements ErrorController {
     public SseService sseService;
     private final ReturnInterface ri;
     private Status status;
-
+    public Login login;
     @Autowired
-    public ApiApplication(SseService sseService, Funcs fc, UAUtil uaUtil, ReturnInterface ri, Status status, Nodes nodes) {
+    public ApiApplication(SseService sseService, Funcs fc, UAUtil uaUtil, ReturnInterface ri, Status status, Nodes nodes, Login login) {
         this.sseService = sseService;
         this.fc = fc;
         this.ri = ri;
         this.ua = uaUtil;
         this.status = status;
+        this.login = login;
         this.nodes = nodes;
     }
 
@@ -291,5 +293,13 @@ public class ApiApplication implements ErrorController {
         retObj.addProperty("result", result.getFirst());
         retObj.addProperty("token", result.getSecond());
         return new ResponseEntity<>(retObj.toString(), headers, HttpStatus.OK);
+    }
+
+    @PostMapping("/qo/upload/loginattempt")
+    public void handleLoginAttemptLogging(@RequestBody String data, @RequestParam(name = "auth", required = true)String auth) throws Exception {
+        Funcs fc = new Funcs();
+        if (fc.verify(auth, Funcs.Perms.FULL)) {
+            login.insertLoginLog(data);
+        }
     }
 }
