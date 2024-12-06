@@ -6,6 +6,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.reactive.asFlow
 import kotlinx.coroutines.reactive.awaitFirst
+import kotlinx.coroutines.reactive.awaitSingle
 import kotlinx.coroutines.runBlocking
 import org.qo.orm.LoginToken
 import org.qo.orm.LoginTokenORM
@@ -55,7 +56,7 @@ class Login {
 			.bind(0, jsonObj.user)
 			.bind(1, jsonObj.date)
 			.bind(2, jsonObj.success)
-		.execute()
+		.execute().awaitSingle()
 	}
 
 	fun queryLoginHistory(username: String): List<LoginLog> = runBlocking {
