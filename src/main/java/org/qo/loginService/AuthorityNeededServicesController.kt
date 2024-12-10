@@ -33,6 +33,7 @@ class AuthorityNeededServicesController(private val login: Login, private val ri
 		if (userInfo == null) {
 			returnObject.addProperty("error", 200)
 			returnObject.addProperty("message", "User not found.")
+			return ri.GeneralHttpHeader(returnObject.toString())
 		}
 		//Sheet 1
 		returnObject.addProperty("username", accountName)
