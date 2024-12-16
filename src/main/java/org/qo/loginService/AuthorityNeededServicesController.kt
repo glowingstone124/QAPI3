@@ -14,36 +14,10 @@ import org.springframework.web.bind.annotation.RestController
 val userORM = UserORM()
 @RestController
 @RequestMapping("/qo/authorization")
-class AuthorityNeededServicesController(private val login: Login, private val ri: ReturnInterface) {
+class AuthorityNeededServicesController(private val login: Login, private val ri: ReturnInterface, private val ans: AuthorityNeededServicesImpl) {
 	@GetMapping("/account")
 	suspend fun getAccountInfo(@RequestHeader token: String): ResponseEntity<String> {
-		val returnObject = JsonObject()
-		val (accountName, errorCode) = login.validate(token)
-		if (accountName == null) {
-			val errorMessage = when (errorCode) {
-				1 -> "Invalid token found."
-				3 -> "Token expired."
-				else -> "Unknown error."
-			}
-			returnObject.addProperty("error", errorCode)
-			returnObject.addProperty("message", errorMessage)
-			return ri.GeneralHttpHeader(returnObject.toString())
-		}
-		val userInfo = userORM.read(accountName)
-		if (userInfo == null) {
-			returnObject.addProperty("error", 200)
-			returnObject.addProperty("message", "User not found.")
-			return ri.GeneralHttpHeader(returnObject.toString())
-		}
-		//Sheet 1
-		returnObject.addProperty("username", accountName)
-		returnObject.addProperty("uid", userInfo!!.uid)
-		returnObject.addProperty("playtime", userInfo.playtime)
-
-		//Phrase 2
-		val result = login.queryLoginHistory(username = accountName).convertToJsonArray()
-		returnObject.add("logins", result)
-		return ri.GeneralHttpHeader(returnObject.toString())
+		return ri.GeneralHttpHeader(ans.getAccountInfo(token))
 	}
 
 }
