@@ -32,8 +32,8 @@ class AuthorityNeededServicesImpl(private val login: Login, private val ri: Retu
 			return precheckResult
 		}
 		val connection = SQL.getConnection()
-		val ipCountResult = connection.createStatement("SELECT * FROM loginip WHERE username = :username")
-			.bind("username", accountName!!)
+		val ipCountResult = connection.createStatement("SELECT * FROM loginip WHERE username = ?")
+			.bind(0, accountName!!)
 			.execute()
 			.awaitSingle().map {
 			row, _ ->
