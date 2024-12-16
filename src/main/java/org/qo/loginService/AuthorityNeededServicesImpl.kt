@@ -4,14 +4,11 @@ import com.google.gson.JsonObject
 import kotlinx.coroutines.reactive.awaitSingle
 import org.qo.ReturnInterface
 import org.qo.orm.SQL
-import org.springframework.http.ResponseEntity
 import org.springframework.stereotype.Service
-import org.springframework.web.bind.annotation.RequestHeader
-import kotlin.io.use
 
 @Service
 class AuthorityNeededServicesImpl(private val login: Login, private val ri: ReturnInterface) {
-	suspend fun getAccountInfo(token: String): ResponseEntity<String> {
+	suspend fun getAccountInfo(token: String): String {
 		val (accountName, errorCode) = login.validate(token)
 		val precheckResult = doPrecheck(accountName, errorCode)
 		if (precheckResult != null) {
@@ -25,10 +22,10 @@ class AuthorityNeededServicesImpl(private val login: Login, private val ri: Retu
 		}
 		val loginHistory = login.queryLoginHistory(username = accountName).convertToJsonArray()
 		returnObject.add("logins", loginHistory)
-		return ri.GeneralHttpHeader(returnObject.toString())
+		return returnObject.toString()
 	}
 
-	suspend fun getIpWhitelists(token: String): ResponseEntity<String> {
+	suspend fun getIpWhitelists(token: String): String {
 		val (accountName, errorCode) = login.validate(token)
 		val precheckResult = doPrecheck(accountName, errorCode)
 		if (precheckResult != null) {
@@ -43,17 +40,17 @@ class AuthorityNeededServicesImpl(private val login: Login, private val ri: Retu
 			return@map row.get("ip", String::class.java) ?: "Unknown IP"
 		}.collectList().awaitSingle().convertToJsonArray()
 
-		return ri.GeneralHttpHeader(ipCountResult.toString())
+		return ipCountResult.toString()
 	}
 
-	private suspend fun doPrecheck(accountName: String?, errorCode: Int): ResponseEntity<String>? {
+	private suspend fun doPrecheck(accountName: String?, errorCode: Int): String? {
 		if (accountName == null) {
 			val errorMessage = getErrorMessage(errorCode)
 			val returnObject = JsonObject().apply {
 				addProperty("error", errorCode)
 				addProperty("message", errorMessage)
 			}
-			return ri.GeneralHttpHeader(returnObject.toString())
+			return returnObject.toString()
 		}
 
 		val userInfo = userORM.read(accountName)
@@ -62,7 +59,7 @@ class AuthorityNeededServicesImpl(private val login: Login, private val ri: Retu
 				addProperty("error", 200)
 				addProperty("message", "User not found.")
 			}
-			return ri.GeneralHttpHeader(returnObject.toString())
+			return returnObject.toString()
 		}
 
 		return null

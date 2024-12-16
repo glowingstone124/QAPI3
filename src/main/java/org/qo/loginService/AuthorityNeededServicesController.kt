@@ -20,6 +20,10 @@ class AuthorityNeededServicesController(private val login: Login, private val ri
 		return ri.GeneralHttpHeader(ans.getAccountInfo(token))
 	}
 
+	@GetMapping("/ip/query")
+	suspend fun getIpInfo(@RequestHeader token: String): ResponseEntity<String> {
+		return ri.GeneralHttpHeader(ans.getIpWhitelists(token))
+	}
 }
 fun <T> List<T>.convertToJsonArray(): JsonArray {
 	val gson = Gson()
