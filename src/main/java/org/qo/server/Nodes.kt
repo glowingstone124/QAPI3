@@ -1,6 +1,7 @@
 package org.qo.server
 
 import com.google.gson.Gson
+import com.google.gson.JsonObject
 import com.google.gson.annotations.SerializedName
 import com.google.gson.reflect.TypeToken
 import org.qo.Logger
@@ -8,6 +9,7 @@ import org.qo.Msg
 import org.springframework.stereotype.Service
 import java.io.FileReader
 import java.io.IOException
+import java.io.Serial
 
 data class Node(
     @SerializedName("name") val name: String,
@@ -23,8 +25,21 @@ data class Node(
 data class MessageIn(
     @SerializedName("message") val message: String,
     @SerializedName("from") val from: Int,
-    @SerializedName("token") val token: String
-)
+    @SerializedName("token") val token: String,
+    @SerializedName("type") val data: String,
+    @SerializedName("time") val time: Long,
+    @SerializedName("sender") val sender: String,
+) {
+    fun doHideToken() : JsonObject {
+        return JsonObject().apply {
+            addProperty("message", message)
+            addProperty("from", from)
+            addProperty("sender", sender)
+            addProperty("time", time)
+            addProperty("sender", sender)
+        }
+    }
+}
 
 enum class Role {
     SERVER,
@@ -49,7 +64,7 @@ class Nodes {
             val messageIn = gson.fromJson(input, MessageIn::class.java)
             nodesData.any { node ->
                 if (node.validate(messageIn.from, messageIn.token)) {
-                    Msg.put("[${node.name}] ${messageIn.message}")
+                    Msg.put(messageIn.doHideToken().toString())
                     true
                 } else {
                     false
