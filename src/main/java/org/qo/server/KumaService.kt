@@ -75,7 +75,7 @@ class KumaService {
                 Service ${result.monitor.name} 的状态为 ${result.monitor.status}
                 最新的heartbeat状态为： ${result.heartbeat.status} 延迟 ${result.heartbeat.ping}ms
             """.trimIndent()
-            Msg.put(message)
+            Msg.putSys(message)
         }.onFailure { error ->
             Logger.log("Error while parsing request from uptime kuma node ${IPUtil.getIpAddr(request)}", LogLevel.WARNING)
         }
