@@ -27,7 +27,7 @@ class Controller {
                 sb.append("简介：$title\n")
                 sb.append("运行结果：$status\n")
 
-                Msg.put(sb.toString())
+                Msg.putSys(sb.toString())
             }
             return
         }
@@ -49,6 +49,6 @@ class Controller {
             sb.append("说明: $msg\n")
             sb.append("-----------------------------------\n")
         }
-        Msg.put(sb.toString())
+        Msg.putSys(sb.toString())
     }
 }

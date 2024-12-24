@@ -51,6 +51,15 @@ class Msg {
             }.toString()
         }
         fun put(msg: String) {
+            FileWriter("chathistory.txt", StandardCharsets.UTF_8).use { writer ->
+                writer.write(msg)
+                if (msgQueue.remainingCapacity() == 0) {
+                    msgQueue.poll()
+                }
+                msgQueue.offer(msg)
+            }
+        }
+        fun putSys(msg: String) {
             val msgObj = JsonObject().apply {
                 addProperty("message", msg)
                 addProperty("from", 2)

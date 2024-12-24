@@ -107,7 +107,7 @@ public class ApiApplication implements ErrorController {
                 serverAlive = 1;
 
                 Logger.log("Server Stopped at " + PackTime, Logger.LogLevel.INFO);
-                Msg.Companion.put("服务器停止于" + uselessthings);
+                Msg.Companion.putSys("服务器停止于" + uselessthings);
             }
             default -> serverAlive = -1;
         }

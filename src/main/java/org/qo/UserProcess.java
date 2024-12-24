@@ -188,7 +188,7 @@ public class UserProcess {
                 try {
                     userORM.create(new Users(name, uid, true, 3, 0, false, 0, false, 0, computePassword(password, true)));
                     String token = Algorithm.generateRandomString(16);
-                    Msg.Companion.put("用户 " + uid + "注册了一个账号：" + name + "，若非本人操作请忽略，确认账号请在消息发出后2小时内输入/approve-register " + token);
+                    Msg.Companion.putSys("用户 " + uid + "注册了一个账号：" + name + "，若非本人操作请忽略，确认账号请在消息发出后2小时内输入/approve-register " + token);
                     verify_list.add(new registry_verify_class(name, token, uid, System.currentTimeMillis()));
                 } catch (NoSuchAlgorithmException e) {
                     throw new RuntimeException(e);
@@ -218,7 +218,7 @@ public class UserProcess {
             Users user = userORM.read(uid);
             if (Objects.nonNull(user)) {
                 String token = Algorithm.generateRandomString(16);
-                Msg.Companion.put("用户 " + uid + "更改了账号：" + user.getUsername() + "的密码，若非本人操作请忽略，确认账号请在消息发出后2小时内输入/update-password " + token);
+                Msg.Companion.putSys("用户 " + uid + "更改了账号：" + user.getUsername() + "的密码，若非本人操作请忽略，确认账号请在消息发出后2小时内输入/update-password " + token);
                 pwdupd_list.add(new password_verify_class(newPassword, token, uid, System.currentTimeMillis()));
                 return ri.success("请求已提交。");
             } else {
