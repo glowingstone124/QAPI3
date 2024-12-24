@@ -4,6 +4,7 @@ import com.google.gson.JsonArray
 import com.google.gson.JsonObject
 import kotlinx.coroutines.*
 import org.json.JSONArray
+import org.qo.server.MessageIn
 import org.springframework.http.MediaType
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter
 import java.io.FileWriter
@@ -50,12 +51,18 @@ class Msg {
             }.toString()
         }
         fun put(msg: String) {
+            val msgObj = JsonObject().apply {
+                addProperty("message", msg)
+                addProperty("from", 2)
+                addProperty("sender", "System")
+                addProperty("time", System.currentTimeMillis())
+            }
             FileWriter("chathistory.txt", StandardCharsets.UTF_8).use { writer ->
-                writer.write(msg)
+                writer.write(msgObj.toString())
                 if (msgQueue.remainingCapacity() == 0) {
                     msgQueue.poll()
                 }
-                msgQueue.offer(msg)
+                msgQueue.offer(msgObj.toString())
             }
         }
         fun get(): JsonObject {
