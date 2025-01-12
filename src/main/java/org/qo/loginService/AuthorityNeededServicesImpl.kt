@@ -43,7 +43,7 @@ class AuthorityNeededServicesImpl(private val login: Login, private val ri: Retu
 		return ipCountResult.toString()
 	}
 
-	private suspend fun doPrecheck(accountName: String?, errorCode: Int): String? {
+	suspend fun doPrecheck(accountName: String?, errorCode: Int): String? {
 		if (accountName == null) {
 			val errorMessage = getErrorMessage(errorCode)
 			val returnObject = JsonObject().apply {

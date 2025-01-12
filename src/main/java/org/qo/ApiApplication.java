@@ -4,6 +4,7 @@ import com.google.gson.JsonObject;
 import jakarta.annotation.PostConstruct;
 import jakarta.servlet.http.HttpServletRequest;
 import org.json.JSONObject;
+import org.qo.loginService.IPWhitelistServices;
 import org.qo.loginService.Login;
 import org.qo.mmdb.Query;
 import org.qo.redis.Configuration;
@@ -50,8 +51,9 @@ public class ApiApplication implements ErrorController {
     private final ReturnInterface ri;
     private Status status;
     public Login login;
+    public IPWhitelistServices ipWhitelistServices;
     @Autowired
-    public ApiApplication(SseService sseService, Funcs fc, UAUtil uaUtil, ReturnInterface ri, Status status, Nodes nodes, Login login) {
+    public ApiApplication(SseService sseService, Funcs fc, UAUtil uaUtil, ReturnInterface ri, Status status, Nodes nodes, Login login, IPWhitelistServices ipWhitelistServices) {
         this.sseService = sseService;
         this.fc = fc;
         this.ri = ri;
@@ -59,6 +61,7 @@ public class ApiApplication implements ErrorController {
         this.status = status;
         this.login = login;
         this.nodes = nodes;
+        this.ipWhitelistServices = ipWhitelistServices;
     }
 
     @PostConstruct
@@ -282,7 +285,12 @@ public class ApiApplication implements ErrorController {
         headers.setContentType(MediaType.APPLICATION_JSON);
         return new ResponseEntity<>((String.valueOf(Query.INSTANCE.isCN(ip))), headers, HttpStatus.OK);
     }
-
+    @GetMapping("/qo/download/ip/whitelisted")
+    public ResponseEntity<String> queryIpWhitelist(@RequestParam String ip) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        return new ResponseEntity<>(ipWhitelistServices.whitelistedWrapper(ip), headers, HttpStatus.OK);
+    }
     @GetMapping("/qo/game/login")
     public ResponseEntity<String> login(@RequestParam String username, @RequestParam String password, HttpServletRequest request) throws NoSuchAlgorithmException {
         HttpHeaders headers = new HttpHeaders();
