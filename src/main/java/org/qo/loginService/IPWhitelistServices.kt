@@ -34,7 +34,7 @@ class IPWhitelistServices(private val login: Login, private val authorityNeededS
 		conn.createStatement("INSERT INTO loginip (username,ip) VALUES (?,?)")
 			.bind(0, username)
 			.bind(1, ip)
-			.execute()
+			.execute().awaitSingle()
 	}
 	suspend fun joinWhitelist(ip:String, token:String): WhitelistReasons {
 		val (username, errorCode) =  login.validate(token)
