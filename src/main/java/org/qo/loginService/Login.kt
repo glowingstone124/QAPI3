@@ -67,7 +67,7 @@ class Login {
         SELECT username, time, success FROM login_logs 
         WHERE username = ? 
         ORDER BY time DESC 
-        LIMIT 5
+        LIMIT 3
         """
 		)
 			.bind(0, username)
