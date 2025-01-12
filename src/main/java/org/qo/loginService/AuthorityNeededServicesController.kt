@@ -33,7 +33,7 @@ class AuthorityNeededServicesController(private val login: Login, private val ri
 		if (authorityNeededServicesImpl.doPrecheck(username, errorCode) != null || username == null){
 			return ri.GeneralHttpHeader(Return(1, authorityNeededServicesImpl.getErrorMessage(1)).serialized())
 		}
-		return when (ipWhitelistServices.joinWhitelist(ip, username)) {
+		return when (ipWhitelistServices.joinWhitelist(ip, token)) {
 			WhitelistReasons.SUCCESS -> ri.GeneralHttpHeader(Return(0, "ok").serialized())
 			WhitelistReasons.TOKEN_INVALID -> ri.GeneralHttpHeader(Return(1, authorityNeededServicesImpl.getErrorMessage(1) + "(else)").serialized())
 			WhitelistReasons.IP_WHITELIST_FULL -> ri.GeneralHttpHeader(Return(2, "Too many ips").serialized())
