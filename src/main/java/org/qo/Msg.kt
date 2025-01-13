@@ -71,11 +71,14 @@ class Msg {
             }
             FileWriter("chathistory.txt", StandardCharsets.UTF_8).use { writer ->
                 writer.write(msgObj.toString())
-                if (msgQueue.remainingCapacity() == 0) {
-                    msgQueue.poll()
-                }
-                msgQueue.offer(msgObj.toString())
+                generalPut(msgObj.toString())
             }
+        }
+        fun generalPut(msg: String) {
+            if (msgQueue.remainingCapacity() == 0) {
+                msgQueue.poll()
+            }
+            msgQueue.offer(msg)
         }
         fun putWebchat(msg:String, sender:String) {
             val msgObj = JsonObject().apply {
@@ -84,6 +87,7 @@ class Msg {
                 addProperty("sender", "<Web>$sender")
                 addProperty("time", System.currentTimeMillis())
             }
+            generalPut(msgObj.toString())
         }
         fun get(): JsonObject {
             return JsonObject().apply {
