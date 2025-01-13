@@ -1,13 +1,37 @@
 package org.qo.loginService
 
+import com.google.gson.Gson
 import com.google.gson.JsonObject
 import kotlinx.coroutines.reactive.awaitSingle
+import org.qo.Msg
 import org.qo.ReturnInterface
 import org.qo.orm.SQL
 import org.springframework.stereotype.Service
+import org.sqlite.SQLiteErrorCode.getErrorCode
 
 @Service
 class AuthorityNeededServicesImpl(private val login: Login, private val ri: ReturnInterface) {
+	val gson = Gson()
+
+	data class WebChatWrapper(
+		val message: String,
+		val timestamp: Long,
+	)
+
+	suspend fun insertWebMessage(msg: String, token: String): Pair<Int, String> {
+		val (username, errCode) = login.validate(token)
+		doPrecheck(username, errCode)?.let {
+			return Pair(1, getErrorMessage(1));
+		}
+		val resultJson = runCatching {
+			gson.fromJson(msg, WebChatWrapper::class.java)
+		}.onFailure {
+			return Pair(20, getErrorMessage(20))
+		}
+		Msg.putWebchat(username!!, resultJson.getOrNull()?.message ?: "")
+		return Pair(0, "ok")
+	}
+
 	suspend fun getAccountInfo(token: String): String {
 		val (accountName, errorCode) = login.validate(token)
 		val precheckResult = doPrecheck(accountName, errorCode)
@@ -35,10 +59,9 @@ class AuthorityNeededServicesImpl(private val login: Login, private val ri: Retu
 		val ipCountResult = connection.createStatement("SELECT * FROM loginip WHERE username = ?")
 			.bind(0, accountName!!)
 			.execute()
-			.awaitSingle().map {
-			row, _ ->
-			return@map row.get("ip", String::class.java) ?: "Unknown IP"
-		}.collectList().awaitSingle().convertToJsonArray()
+			.awaitSingle().map { row, _ ->
+				return@map row.get("ip", String::class.java) ?: "Unknown IP"
+			}.collectList().awaitSingle().convertToJsonArray()
 
 		return ipCountResult.toString()
 	}
@@ -64,10 +87,12 @@ class AuthorityNeededServicesImpl(private val login: Login, private val ri: Retu
 
 		return null
 	}
+
 	fun getErrorMessage(errorCode: Int): String {
 		return when (errorCode) {
 			1 -> "Invalid token found."
 			3 -> "Token expired."
+			20 -> "Format error."
 			else -> "Unknown error."
 		}
 	}

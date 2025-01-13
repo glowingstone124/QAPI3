@@ -3,19 +3,22 @@ package org.qo
 import com.google.gson.JsonArray
 import com.google.gson.JsonObject
 import kotlinx.coroutines.*
-import org.json.JSONArray
-import org.qo.server.MessageIn
+import org.qo.loginService.Login
+import org.qo.customAnnotations.Authority
+import org.qo.loginService.AuthorityNeededServicesImpl
+import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.http.MediaType
+import org.springframework.stereotype.Service
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter
 import java.io.FileWriter
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.LinkedBlockingQueue
-
+@Service
 class Msg {
     companion object {
         const val MAX_QUEUE_SIZE = 300
         val msgQueue = LinkedBlockingQueue<String>(MAX_QUEUE_SIZE)
-
+        val login = Login()
         suspend fun sse(): SseEmitter {
             val emitter = SseEmitter(0L)
             val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -72,6 +75,14 @@ class Msg {
                     msgQueue.poll()
                 }
                 msgQueue.offer(msgObj.toString())
+            }
+        }
+        fun putWebchat(msg:String, sender:String) {
+            val msgObj = JsonObject().apply {
+                addProperty("message", msg)
+                addProperty("from", 3)
+                addProperty("sender", "<Web>$sender")
+                addProperty("time", System.currentTimeMillis())
             }
         }
         fun get(): JsonObject {

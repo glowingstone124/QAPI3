@@ -8,6 +8,8 @@ import org.qo.loginService.IPWhitelistServices.WhitelistReasons
 import org.qo.orm.UserORM
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.GetMapping
+import org.springframework.web.bind.annotation.PostMapping
+import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestHeader
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
@@ -16,15 +18,25 @@ import org.springframework.web.bind.annotation.RestController
 val userORM = UserORM()
 @RestController
 @RequestMapping("/qo/authorization")
-class AuthorityNeededServicesController(private val login: Login, private val ri: ReturnInterface, private val ans: AuthorityNeededServicesImpl, private val ipWhitelistServices: IPWhitelistServices, private val authorityNeededServicesImpl: AuthorityNeededServicesImpl) {
+class AuthorityNeededServicesController(private val login: Login, private val ri: ReturnInterface, private val ipWhitelistServices: IPWhitelistServices, private val authorityNeededServicesImpl: AuthorityNeededServicesImpl) {
+
+	@PostMapping("/message/upload")
+	suspend fun insertWebMessage(@RequestBody msg: String, @RequestHeader token:String): ResponseEntity<String> {
+		val (code, result)=authorityNeededServicesImpl.insertWebMessage(msg, token)
+		return ri.GeneralHttpHeader(JsonObject().apply {
+			addProperty("code", code)
+			addProperty("result",result)
+		}.toString())
+	}
+
 	@GetMapping("/account")
 	suspend fun getAccountInfo(@RequestHeader token: String): ResponseEntity<String> {
-		return ri.GeneralHttpHeader(ans.getAccountInfo(token))
+		return ri.GeneralHttpHeader(authorityNeededServicesImpl.getAccountInfo(token))
 	}
 
 	@GetMapping("/ip/query")
 	suspend fun getIpInfo(@RequestHeader token: String): ResponseEntity<String> {
-		return ri.GeneralHttpHeader(ans.getIpWhitelists(token))
+		return ri.GeneralHttpHeader(authorityNeededServicesImpl.getIpWhitelists(token))
 	}
 
 	@GetMapping("/ip/add")
