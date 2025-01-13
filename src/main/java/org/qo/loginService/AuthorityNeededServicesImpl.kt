@@ -28,7 +28,7 @@ class AuthorityNeededServicesImpl(private val login: Login, private val ri: Retu
 		}.onFailure {
 			return Pair(20, getErrorMessage(20))
 		}
-		Msg.putWebchat(username!!, resultJson.getOrNull()?.message ?: "")
+		Msg.putWebchat(resultJson.getOrNull()?.message ?: "",username!!)
 		return Pair(0, "ok")
 	}
 
