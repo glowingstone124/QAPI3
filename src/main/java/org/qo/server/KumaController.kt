@@ -16,4 +16,5 @@ class KumaController {
     fun handleKumaUpload(@RequestBody input: String, request: HttpServletRequest): ResponseEntity<String> {
         return kumaService.handleMessage(input, request)
     }
+    
 }

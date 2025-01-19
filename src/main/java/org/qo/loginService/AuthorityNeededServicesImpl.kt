@@ -7,7 +7,6 @@ import org.qo.Msg
 import org.qo.ReturnInterface
 import org.qo.orm.SQL
 import org.springframework.stereotype.Service
-import org.sqlite.SQLiteErrorCode.getErrorCode
 
 @Service
 class AuthorityNeededServicesImpl(private val login: Login, private val ri: ReturnInterface) {
