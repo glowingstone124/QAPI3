@@ -1,6 +1,5 @@
 package org.qo
 
-
 import com.google.gson.Gson
 import org.qo.RankingImpl.Rank
 import org.springframework.http.ResponseEntity

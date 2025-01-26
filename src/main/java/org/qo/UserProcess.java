@@ -43,15 +43,15 @@ public class UserProcess {
     public static ArrayList<Key> inventoryViewList = new ArrayList<>();
     public static Request request = new Request();
     public static String CODE = "null";
-    private static ReturnInterface ri = new ReturnInterface();
-    private static Login login = new Login();
+    private static final ReturnInterface ri = new ReturnInterface();
+    private static final Login login = new Login();
     public static UserORM userORM = new UserORM();
     private static CoroutineAdapter ca;
-    private static Redis redis = new Redis();
+    private static final Redis redis = new Redis();
 
     @Autowired
     public UserProcess(CoroutineAdapter ca) {
-        this.ca = ca;
+        UserProcess.ca = ca;
     }
 
     static SynchronousQueue<String> onlinePlayers = new SynchronousQueue<>();
@@ -162,8 +162,8 @@ public class UserProcess {
         if (user != null) {
             String username = user.getUsername();
             Boolean frozen = user.getFrozen();
-            int eco = user.getEconomy();
-            long playtime = user.getPlaytime();
+            int eco = Objects.requireNonNull(user.getEconomy());
+            long playtime = Objects.requireNonNull(user.getPlaytime());
             responseJson.put("code", 0);
             responseJson.put("frozen", frozen);
             responseJson.put("username", username);
