@@ -5,6 +5,18 @@ This program contains these features:
 - Chat Sync between several Minecraft Servers(WIP): This feature allows users to chat across servers.
 - Minecraft Server Status Query: This api will automatically show latest server status.(Need Plugin-side support)
 
+## Future RoadMaps
+
+Refactor ALL sql operations into R2DBC
+
+Optimize code structure
+
+More codes in Kotlin
+
+Rankings (Like destroy & place) with QPlugin
+
+DIY player card with QCommunity WEB
+## Guides
 ### To install:
     
 simply just run gradle build and that's all. Don't forget to add configurations like MySQL server and Redis!
