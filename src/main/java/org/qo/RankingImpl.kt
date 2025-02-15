@@ -11,7 +11,7 @@ class RankingImpl {
 	val gson = Gson()
 	val sqlCheckExistence = "SELECT username FROM users WHERE username IN (:usernames)"
 	val sqlUpdateDestroy = "UPDATE users SET destroy = destroy + ? WHERE username = ?"
-	val sqlUpdatePlace = "UPDATE users SET place = place + ? WHERE username = ?"
+	val sqlUpdatePlace = "UPDATE users SET place = place + :place WHERE username = :username"
 	val sqlQueryDestroy = "SELECT username, destroy FROM users WHERE destroy > 0 ORDER BY destroy DESC LIMIT 5"
 	val sqlQueryPlace = "SELECT username, place FROM users WHERE place > 0 ORDER BY place DESC LIMIT 5"
 
@@ -41,8 +41,8 @@ class RankingImpl {
 		val connection = SQL.getConnection()
 		val inserts = validPlaceData.map { (username, place) ->
 			connection.createStatement(sqlUpdatePlace)
-				.bind(0, place)
-				.bind(1, username)
+				.bind("place", place)
+				.bind("username", username)
 				.execute()
 		}
 		Flux.concat(inserts)
