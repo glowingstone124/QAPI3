@@ -2,9 +2,11 @@ package org.qo
 
 import com.google.gson.Gson
 import kotlinx.coroutines.reactive.awaitFirst
+import kotlinx.coroutines.reactive.awaitSingle
 import org.qo.orm.SQL
 import org.springframework.stereotype.Service
 import reactor.core.publisher.Flux
+import reactor.core.publisher.Mono
 
 @Service
 class RankingImpl {
@@ -38,17 +40,20 @@ class RankingImpl {
 	suspend fun insertPlaceRanking(body: String) {
 		val placeData: Map<String, Long> = gson.fromJson(body, Map::class.java) as Map<String, Long>
 		val validPlaceData = doFilter(placeData)
+
+
 		val connection = SQL.getConnection()
+
 		val inserts = validPlaceData.map { (username, place) ->
 			connection.createStatement(sqlUpdatePlace)
 				.bind(0, place)
 				.bind(1, username)
 				.execute()
 		}
-		Flux.concat(inserts)
-			.then()
-			.awaitFirst()
+
+		Mono.`when`(inserts).awaitFirst()
 	}
+
 
 	suspend fun doFilter(map: Map<String, Long>): Map<String, Long> {
 		return map.filter { (username, _) -> username in checkUsersExistence(map.keys.toList()) }

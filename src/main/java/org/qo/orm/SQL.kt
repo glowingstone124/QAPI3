@@ -3,11 +3,9 @@ package org.qo.orm
 import com.google.gson.Gson
 import io.asyncer.r2dbc.mysql.MySqlConnectionConfiguration
 import io.asyncer.r2dbc.mysql.MySqlConnectionFactory
-import io.asyncer.r2dbc.mysql.api.MySqlConnection
 import kotlinx.coroutines.reactive.awaitSingle
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
-import reactor.core.publisher.Mono
 import java.nio.file.Files
 import java.nio.file.Paths
 
@@ -22,7 +20,6 @@ object SQL {
         }
 
     val connectionFactory: MySqlConnectionFactory by lazy { MySqlConnectionFactory.from(configuration) }
-
     private fun initialize() {
         try {
             val content = Files.readString(Paths.get("data/sql/info.json"))
@@ -70,4 +67,5 @@ class DBConfig {
     fun connectionFactory(): MySqlConnectionFactory {
         return SQL.connectionFactory
     }
+
 }
