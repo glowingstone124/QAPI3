@@ -11,7 +11,7 @@ import reactor.core.publisher.Mono
 @Service
 class RankingImpl {
 	val gson = Gson()
-	val sqlCheckExistence = "SELECT username FROM users WHERE username IN (:usernames)"
+	val sqlCheckExistence = "SELECT username FROM users WHERE username IN (?)"
 	val sqlUpdateDestroy = "UPDATE users SET destroy = destroy + ? WHERE username = ?"
 	val sqlUpdatePlace = "UPDATE users SET place = place + ? WHERE username = ?"
 	val sqlQueryDestroy = "SELECT username, destroy FROM users WHERE destroy > 0 ORDER BY destroy DESC LIMIT 5"
@@ -62,7 +62,7 @@ class RankingImpl {
 	suspend fun checkUsersExistence(usernames: List<String>): List<String> {
 		return SQL.getConnection()
 			.createStatement(sqlCheckExistence)
-			.bind(":usernames", usernames)
+			.bind(0, usernames)
 			.execute()
 			.flatMap { result ->
 				result.map { row, _ -> row.get("username", String::class.java) }
