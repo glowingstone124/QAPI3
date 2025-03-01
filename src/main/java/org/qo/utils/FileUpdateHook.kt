@@ -6,16 +6,17 @@ import java.nio.file.*
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import kotlin.io.path.absolute
 
 @Service
 class FileUpdateHook {
     private val watchService: WatchService = FileSystems.getDefault().newWatchService()
     private val watchHookMaps: ConcurrentHashMap<Path, WatchKey> = ConcurrentHashMap()
     private val fileHooks: ConcurrentHashMap<Path, () -> Unit> = ConcurrentHashMap()
-    private val executor: ExecutorService = Executors.newCachedThreadPool() // 使用线程池
+    private val executor: ExecutorService = Executors.newCachedThreadPool()
 
     fun addHook(file: File, function: () -> Unit, vararg eventKinds: WatchEvent.Kind<*>) {
-        val path = file.toPath().parent
+        val path = file.toPath().absolute().parent
         val fileName = file.name
         val watchKey = path.register(watchService, *eventKinds)
         watchHookMaps[path] = watchKey
