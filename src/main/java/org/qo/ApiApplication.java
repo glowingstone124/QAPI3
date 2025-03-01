@@ -7,6 +7,9 @@ import org.json.JSONObject;
 import org.qo.loginService.IPWhitelistServices;
 import org.qo.loginService.Login;
 import org.qo.mmdb.Query;
+import org.qo.proxyRelatedServices.ProxyRelatedController;
+import org.qo.proxyRelatedServices.ProxyRelatedImpl;
+import org.qo.proxyRelatedServices.ProxyStatus;
 import org.qo.redis.Configuration;
 import org.qo.redis.Redis;
 import org.qo.server.Nodes;
@@ -49,11 +52,12 @@ public class ApiApplication implements ErrorController {
     private UAUtil ua;
     public SseService sseService;
     private final ReturnInterface ri;
+    private final ProxyRelatedImpl proxyRelatedImpl;
     private Status status;
     public Login login;
     public IPWhitelistServices ipWhitelistServices;
     @Autowired
-    public ApiApplication(SseService sseService, Funcs fc, UAUtil uaUtil, ReturnInterface ri, Status status, Nodes nodes, Login login, IPWhitelistServices ipWhitelistServices) {
+    public ApiApplication(SseService sseService, Funcs fc, UAUtil uaUtil, ReturnInterface ri, Status status, Nodes nodes, Login login, IPWhitelistServices ipWhitelistServices, ProxyRelatedImpl proxyRelatedImpl) {
         this.sseService = sseService;
         this.fc = fc;
         this.ri = ri;
@@ -62,6 +66,7 @@ public class ApiApplication implements ErrorController {
         this.login = login;
         this.nodes = nodes;
         this.ipWhitelistServices = ipWhitelistServices;
+        this.proxyRelatedImpl = proxyRelatedImpl;
     }
 
     @PostConstruct
@@ -90,6 +95,7 @@ public class ApiApplication implements ErrorController {
         returnObj.put("online", status.countOnline() + " server(s)");
         returnObj.put("sql", SQLAvliable());
         returnObj.put("redis", Configuration.INSTANCE.getEnableRedis());
+        returnObj.put("proxies", proxyRelatedImpl.getProxies(ProxyStatus.ALIVE).size());
         return ri.GeneralHttpHeader(returnObj.toString());
     }
 

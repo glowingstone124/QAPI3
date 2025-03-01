@@ -56,8 +56,16 @@ class ProxyRelatedImpl(private val fileUpdateHook: FileUpdateHook) {
             }
         }
     }
-}
+    fun getSimplifiedProxies(): List<SimplifiedProxy> {
+        return proxyList.map { SimplifiedProxy(it.name, it.url, it.stat) }
+    }
 
+}
+data class SimplifiedProxy(
+    val name: String,
+    val url: String,
+    val stat: ProxyStatus
+)
 
 data class Proxy(
     val name: String,
