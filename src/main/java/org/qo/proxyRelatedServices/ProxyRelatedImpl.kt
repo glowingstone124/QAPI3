@@ -45,7 +45,10 @@ class ProxyRelatedImpl(private val fileUpdateHook: FileUpdateHook) {
     }
 
     fun heartBeatUpdate(token: String) {
-        proxyList.find { it.token == token }?.latestHeartBeat = System.currentTimeMillis()
+        proxyList.find { it.token == token }?.let {
+            it.latestHeartBeat = System.currentTimeMillis()
+            it.stat = ProxyStatus.ALIVE
+        }
     }
 
     @Scheduled(fixedDelay = 5000)
