@@ -52,6 +52,11 @@ class AuthorityNeededServicesController(private val login: Login, private val ri
 		}
 	}
 
+	@GetMapping("/fortune")
+	suspend fun getFortuneForUser(@RequestHeader token: String): ResponseEntity<String> {
+		return ri.GeneralHttpHeader(authorityNeededServicesImpl.calculateFortune(token));
+	}
+
 }
 data class Return(
 	val code: Int,
