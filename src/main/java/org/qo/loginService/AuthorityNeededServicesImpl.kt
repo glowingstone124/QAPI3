@@ -139,12 +139,13 @@ class FortuneTools {
 	fun hashValue(userId: String): Triple<Int, Int, Int> {
 		val md5 = MessageDigest.getInstance("MD5").digest(userId.toByteArray()).joinToString("") { "%02x".format(it) }
 
-		val base1 = (md5.substring(0, 8).toLong(16) and 0xFFFFFFFF).toInt() % 100
-		val base2 = (md5.substring(8, 16).toLong(16) and 0xFFFFFFFF).toInt() % 100
-		val base3 = (md5.substring(16, 24).toLong(16) and 0xFFFFFFFF).toInt() % 100
+		val base1 = (md5.substring(0, 8).toLong(16) % 100).toInt()
+		val base2 = (md5.substring(8, 16).toLong(16) % 100).toInt()
+		val base3 = (md5.substring(16, 24).toLong(16) % 100).toInt()
 
 		return Triple(base1, base2, base3)
 	}
+
 
 
 	fun calculateFortune(userId: String): Fortune {
