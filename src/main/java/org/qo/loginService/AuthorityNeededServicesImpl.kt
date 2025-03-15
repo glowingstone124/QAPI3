@@ -146,8 +146,6 @@ class FortuneTools {
 		return Triple(base1, base2, base3)
 	}
 
-
-
 	fun calculateFortune(userId: String): Fortune {
 		val bazi = getBazi()
 		val (base1, base2, base3) = hashValue(userId)
