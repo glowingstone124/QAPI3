@@ -20,8 +20,6 @@ import static org.qo.Logger.LogLevel.*;
 @EnableAsync
 public class Main {
     public static void main(String[] args) throws Exception {
-        //SystemInfo si = new SystemInfo();
-        //si.printSystemInfo();
         if (args.length != 0) {
             for (String arg : args) {
                 if (arg.equals("--disable-redis")) {
@@ -30,12 +28,6 @@ public class Main {
             }
         }
         ConnectionPool.init();
-
-        //Mail mail = new Mail();
-        //if (!mail.test()){
-            //Logger.log("Mail function doesn't work properly. With following exception:", ERROR);
-           // Logger.log("", ERROR);
-        //}
         Runtime.getRuntime().addShutdownHook(new Thread(() -> Logger.log("API shutdown.", INFO)));
         Configuration.INSTANCE.init();
         Funcs.Start();
