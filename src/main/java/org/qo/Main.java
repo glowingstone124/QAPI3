@@ -27,8 +27,9 @@ public class Main {
                 }
             }
         }
-        ConnectionPool.init();
+        ConnectionPool.init(); //EVERY thing using SQL should init after this!
         Runtime.getRuntime().addShutdownHook(new Thread(() -> Logger.log("API shutdown.", INFO)));
+        Msg.Companion.init();
         Configuration.INSTANCE.init();
         Funcs.Start();
         Init.INSTANCE.init();
