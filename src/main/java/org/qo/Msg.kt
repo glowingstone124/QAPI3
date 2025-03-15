@@ -112,16 +112,21 @@ class Msg {
                     val statement: PreparedStatement = conn.prepareStatement(sql)
                     val resultSet: ResultSet = statement.executeQuery()
 
+                    val messages = mutableListOf<Message>()
                     while (resultSet.next()) {
                         val message = resultSet.getString("message")
                         val fromUser = resultSet.getInt("from_user")
                         val sender = resultSet.getString("sender")
                         val time = resultSet.getLong("time")
-
                         val msg = Message(message, fromUser, sender, time)
                         cnt++
-                        msgQueue.offer(msg)
+
+                        messages.add(msg)
                     }
+
+                    messages.sortBy { it.time }
+
+                    messages.forEach { msgQueue.offer(it) }
 
                     Logger.log("Loaded $cnt messages from the database.", Logger.LogLevel.INFO)
                 } catch (e: SQLException) {
