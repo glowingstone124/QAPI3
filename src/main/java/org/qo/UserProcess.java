@@ -54,8 +54,6 @@ public class UserProcess {
         UserProcess.ca = ca;
     }
 
-    static SynchronousQueue<String> onlinePlayers = new SynchronousQueue<>();
-
     public static String getServerStats() throws IOException {
         JSONArray statusArray = new JSONArray(Files.readString(Path.of("stat.json")));
         for (int i = 0; i < statusArray.length(); i++) {
@@ -341,52 +339,6 @@ public class UserProcess {
             e.printStackTrace();
         }
         return "error";
-    }
-
-    public static boolean insertInventoryViewRequest(String key, String viewer, String sender) {
-        Key request = new Key();
-        request.viewer = viewer;
-        request.provider = sender;
-        request.key = key;
-        request.expire = System.currentTimeMillis() + 360000;
-        request.approve = false;
-        if (inventoryViewList.size() >= 20) {
-            return false;
-        }
-
-        for (Key obj : inventoryViewList) {
-            if (obj.equals(request)) {
-                return false;
-            }
-        }
-
-        inventoryViewList.add(request);
-        return true;
-    }
-
-    public static void approveInventoryViewRequest(String secret) {
-        for (Key obj : inventoryViewList) {
-            if (Objects.equals(obj.key, secret)) {
-                obj.approve = true;
-            }
-        }
-    }
-
-    public static String InventoryViewStatus(String key) {
-        JsonObject retObj = new JsonObject();
-        int appr = 1;
-        String viewer = "";
-        for (Key obj : inventoryViewList) {
-            if (Objects.equals(obj.key, key)) {
-                if (obj.approve) {
-                    appr = 0;
-                }
-                viewer = obj.viewer;
-            }
-        }
-        retObj.addProperty("approved", appr);
-        retObj.addProperty("viewer", viewer);
-        return retObj.toString();
     }
 
     public enum opEco {
