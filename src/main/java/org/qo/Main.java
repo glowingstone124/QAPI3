@@ -34,19 +34,6 @@ public class Main {
         Logger.startLogWriter("log.log", 3000);
     }
     @Bean
-    public WebMvcConfigurer corsConfigurer() {
-        return new WebMvcConfigurer() {
-            @Override
-            public void addCorsMappings(CorsRegistry registry) {
-                registry.addMapping("/**")
-                        .allowedOrigins("http://127.0.0.1:5500")
-                        .allowedMethods("GET", "POST")
-                        .allowedHeaders("*")
-                        .allowCredentials(true);
-            }
-        };
-    }
-    @Bean
     public CorsFilter corsFilter() {
         CorsConfiguration config = new CorsConfiguration();
         config.setAllowCredentials(Boolean.FALSE);
