@@ -21,11 +21,6 @@ import static org.qo.Logger.LogLevel.*;
 public class Main {
     public static void main(String[] args) throws Exception {
         if (args.length != 0) {
-            for (String arg : args) {
-                if (arg.equals("--disable-redis")) {
-                    Configuration.INSTANCE.setEnableRedis(false);
-                }
-            }
         }
         ConnectionPool.init(); //EVERY thing using SQL should init after this!
         Runtime.getRuntime().addShutdownHook(new Thread(() -> Logger.log("API shutdown.", INFO)));
