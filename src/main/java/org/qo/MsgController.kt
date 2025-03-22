@@ -36,8 +36,4 @@ class MsgController @Autowired constructor(
     fun returnMsg(): ResponseEntity<String> {
         return ri.GeneralHttpHeader(Msg.get().toString())
     }
-    @GetMapping("/qo/msglist/sse")
-    suspend fun sseConnection(): SseEmitter {
-        return Msg.sse()
-    }
 }
