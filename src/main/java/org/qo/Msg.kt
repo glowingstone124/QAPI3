@@ -26,26 +26,6 @@ class Msg {
         val gson = Gson()
 
         val login = Login()
-
-        suspend fun sse(): SseEmitter {
-            val emitter = SseEmitter(0L)
-            val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
-
-            scope.launch {
-                try {
-                    while (true) {
-                        val message = msgQueue.take()
-                        emitter.send(JsonObject().apply {
-                            addProperty("messages", gson.toJson(message))
-                        }, MediaType.APPLICATION_JSON)
-                    }
-                } catch (e: Exception) {
-                    emitter.completeWithError(e)
-                }
-            }
-
-            return emitter
-        }
         fun webGet(): String {
             return JsonObject().apply {
                 if (msgQueue.isEmpty()) {
