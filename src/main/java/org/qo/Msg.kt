@@ -37,13 +37,14 @@ class Msg {
             }.toString()
         }
 
-        fun put(msg: String) {
+        fun put(msg: JsonObject) {
             FileWriter("chathistory.txt", StandardCharsets.UTF_8).use { writer ->
-                writer.write(msg)
+                writer.write(msg.toString())
                 if (msgQueue.remainingCapacity() == 0) {
                     msgQueue.poll()
                 }
-                msgQueue.offer(Message(msg, 1, "Sender", System.currentTimeMillis()))
+                msgQueue.offer(gson.fromJson(msg, Message::class.java))
+                //msgQueue.offer(Message(msg, 1, "Sender", System.currentTimeMillis()))
             }
         }
 

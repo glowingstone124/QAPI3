@@ -64,7 +64,7 @@ class Nodes {
             val messageIn = gson.fromJson(input, MessageIn::class.java)
             nodesData.any { node ->
                 if (node.validate(messageIn.from, messageIn.token)) {
-                    Msg.put(messageIn.doHideToken().toString())
+                    Msg.put(messageIn.doHideToken())
                     true
                 } else {
                     false
