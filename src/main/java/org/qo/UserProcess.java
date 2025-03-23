@@ -386,9 +386,21 @@ public class UserProcess {
         if (user == null) {
             return new Pair<>(false, null);
         }
-        String user_salt = user.getPassword().split("\\$")[2];
-        if (Algorithm.hash(Algorithm.hash(password, MessageDigest.getInstance("SHA-256")) + user_salt, MessageDigest.getInstance("SHA-256")).equals(user.getPassword().split("\\$")[3])) {
+
+        String[] passwordParts = user.getPassword().split("\\$");
+        String user_salt = passwordParts[2];
+
+        MessageDigest sha256 = MessageDigest.getInstance("SHA-256");
+
+        byte[] firstHash = sha256.digest(password.getBytes());
+        sha256.reset();
+        sha256.update(firstHash);
+        sha256.update(user_salt.getBytes());
+        String hashedPassword = Base64.getEncoder().encodeToString(sha256.digest());
+
+        if (hashedPassword.equals(passwordParts[3])) {
             String token = login.generateToken(64);
+
             login.insertInto(token, username);
             return new Pair<>(true, token);
         }
