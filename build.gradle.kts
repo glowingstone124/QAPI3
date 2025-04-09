@@ -1,3 +1,4 @@
+import java.util.Properties
 plugins {
     id("org.springframework.boot") version "3.1.5"
     id("io.spring.dependency-management") version "1.1.3"
@@ -7,6 +8,8 @@ plugins {
 
 group = "org.qo"
 version = "1.0-SNAPSHOT"
+val ProductVersion = "4.0.0"
+
 java.sourceCompatibility = JavaVersion.VERSION_21
 
 repositories {
@@ -49,11 +52,31 @@ tasks.withType<Test> {
     useJUnitPlatform()
 }
 
+val generateProperties by tasks.registering {
+    val outputDir = layout.buildDirectory.dir("generated-properties").get().asFile
+    val propsFile = File(outputDir, "version.properties")
+    outputs.file(propsFile)
+    doLast {
+        outputDir.mkdirs()
+        val props = Properties().apply {
+            setProperty("build.version", ProductVersion)
+            setProperty("build.timestamp", System.currentTimeMillis().toString())
+        }
+        propsFile.outputStream().use {
+            props.store(it, null)
+        }
+    }
+}
+
+tasks.named("processResources") {
+    dependsOn(generateProperties)
+}
+
 tasks.register("buildAndCopy") {
     dependsOn("build")
 
     doLast {
-        val buildDir = buildDir.resolve("libs")
+        val buildDir =  layout.buildDirectory.dir("libs").get().asFile
         val outputDir = File("/opt/server/api")
         val targetJarName = "QAPI3-1.0-SNAPSHOT.jar"
 

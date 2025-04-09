@@ -7,9 +7,16 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.SecureRandom;
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
+import java.util.Properties;
+import java.util.stream.Stream;
+
 @Service
 public class Funcs {
     private static final String CHARACTERS = "abcdefghijklmnopqrstuvwxyz0123456789";
@@ -18,14 +25,29 @@ public class Funcs {
         System.out.println("Api Dictionary: \n");
     }
     public static void Start() {
+        Properties prop = new Properties();
+        try (InputStream in = Funcs.class.getClassLoader().getResourceAsStream("version.properties")) {
+            if (in == null) {
+                throw new IllegalArgumentException("version.properties not found");
+            }
+            prop.load(in);
+        } catch (IOException e) {
+            throw new RuntimeException("Error loading version.properties", e);
+        }
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             Logger.log("API shutdown.", Logger.LogLevel.ERROR);
         }));
         System.out.println("""
                 QApi Opensource Project
                 启动中...
-                Based On Springboot                             
+                Based On Springboot
                 """);
+        System.out.println("版本号: " + prop.getProperty("build.version"));
+        Instant instant = Instant.ofEpochSecond(Long.parseLong(prop.getProperty("build.timestamp")));
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss")
+                .withZone(ZoneOffset.UTC);
+
+        System.out.println("构建时间: " + formatter.format(instant));
         if (!Database.SQLAvliable()) {
             System.out.println("SQL Misconfigured!");
         }
