@@ -11,7 +11,9 @@ version = "1.0-SNAPSHOT"
 val ProductVersion = "4.0.0"
 
 java.sourceCompatibility = JavaVersion.VERSION_21
-
+kotlin {
+    jvmToolchain(21)
+}
 repositories {
     mavenCentral()
 }
