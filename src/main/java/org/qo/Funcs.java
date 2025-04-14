@@ -19,6 +19,7 @@ import java.util.stream.Stream;
 
 @Service
 public class Funcs {
+    public static String version = "Unknown";
     private static final String CHARACTERS = "abcdefghijklmnopqrstuvwxyz0123456789";
     @Deprecated
     public static void ShowDic(){
@@ -46,7 +47,7 @@ public class Funcs {
         Instant instant = Instant.ofEpochSecond(Long.parseLong(prop.getProperty("build.timestamp")));
         DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss")
                 .withZone(ZoneOffset.UTC);
-
+        version = formatter.format(instant);
         System.out.println("构建时间: " + formatter.format(instant));
         if (!Database.SQLAvliable()) {
             System.out.println("SQL Misconfigured!");

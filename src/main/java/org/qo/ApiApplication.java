@@ -91,7 +91,7 @@ public class ApiApplication implements ErrorController {
     public ResponseEntity<String> root() {
         JSONObject returnObj = new JSONObject();
         returnObj.put("code", 0);
-        returnObj.put("build", "2025-3");
+        returnObj.put("build", Funcs.version);
         returnObj.put("online", status.countOnline() + " server(s)");
         returnObj.put("sql", SQLAvliable());
         returnObj.put("redis", Configuration.INSTANCE.getEnableRedis());
