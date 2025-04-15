@@ -40,9 +40,7 @@ public class UserProcess {
     public static ConcurrentLinkedDeque<registry_verify_class> verify_list = new ConcurrentLinkedDeque<>();
     public static ConcurrentLinkedDeque<password_verify_class> pwdupd_list = new ConcurrentLinkedDeque<>();
 
-    public static ArrayList<Key> inventoryViewList = new ArrayList<>();
     public static Request request = new Request();
-    public static String CODE = "null";
     private static final ReturnInterface ri = new ReturnInterface();
     private static final Login login = new Login();
     public static UserORM userORM = new UserORM();
@@ -294,34 +292,6 @@ public class UserProcess {
         returnObject.put("name", name);
         return returnObject.toString();
     }
-
-    /**
-     * @param ip       登录ip
-     * @param username 登录用户名
-     */
-    @Deprecated
-    public static void insertLoginIP(String ip, String username) throws Exception {
-        ca.push(() -> {
-            String query = "SELECT username, uid FROM users WHERE username = ?";
-            String insert = "INSERT INTO iptable (username, ip) VALUES (?, ?)";
-            try (Connection connection = ConnectionPool.getConnection(); PreparedStatement preparedStatement = connection.prepareStatement(query)) {
-                preparedStatement.setString(1, username);
-                try (ResultSet resultSet = preparedStatement.executeQuery()) {
-                    if (resultSet.next()) {
-                        try (PreparedStatement preparedStatement1 = connection.prepareStatement(insert)) {
-                            preparedStatement1.setString(1, username);
-                            preparedStatement1.setString(2, ip);
-                            preparedStatement1.executeUpdate();
-                        }
-                    }
-                }
-            } catch (Exception e) {
-                e.printStackTrace();
-            }
-
-        }, Dispatchers.getIO());
-    }
-
     /**
      * @param username 查询用户名
      */

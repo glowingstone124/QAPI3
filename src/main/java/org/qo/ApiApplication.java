@@ -10,7 +10,6 @@ import org.qo.services.mmdb.Query;
 import org.qo.services.proxyRelatedServices.ProxyRelatedImpl;
 import org.qo.services.proxyRelatedServices.ProxyStatus;
 import org.qo.redis.Configuration;
-import org.qo.datas.Nodes;
 import org.qo.services.messageServices.Msg;
 import org.qo.services.gameStatusService.Status;
 import org.qo.utils.*;
@@ -54,7 +53,7 @@ public class ApiApplication implements ErrorController {
     public Login login;
     public IPWhitelistServices ipWhitelistServices;
     @Autowired
-    public ApiApplication(Funcs fc, UAUtil uaUtil, ReturnInterface ri, Status status, Login login, IPWhitelistServices ipWhitelistServices, ProxyRelatedImpl proxyRelatedImpl) {
+    public ApiApplication(UAUtil uaUtil, ReturnInterface ri, Status status, Login login, IPWhitelistServices ipWhitelistServices, ProxyRelatedImpl proxyRelatedImpl) {
         this.ri = ri;
         this.ua = uaUtil;
         this.status = status;
@@ -124,12 +123,12 @@ public class ApiApplication implements ErrorController {
     }
 
     @PostMapping("/qo/upload/gametimerecord")
-    public void parser(@RequestParam(name = "name", required = true) String name, @RequestParam(name = "time", required = true) int time) {
+    public void parser(@RequestParam(name = "name") String name, @RequestParam(name = "time") int time) {
         handleTime(name, time);
     }
 
     @GetMapping("/qo/download/getgametime")
-    public ResponseEntity<String> getTime(@RequestParam(name = "username", required = true) String username) {
+    public ResponseEntity<String> getTime(@RequestParam(name = "username") String username) {
         return ri.GeneralHttpHeader(UserProcess.getTime(username).toString());
     }
 
@@ -149,9 +148,6 @@ public class ApiApplication implements ErrorController {
 
     @PostMapping("/qo/upload/status")
     public void handlePost(@RequestBody String data, @RequestHeader("Authorization") String header) {
-        //if (data != null) {
-        //    status = data;
-        //}
         status.upload(data, header);
     }
 
@@ -206,7 +202,7 @@ public class ApiApplication implements ErrorController {
      * @throws Exception If an error occurs during the processing of the user data.
      */
     @RequestMapping("/qo/upload/registry")
-    public ResponseEntity<String> InsertData(@RequestParam(name = "name", required = true) String name, @RequestParam(name = "uid", required = true) Long uid, @RequestParam(name = "password", required = true) String password, HttpServletRequest request) throws Exception {
+    public ResponseEntity<String> InsertData(@RequestParam(name = "name") String name, @RequestParam(name = "uid") Long uid, @RequestParam(name = "password") String password, HttpServletRequest request) throws Exception {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
         if (ua.isCLIToolRequest(request)) return new ResponseEntity<>("failed", headers, HttpStatus.BAD_REQUEST);
@@ -232,7 +228,7 @@ public class ApiApplication implements ErrorController {
     }
 
     @PostMapping("/qo/upload/password")
-    public static ResponseEntity<String> requestUpdatePassword(@RequestParam long uid, @RequestParam String password) throws ExecutionException, InterruptedException {
+    public ResponseEntity<String> requestUpdatePassword(@RequestParam long uid, @RequestParam String password) throws ExecutionException, InterruptedException {
         return updatePassword(uid, password);
     }
     @RequestMapping("/qo/download/avatar")
@@ -244,7 +240,7 @@ public class ApiApplication implements ErrorController {
     }
 
     @RequestMapping("/qo/download/registry")
-    public ResponseEntity<String> GetData(@RequestParam(required = true) String name) {
+    public ResponseEntity<String> GetData(@RequestParam String name) {
         return ri.GeneralHttpHeader(queryReg(name));
     }
 
@@ -252,25 +248,6 @@ public class ApiApplication implements ErrorController {
     public ResponseEntity<String> returnWeb() {
         return ri.GeneralHttpHeader(Msg.Companion.webGet());
     }
-
-    @PostMapping("/qo/loginip/upload")
-    public void handleLogin(@RequestParam(name = "ip", required = true) String ip, @RequestParam(name = "auth", required = true) String auth, @RequestParam(name = "username", required = true) String username) throws Exception {
-        Funcs fc = new Funcs();
-        if (fc.verify(auth, Funcs.Perms.FULL)) {
-            insertLoginIP(ip, username);
-        }
-    }
-
-    @GetMapping("/qo/loginip/download")
-    public ResponseEntity<String> getLogin(@RequestParam(name = "username", required = true) String username) {
-        String result = getLatestLoginIP(username);
-        if (result.equals("undefined")) {
-            return ri.denied("请求的用户没有历史ip记录");
-        } else {
-            return ri.success(result);
-        }
-    }
-
 
     @GetMapping("/qo/download/name")
     public ResponseEntity<String> queryPlayerName(@RequestParam long qq) {
