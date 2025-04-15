@@ -67,6 +67,7 @@ val generateProperties by tasks.registering {
         propsFile.outputStream().use {
             props.store(it, null)
         }
+        println("Successfully generated properties file")
     }
 }
 
