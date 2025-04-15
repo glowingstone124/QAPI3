@@ -57,7 +57,10 @@ tasks.withType<Test> {
 val generateProperties by tasks.registering {
     val outputDir = layout.buildDirectory.dir("generated-properties").get().asFile
     val propsFile = File(outputDir, "version.properties")
+    val resourceDir = layout.buildDirectory.dir("resources/main").get().asFile
+
     outputs.file(propsFile)
+
     doLast {
         outputDir.mkdirs()
         val props = Properties().apply {
@@ -68,8 +71,13 @@ val generateProperties by tasks.registering {
             props.store(it, null)
         }
         println("Successfully generated properties file")
+
+        resourceDir.mkdirs()
+        propsFile.copyTo(File(resourceDir, "version.properties"), overwrite = true)
+        println("Copied version.properties to resources")
     }
 }
+
 
 tasks.named("processResources") {
     dependsOn(generateProperties)
