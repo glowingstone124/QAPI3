@@ -1,15 +1,11 @@
 package org.qo.orm
 
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
 import kotlinx.coroutines.reactive.awaitSingle
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import org.qo.datas.Mapping.Users
-import org.qo.ConnectionPool
-import org.qo.UserProcess.computePassword
-import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.stereotype.Service
+import org.qo.datas.ConnectionPool
 import java.sql.PreparedStatement
 import java.sql.ResultSet
 
@@ -130,7 +126,7 @@ class UserORM() : CrudDao<Users>  {
                 fields.add("playtime = ?")
                 values.add(it)
             }
-            user.password?.let {
+            user.password.let {
                 fields.add("password = ?")
                 values.add(it)
             }

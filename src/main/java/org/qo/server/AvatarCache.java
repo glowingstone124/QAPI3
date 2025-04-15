@@ -1,8 +1,7 @@
 package org.qo.server;
 
-import kotlinx.coroutines.Dispatchers;
-import org.qo.CoroutineAdapter;
-import org.qo.Request;
+import org.qo.utils.CoroutineAdapter;
+import org.qo.utils.Request;
 
 import java.io.IOException;
 import java.nio.file.Files;

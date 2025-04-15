@@ -1,6 +1,6 @@
 package org.qo.redis
 
-import org.qo.Logger
+import org.qo.utils.Logger
 import org.qo.redis.Configuration.pool
 import redis.clients.jedis.exceptions.JedisConnectionException
 import redis.clients.jedis.exceptions.JedisDataException

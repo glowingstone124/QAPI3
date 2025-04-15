@@ -2,7 +2,7 @@ package org.qo.redis
 
 import com.google.gson.Gson
 import com.google.gson.JsonObject
-import org.qo.Logger
+import org.qo.utils.Logger
 import redis.clients.jedis.*
 import redis.clients.jedis.exceptions.JedisConnectionException
 import redis.clients.jedis.exceptions.JedisDataException

@@ -2,9 +2,7 @@ package org.qo.orm
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import org.qo.ConnectionPool
-import java.sql.Connection
-import java.sql.PreparedStatement
+import org.qo.datas.ConnectionPool
 import java.sql.ResultSet
 
 data class LoginToken(

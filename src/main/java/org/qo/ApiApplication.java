@@ -4,15 +4,16 @@ import com.google.gson.JsonObject;
 import jakarta.annotation.PostConstruct;
 import jakarta.servlet.http.HttpServletRequest;
 import org.json.JSONObject;
-import org.qo.loginService.IPWhitelistServices;
-import org.qo.loginService.Login;
-import org.qo.mmdb.Query;
-import org.qo.proxyRelatedServices.ProxyRelatedController;
-import org.qo.proxyRelatedServices.ProxyRelatedImpl;
-import org.qo.proxyRelatedServices.ProxyStatus;
+import org.qo.services.loginService.IPWhitelistServices;
+import org.qo.services.loginService.Login;
+import org.qo.services.mmdb.Query;
+import org.qo.services.proxyRelatedServices.ProxyRelatedImpl;
+import org.qo.services.proxyRelatedServices.ProxyStatus;
 import org.qo.redis.Configuration;
-import org.qo.redis.Redis;
-import org.qo.server.Nodes;
+import org.qo.datas.Nodes;
+import org.qo.services.messageServices.Msg;
+import org.qo.services.gameStatusService.Status;
+import org.qo.utils.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.web.servlet.error.ErrorController;
@@ -36,35 +37,28 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.Date;
 
-import static org.qo.Database.SQLAvliable;
-import static org.qo.UserProcess.*;
+import static org.qo.datas.Database.SQLAvliable;
+import static org.qo.utils.UserProcess.*;
 
 @RestController
 @SpringBootApplication
 public class ApiApplication implements ErrorController {
     //public static String status = "no old status found";
-    public static String serverStatus;
     public static int serverAlive;
     public static long PackTime;
     public static int requests = 0;
-    private final Nodes nodes;
-    private Funcs fc;
-    private UAUtil ua;
-    public SseService sseService;
+    private final UAUtil ua;
     private final ReturnInterface ri;
     private final ProxyRelatedImpl proxyRelatedImpl;
-    private Status status;
+    private final Status status;
     public Login login;
     public IPWhitelistServices ipWhitelistServices;
     @Autowired
-    public ApiApplication(SseService sseService, Funcs fc, UAUtil uaUtil, ReturnInterface ri, Status status, Nodes nodes, Login login, IPWhitelistServices ipWhitelistServices, ProxyRelatedImpl proxyRelatedImpl) {
-        this.sseService = sseService;
-        this.fc = fc;
+    public ApiApplication(Funcs fc, UAUtil uaUtil, ReturnInterface ri, Status status, Login login, IPWhitelistServices ipWhitelistServices, ProxyRelatedImpl proxyRelatedImpl) {
         this.ri = ri;
         this.ua = uaUtil;
         this.status = status;
         this.login = login;
-        this.nodes = nodes;
         this.ipWhitelistServices = ipWhitelistServices;
         this.proxyRelatedImpl = proxyRelatedImpl;
     }
