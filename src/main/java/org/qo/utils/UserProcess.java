@@ -369,7 +369,8 @@ public class UserProcess {
         sha256.update(firstHash);
         sha256.update(user_salt.getBytes());
         String hashedPassword = Base64.getEncoder().encodeToString(sha256.digest());
-
+        System.out.println("[DEBUG@performLogin,GenerateHash]" + "User " + username + " hashed password: " + hashedPassword);
+        System.out.println("[DEBUG@performLogin,GenerateHash]" + "DB stored password: " + passwordParts[3]);
         if (hashedPassword.equals(passwordParts[3])) {
             String token = login.generateToken(64);
 
