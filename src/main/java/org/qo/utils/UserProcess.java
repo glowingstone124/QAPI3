@@ -355,10 +355,11 @@ public class UserProcess {
     public static Pair<Boolean, String> performLogin(String username, String password) throws NoSuchAlgorithmException {
         Users user = userORM.read(username);
         if (user == null) {
+            System.out.println("[DEBUG@performLogin,ORM]User " + username + " not found");
             return new Pair<>(false, null);
         }
 
-        /*String[] passwordParts = user.getPassword().split("\\$");
+        String[] passwordParts = user.getPassword().split("\\$");
         String user_salt = passwordParts[2];
 
         MessageDigest sha256 = MessageDigest.getInstance("SHA-256");
@@ -375,28 +376,7 @@ public class UserProcess {
             login.insertInto(token, username);
             return new Pair<>(true, token);
         }
-        return new Pair<>(false, null);*/
-        String[] passwordParts = user.getPassword().split("\\$");
-        if (passwordParts.length < 4) {
-            return new Pair<>(false, null);
-        }
-
-        String user_salt = passwordParts[2];
-
-        MessageDigest sha256 = MessageDigest.getInstance("SHA-256");
-        byte[] firstHash = sha256.digest(password.getBytes(StandardCharsets.UTF_8));
-        sha256.reset();
-        sha256.update(firstHash);
-        sha256.update(user_salt.getBytes(StandardCharsets.UTF_8));
-        String hashedPassword = bytesToHex(sha256.digest());
-
-        if (hashedPassword.equals(passwordParts[3])) {
-            String token = login.generateToken(64);
-            login.insertInto(token, username);
-            return new Pair<>(true, token);
-        }
         return new Pair<>(false, null);
-
     }
 
     /**
@@ -442,12 +422,4 @@ public class UserProcess {
             this.expiration = expiration;
         }
     }
-    private static String bytesToHex(byte[] bytes) {
-        StringBuilder sb = new StringBuilder();
-        for (byte b : bytes) {
-            sb.append(String.format("%02x", b));
-        }
-        return sb.toString();
-    }
-
 }
