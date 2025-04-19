@@ -361,12 +361,9 @@ public class UserProcess {
 
         String[] passwordParts = user.getPassword().split("\\$");
         String user_salt = passwordParts[2];
-
-        String computedPasswordHash = computePassword(password, true).split("\\$")[3]; // 提取出哈希部分
-
-        System.out.println("[DEBUG@performLogin,GenerateHash]" + "User " + username + " computed password: " + computedPasswordHash);
-        System.out.println("[DEBUG@performLogin,GenerateHash]" + "DB stored password: " + passwordParts[3]);
-        if (computedPasswordHash.equals(passwordParts[3])) {
+        String user_hashed = passwordParts[3];
+        String computedPasswordHash = Algorithm.hash(Algorithm.hash(password, MessageDigest.getInstance("SHA-256")) + user_salt, MessageDigest.getInstance("SHA-256"));
+        if (computedPasswordHash.equals(user_hashed)) {
             String token = login.generateToken(64);
 
             login.insertInto(token, username);
