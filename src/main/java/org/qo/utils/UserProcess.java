@@ -362,16 +362,11 @@ public class UserProcess {
         String[] passwordParts = user.getPassword().split("\\$");
         String user_salt = passwordParts[2];
 
-        MessageDigest sha256 = MessageDigest.getInstance("SHA-256");
+        String computedPasswordHash = computePassword(password, true).split("\\$")[3]; // 提取出哈希部分
 
-        byte[] firstHash = sha256.digest(password.getBytes());
-        sha256.reset();
-        sha256.update(firstHash);
-        sha256.update(user_salt.getBytes());
-        String hashedPassword = toHex(sha256.digest());
-        System.out.println("[DEBUG@performLogin,GenerateHash]" + "User " + username + " hashed password: " + hashedPassword);
+        System.out.println("[DEBUG@performLogin,GenerateHash]" + "User " + username + " computed password: " + computedPasswordHash);
         System.out.println("[DEBUG@performLogin,GenerateHash]" + "DB stored password: " + passwordParts[3]);
-        if (hashedPassword.equals(passwordParts[3])) {
+        if (computedPasswordHash.equals(passwordParts[3])) {
             String token = login.generateToken(64);
 
             login.insertInto(token, username);
@@ -379,6 +374,7 @@ public class UserProcess {
         }
         return new Pair<>(false, null);
     }
+
 
     /**
      * Computes a securely hashed password with an optional formatted prefix.
