@@ -6,16 +6,13 @@ This program contains these features:
 - Minecraft Server Status Query: This api will automatically show latest server status.(Need Plugin-side support)
 
 ## Future RoadMaps
-
-Refactor ALL sql operations into R2DBC
-
-Optimize code structure
-
 More codes in Kotlin
 
 Rankings (Like destroy & place) with QPlugin
 
 DIY player card with QCommunity WEB
+
+Add Discord support
 ## Guides
 ### To install:
     
