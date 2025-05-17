@@ -39,13 +39,13 @@ class MetroServiceImpl {
 			val station = resultSet.getBoolean("station")
 			val dummy = resultSet.getString("dummy")
 			val sigList: MutableList<JsonObject> = mutableListOf()
-			val upStr = resultSet.getString("signal_up")
-			val downStr = resultSet.getString("signal_down")
+			val upStr: String? = resultSet.getString("signal_up")
+			val downStr: String? = resultSet.getString("signal_down")
 
-			if (upStr != "") {
+			upStr?.let {
 				sigList.add(JsonParser.parseString(upStr) as JsonObject)
 			}
-			if (downStr != "") {
+			downStr?.let {
 				sigList.add(JsonParser.parseString(downStr) as JsonObject)
 			}
 
