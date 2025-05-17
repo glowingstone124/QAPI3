@@ -3,6 +3,7 @@ package org.qo.services.metroServices
 import com.google.gson.Gson
 import com.google.gson.GsonBuilder
 import com.google.gson.JsonObject
+import com.google.gson.JsonParser
 import com.google.gson.reflect.TypeToken
 import org.qo.datas.ConnectionPool
 import org.qo.orm.SQL
@@ -21,13 +22,11 @@ class MetroServiceImpl {
 		val lid: Int,
 		val station: Boolean,
 		val dummy: String,
-		val signal: List<Signal>
+		val signal: List<JsonObject>
 	)
 
 	fun getMetroJson(): String {
 		val gson: Gson = GsonBuilder().setPrettyPrinting().create()
-		val root = JsonObject()
-		val signalListType = object : TypeToken<List<Signal>>() {}.type
 
 		val sectionMap = mutableMapOf<String, Section>()
 		val connection = ConnectionPool.getConnection()
@@ -39,29 +38,22 @@ class MetroServiceImpl {
 			val lid = resultSet.getInt("lid")
 			val station = resultSet.getBoolean("station")
 			val dummy = resultSet.getString("dummy")
-
+			val sigList: MutableList<JsonObject> = mutableListOf()
 			val upStr = resultSet.getString("signal_up")
 			val downStr = resultSet.getString("signal_down")
 
-			val up = try {
-				if (upStr.isNullOrBlank()) emptyList()
-				else gson.fromJson<List<Signal>>(upStr, signalListType)
-			} catch (e: Exception) {
-				emptyList()
+			if (upStr != "") {
+				sigList.add(JsonParser.parseString(upStr) as JsonObject)
 			}
-
-			val down = try {
-				if (downStr.isNullOrBlank()) emptyList()
-				else gson.fromJson<List<Signal>>(downStr, signalListType)
-			} catch (e: Exception) {
-				emptyList()
+			if (downStr != "") {
+				sigList.add(JsonParser.parseString(downStr) as JsonObject)
 			}
 
 			val section = Section(
 				lid = lid,
 				station = station,
 				dummy = dummy,
-				signal = up + down
+				signal = sigList
 			)
 
 			sectionMap[id] = section
