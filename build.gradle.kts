@@ -19,15 +19,20 @@ repositories {
 }
 
 dependencies {
+    //GEOIP
     implementation("com.maxmind.geoip2:geoip2:4.2.1")
-
+    //Kotlin Stdlibs
     implementation("org.jetbrains.kotlin:kotlin-reflect")
     implementation("org.jetbrains.kotlin:kotlin-stdlib")
-    implementation("org.springframework.boot:spring-boot-starter-web")
+    // Springboot
+    implementation("org.springframework.boot:spring-boot-starter-webflux")
     implementation("org.springframework.boot:spring-boot-starter-thymeleaf")
-    implementation("org.springframework.boot:spring-boot-starter-tomcat")
     implementation("org.springframework.boot:spring-boot-starter")
     implementation("org.springframework.boot:spring-boot-starter-quartz")
+    implementation("org.springframework.boot:spring-boot-starter-reactor-netty")
+    implementation("org.springframework.boot:spring-boot-starter-websocket")
+    implementation("org.springframework.boot:spring-boot-starter-web")
+    //Redis
     implementation("redis.clients:jedis:3.6.3")
     implementation("org.mockito:mockito-core:5.13.0")
     implementation("org.json:json:20231013")
@@ -43,9 +48,7 @@ dependencies {
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-reactor:1.9.0")
-
     testImplementation("junit:junit:4.13.2")
-    implementation("org.springframework.boot:spring-boot-starter-websocket")
     testImplementation("org.junit.jupiter:junit-jupiter:5.9.1")
     implementation("io.asyncer:r2dbc-mysql:1.2.0")
     testImplementation("org.jetbrains.kotlin:kotlin-test:${kotlin.coreLibrariesVersion}")
