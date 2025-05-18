@@ -31,7 +31,7 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-quartz")
     implementation("org.springframework.boot:spring-boot-starter-reactor-netty")
     implementation("org.springframework.boot:spring-boot-starter-websocket")
-    implementation("org.springframework.boot:spring-boot-starter-web")
+    //implementation("org.springframework.boot:spring-boot-starter-web")
     //Redis
     implementation("redis.clients:jedis:3.6.3")
     implementation("org.mockito:mockito-core:5.13.0")
