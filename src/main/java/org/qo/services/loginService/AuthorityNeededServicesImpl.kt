@@ -3,6 +3,7 @@ package org.qo.services.loginService
 import com.google.gson.Gson
 import com.google.gson.JsonObject
 import kotlinx.coroutines.reactive.awaitSingle
+import org.qo.datas.Mapping
 import org.qo.services.messageServices.Msg
 import org.qo.utils.ReturnInterface
 import org.qo.orm.SQL
@@ -105,6 +106,15 @@ class AuthorityNeededServicesImpl(private val login: Login, private val ri: Retu
 			20 -> "Format error."
 			else -> "Unknown error."
 		}
+	}
+
+	suspend fun internalAuthorityCheck(token: String): Pair<Mapping.Users?, Boolean>{
+		val (accountName, errorCode) = login.validate(token)
+		val precheckResult = doPrecheck(accountName, errorCode)
+		if (precheckResult != null) {
+			return Pair(null, false)
+		}
+		return Pair(userORM.read(accountName!!),true)
 	}
 }
 
