@@ -29,9 +29,6 @@ public class Main {
     @Resource
     private FileUpdateHook fileUpdateHook;
 
-    @Resource
-    private Redis redis;
-
     @PreDestroy
     public void onShutdown() {
         Logger.log("Stopping API...", INFO);
