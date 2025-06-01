@@ -8,7 +8,7 @@ import org.springframework.web.bind.annotation.*
 import reactor.core.publisher.Flux
 
 @RestController
-@RequestMapping("/qo/asking")
+@RequestMapping("/qo/asking/")
 class LLMController(private val llmServices: LLMServices) {
 
 	@PostMapping("/ask", produces = [MediaType.TEXT_EVENT_STREAM_VALUE])
