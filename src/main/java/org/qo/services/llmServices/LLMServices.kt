@@ -79,6 +79,7 @@ class LLMServices(private val authorityNeededServicesImpl: AuthorityNeededServic
 				if (line.startsWith("data: ")) {
 					val dataJson = line.removePrefix("data: ").trim()
 					if (dataJson == "[DONE]") break
+					println("data: $dataJson")
 					emit(dataJson)
 				}
 			}
