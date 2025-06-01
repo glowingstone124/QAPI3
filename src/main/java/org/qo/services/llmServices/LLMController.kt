@@ -12,9 +12,7 @@ class LLMController(private val llmServices: LLMServices) {
 	suspend fun handleResponse(@RequestHeader("Authorization") requestToken: String, @RequestBody body: String): Flow<String>? {
 		val result = llmServices.generateLLMStream(body, requestToken)
 		val flow = result.first
-		flow?.collect {
-			println(it)
-		}
+		print("debug: flow is null: ${flow == null}")
 		return if (!result.second) {
 			null
 		} else {
