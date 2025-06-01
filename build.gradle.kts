@@ -9,7 +9,7 @@ plugins {
 group = "org.qo"
 version = "1.0-SNAPSHOT"
 val ProductVersion = "4.0.0"
-
+val ktor_version = "3.1.3"
 java.sourceCompatibility = JavaVersion.VERSION_21
 kotlin {
     jvmToolchain(21)
@@ -35,7 +35,7 @@ dependencies {
     //Redis
     implementation("redis.clients:jedis:3.6.3")
     implementation("org.mockito:mockito-core:5.13.0")
-    implementation("org.json:json:20231013")
+
     implementation("javax.servlet:javax.servlet-api:4.0.1")
     implementation("org.xerial:sqlite-jdbc:3.34.0")
     implementation("com.google.code.gson:gson:2.10.1")
@@ -52,6 +52,9 @@ dependencies {
     testImplementation("org.junit.jupiter:junit-jupiter:5.9.1")
     implementation("io.asyncer:r2dbc-mysql:1.2.0")
     testImplementation("org.jetbrains.kotlin:kotlin-test:${kotlin.coreLibrariesVersion}")
+
+    implementation("io.ktor:ktor-client-core:${ktor_version}")
+    implementation("io.ktor:ktor-client-cio:${ktor_version}")
 }
 
 tasks.withType<Test> {

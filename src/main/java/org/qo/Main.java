@@ -39,7 +39,7 @@ public class Main {
         }
         ConnectionPool.init(); //EVERY thing using SQL should init after this!
         Msg.Companion.init();
-        Configuration.INSTANCE.init();
+        org.qo.redis.Configuration.INSTANCE.init();
         Funcs.Start();
         Init.INSTANCE.init();
         Funcs.ShowDic();
