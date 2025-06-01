@@ -2,20 +2,24 @@ package org.qo.services.llmServices
 
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
+import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.request.header
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsChannel
 import io.ktor.http.ContentType
+import io.ktor.http.ContentType.Application.Json
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.contentType
 import io.ktor.http.isSuccess
+import io.ktor.serialization.kotlinx.json.json
 import io.ktor.utils.io.readUTF8Line
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
 import org.qo.redis.DatabaseType
 import org.qo.redis.Redis
 import org.qo.services.loginService.AuthorityNeededServicesImpl
@@ -26,7 +30,16 @@ import java.nio.file.Path
 @Service
 class LLMServices(private val authorityNeededServicesImpl: AuthorityNeededServicesImpl){
 	val redis = Redis()
-	val client = HttpClient(CIO)
+	val client = HttpClient(CIO) {
+		install(ContentNegotiation) {
+			json(Json {
+				ignoreUnknownKeys = true
+				prettyPrint = true
+				isLenient = true
+			})
+		}
+	}
+
 	val token = Files.readString(Path.of("LLMAPITOKEN")).trim()
 	suspend fun generalPreProcess(token: String) : Boolean {
 		val result = authorityNeededServicesImpl.internalAuthorityCheck(token)
