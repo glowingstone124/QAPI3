@@ -76,7 +76,7 @@ class LLMServices(private val authorityNeededServicesImpl: AuthorityNeededServic
 		if (response.status.isSuccess()) {
 			val channel = response.bodyAsChannel()
 			while (!channel.isClosedForRead) {
-				val line = channel.readUTF8Line()
+				val line = channel.readUTF8Line()?.removeSurrounding("data: ")
 				if (line == null) break
 				//println("data: $dataJson")
 				val json = Json { ignoreUnknownKeys = true }
