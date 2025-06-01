@@ -57,7 +57,7 @@ class LLMServices(private val authorityNeededServicesImpl: AuthorityNeededServic
 
 	}
 
-	fun accessOpenAI(prompt: String): Flow<String> = flow {
+	suspend fun accessOpenAI(prompt: String): Flow<String> = flow {
 		val response = client.post("https://api.deepseek.com/v1/chat/completions") {
 			header(HttpHeaders.Authorization, "Bearer $token")
 			contentType(ContentType.Application.Json)
@@ -94,7 +94,7 @@ class LLMServices(private val authorityNeededServicesImpl: AuthorityNeededServic
 		}
 	}
 
-	fun generateLLMStream(prompt: String, token: String): Pair<Flow<String>?, Boolean> {
+	suspend fun generateLLMStream(prompt: String, token: String): Pair<Flow<String>?, Boolean> {
 		if (hasAlreadyRequested(token)) {
 			return Pair(null, false)
 		}
