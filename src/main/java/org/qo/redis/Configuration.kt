@@ -80,8 +80,8 @@ object Configuration {
 enum class DatabaseType(val value: Int) {
     QO_REG_DATABASE(0),
     QOAPP_REG_DATABASE(1),
-    QO_ONLINE_DATABASE(2);
-
+    QO_ONLINE_DATABASE(2),
+    QO_ASSISTANT_DATABASE(3);
     companion object {
         fun fromInt(value: Int): DatabaseType? {
             return DatabaseType.entries.find { it.value == value }

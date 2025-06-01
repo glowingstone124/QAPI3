@@ -2,78 +2,78 @@ package org.qo.redis
 
 import org.qo.utils.Logger
 import org.qo.redis.Configuration.pool
+import redis.clients.jedis.Jedis
 import redis.clients.jedis.exceptions.JedisConnectionException
 import redis.clients.jedis.exceptions.JedisDataException
 
 class Redis {
-
 	@JvmOverloads
-	fun insert(key: String, value: String, database: Int, expires: Long = Configuration.EXPIRE_TIME) {
-		if (!Configuration.EnableRedis) return
+	fun insert(key: String, value: String, database: Int, expires: Long = Configuration.EXPIRE_TIME): RedisResult<Unit> {
+		return RedisResult {
+			if (!Configuration.EnableRedis) return@RedisResult null
 
-		try {
 			pool?.resource?.use { jedis ->
 				jedis.select(database)
 				jedis.set(key, value)
 				jedis.expire(key, expires)
-			} ?: Logger.log("ERROR: Redis pool is not initialized.", Logger.LogLevel.ERROR)
-		} catch (e: JedisConnectionException) {
-			Logger.log("Redis connection error on key=$key db=$database: ${e.message}", Logger.LogLevel.ERROR)
-		} catch (e: JedisDataException) {
-			Logger.log("Redis data error on key=$key db=$database: ${e.message}", Logger.LogLevel.ERROR)
+			} ?: throw IllegalStateException("Redis pool is not initialized.")
+			Unit
 		}
 	}
 
+	fun get(key: String, database: Int): RedisResult<String?> {
+		return RedisResult {
+			if (!Configuration.EnableRedis) return@RedisResult null
 
-	fun get(key: String, database: Int): String? {
-		if (!Configuration.EnableRedis) {
-			return null
-		}
-		return try {
-			pool!!.resource.use { jedis ->
+			pool?.resource?.use { jedis ->
 				jedis.select(database)
 				jedis.get(key)
-			}
-		} catch (e: JedisConnectionException) {
-			Logger.log("ERROR: ${e.message}", Logger.LogLevel.ERROR)
-			null
-		} catch (e: JedisDataException) {
-			Logger.log("ERROR: ${e.message}", Logger.LogLevel.ERROR)
-			null
+			} ?: throw IllegalStateException("Redis pool is not initialized.")
 		}
 	}
 
-	fun exists(key: String, database: Int): Boolean {
-		if (!Configuration.EnableRedis) {
-			return false
+	fun delete(key: String, database: Int): RedisResult<Unit> {
+		return RedisResult {
+			if (!Configuration.EnableRedis) return@RedisResult null
+
+			pool?.resource?.use { jedis ->
+				jedis.select(database)
+				jedis.del(key)
+			} ?: throw IllegalStateException("Redis pool is not initialized.")
+			Unit
 		}
-		return try {
-			pool!!.resource.use { jedis ->
+	}
+
+	fun exists(key: String, database: Int): RedisResult<Boolean> {
+		return RedisResult {
+			if (!Configuration.EnableRedis) return@RedisResult false
+
+			pool?.resource?.use { jedis ->
 				jedis.select(database)
 				jedis.exists(key)
+			} ?: throw IllegalStateException("Redis pool is not initialized.")
+		}
+	}
+	class RedisResult<T>(private val executor: () -> T?) {
+		private var errorHandler: ((Exception) -> Unit)? = null
+
+		fun onException(handler: (Exception) -> Unit): T? {
+			this.errorHandler = handler
+			return execute()
+		}
+
+		fun ignoreException(): T? {
+			return execute()
+		}
+
+		private fun execute(): T? {
+			return try {
+				executor()
+			} catch (e: Exception) {
+				errorHandler?.invoke(e)
+				null
 			}
-		} catch (e: JedisConnectionException) {
-			Logger.log("ERROR: ${e.message}", Logger.LogLevel.ERROR)
-			false
-		} catch (e: JedisDataException) {
-			Logger.log("ERROR: ${e.message}", Logger.LogLevel.ERROR)
-			false
 		}
 	}
 
-	fun delete(key: String, database: Int) {
-		if (!Configuration.EnableRedis) {
-			return
-		}
-		try {
-			pool?.resource.use { jedis ->
-				jedis?.select(database)
-				jedis?.del(key)
-			}
-		} catch (e: JedisConnectionException) {
-			Logger.log("ERROR: ${e.message}", Logger.LogLevel.ERROR)
-		} catch (e: JedisDataException) {
-			Logger.log("ERROR: ${e.message}", Logger.LogLevel.ERROR)
-		}
-	}
 }
