@@ -8,15 +8,11 @@ import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsChannel
 import io.ktor.http.ContentType
-import io.ktor.http.ContentType.Application.Json
 import io.ktor.http.HttpHeaders
-import io.ktor.http.HttpStatusCode
 import io.ktor.http.contentType
 import io.ktor.http.isSuccess
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.utils.io.jvm.javaio.toInputStream
-import io.ktor.utils.io.readUTF8Line
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.serialization.Serializable
@@ -99,7 +95,7 @@ class LLMServices(private val authorityNeededServicesImpl: AuthorityNeededServic
 	}
 
 	suspend fun generateLLMStream(prompt: String, token: String): Pair<Flow<String>?, Boolean> {
-		if (hasAlreadyRequested(token)) {
+		if (hasAlreadyRequested(token) || !generalPreProcess(token)) {
 			return Pair(null, false)
 		}
 
