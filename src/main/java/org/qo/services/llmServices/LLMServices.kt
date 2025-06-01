@@ -78,11 +78,10 @@ class LLMServices(private val authorityNeededServicesImpl: AuthorityNeededServic
 			while (!channel.isClosedForRead) {
 				val line = channel.readUTF8Line()
 				if (line == null) break
-				val dataJson = line.removePrefix("data: ").trim()
 				//println("data: $dataJson")
 				val json = Json { ignoreUnknownKeys = true }
-				val resp = json.decodeFromString<ChatCompletionChunk>(dataJson)
-				if (resp.choices[0].finish_reason == null) break
+				val resp = json.decodeFromString<ChatCompletionChunk>(line)
+				if (resp.choices[0].finish_reason != null) break
 				emit(resp.choices[0].delta.content ?: "")
 			}
 		} else {
