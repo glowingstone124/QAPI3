@@ -2,9 +2,20 @@ package org.qo.services.llmServices
 
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
+import io.ktor.client.request.header
+import io.ktor.client.request.post
+import io.ktor.client.request.setBody
+import io.ktor.client.statement.bodyAsChannel
+import io.ktor.http.ContentType
+import io.ktor.http.HttpHeaders
+import io.ktor.http.HttpStatusCode
+import io.ktor.http.contentType
+import io.ktor.http.isSuccess
+import io.ktor.utils.io.readUTF8Line
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
+import kotlinx.serialization.Serializable
 import org.qo.redis.DatabaseType
 import org.qo.redis.Redis
 import org.qo.services.loginService.AuthorityNeededServicesImpl
@@ -31,20 +42,44 @@ class LLMServices(private val authorityNeededServicesImpl: AuthorityNeededServic
 	suspend fun prepareDocuments() {
 
 	}
-	suspend fun accessOpenAI() {
-	}
-	fun generateLLMStream(prompt: String, token: String): Pair<Flow<String>?, Boolean> {
-		val flow = flow {
-			val tokens = listOf("你好，", "我是一个", "流式输出的", "LLM模型", "。")
-			for (token in tokens) {
-				emit(token)
-				delay(500)
-			}
+	suspend fun accessOpenAI(prompt: String): Flow<String> = flow {
+		val response = client.post("https://api.deepseek.com/v1/chat/completions") {
+			header(HttpHeaders.Authorization, "Bearer $token")
+			contentType(ContentType.Application.Json)
+			setBody(
+				ChatRequest(
+					model = "deepseek-chat",
+					messages = listOf(
+						Message("system", "You are a helpful assistant."),
+						Message("user", prompt)
+					),
+					stream = true
+				)
+			)
 		}
+
+		if (response.status.isSuccess()) {
+			val channel = response.bodyAsChannel()
+			while (!channel.isClosedForRead) {
+				val line = channel.readUTF8Line()
+				if (line == null) break
+				if (line.startsWith("data: ")) {
+					val dataJson = line.removePrefix("data: ").trim()
+					if (dataJson == "[DONE]") break
+					emit(dataJson)
+				}
+			}
+		} else {
+			throw RuntimeException("API 请求失败: ${response.status}")
+		}
+	}
+
+	suspend fun generateLLMStream(prompt: String, token: String): Pair<Flow<String>?, Boolean> {
 		if (hasAlreadyRequested(token)) {
 			return Pair(null, false)
 		}
-		return TODO("Provide the return value")
+
+		return Pair(accessOpenAI(prompt), true)
 	}
 
 	private fun hasAlreadyRequested(token: String): Boolean {
@@ -59,3 +94,9 @@ class LLMServices(private val authorityNeededServicesImpl: AuthorityNeededServic
 		return false
 	}
 }
+
+@Serializable
+data class Message(val role: String, val content: String)
+
+@Serializable
+data class ChatRequest(val model: String,val messages: List<Message>, val stream: Boolean)

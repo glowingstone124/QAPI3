@@ -12,7 +12,7 @@ import reactor.core.publisher.Flux
 class LLMController(private val llmServices: LLMServices) {
 
 	@PostMapping("/ask", produces = [MediaType.TEXT_EVENT_STREAM_VALUE])
-	fun handleResponse(@Header("Authorization") requestToken: String, @RequestBody body: String): Flux<String> {
+	suspend fun handleResponse(@Header("Authorization") requestToken: String, @RequestBody body: String): Flux<String> {
 		val result = llmServices.generateLLMStream(body, requestToken)
 		return if (!result.second) {
 			Flux.just("Unpermitted access")
@@ -20,6 +20,4 @@ class LLMController(private val llmServices: LLMServices) {
 			result.first!!.asFlux()
 		}
 	}
-
-
 }
