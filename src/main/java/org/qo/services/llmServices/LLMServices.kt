@@ -84,6 +84,7 @@ class LLMServices(private val authorityNeededServicesImpl: AuthorityNeededServic
 					val resp = json.decodeFromString<ChatCompletionChunk>(line)
 					if (resp.choices[0].finish_reason != null) break
 					emit(resp.choices[0].delta.content ?: "")
+					println(resp.choices[0].delta.content)
 				} catch (e: Exception) {
 					println("JSON解析错误: ${e.message}")
 				}
