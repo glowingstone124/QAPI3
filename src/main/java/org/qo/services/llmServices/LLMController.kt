@@ -9,8 +9,12 @@ import org.springframework.web.bind.annotation.*
 @RequestMapping("/qo/asking/")
 class LLMController(private val llmServices: LLMServices) {
 	@PostMapping("/ask", produces = [MediaType.TEXT_EVENT_STREAM_VALUE])
-	fun handleResponse(@RequestHeader("Authorization") requestToken: String, @RequestBody body: String): Flow<String>? {
+	suspend fun handleResponse(@RequestHeader("Authorization") requestToken: String, @RequestBody body: String): Flow<String>? {
 		val result = llmServices.generateLLMStream(body, requestToken)
+		val flow = result.first
+		flow?.collect {
+			println(it)
+		}
 		return if (!result.second) {
 			null
 		} else {
