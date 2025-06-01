@@ -1,9 +1,9 @@
 package org.qo;
 
 import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import jakarta.annotation.PostConstruct;
 import jakarta.servlet.http.HttpServletRequest;
-import org.json.JSONObject;
 import org.qo.services.loginService.IPWhitelistServices;
 import org.qo.services.loginService.Login;
 import org.qo.services.mmdb.Query;
@@ -82,27 +82,27 @@ public class ApiApplication implements ErrorController {
 
     @RequestMapping("/")
     public ResponseEntity<String> root() {
-        JSONObject returnObj = new JSONObject();
-        returnObj.put("code", 0);
-        returnObj.put("build", Funcs.version);
-        returnObj.put("online", status.countOnline() + " server(s)");
-        returnObj.put("sql", SQLAvliable());
-        returnObj.put("redis", Configuration.INSTANCE.getEnableRedis());
-        returnObj.put("proxies", proxyRelatedImpl.getProxies(ProxyStatus.ALIVE).size());
+        JsonObject returnObj = new JsonObject();
+        returnObj.addProperty("code", 0);
+        returnObj.addProperty("build", Funcs.version);
+        returnObj.addProperty("online", status.countOnline() + " server(s)");
+        returnObj.addProperty("sql", SQLAvliable());
+        returnObj.addProperty("redis", Configuration.INSTANCE.getEnableRedis());
+        returnObj.addProperty("proxies", proxyRelatedImpl.getProxies(ProxyStatus.ALIVE).size());
         return ri.GeneralHttpHeader(returnObj.toString());
     }
 
     @PostMapping("/qo/alive/upload")
     public void getAlive(@RequestBody String data, @RequestHeader("Authorization") String header) {
-        JSONObject Heartbeat = new JSONObject(data);
-        PackTime = Heartbeat.getLong("timestamp");
+        JsonObject Heartbeat = JsonParser.parseString(data).getAsJsonObject();
+        PackTime = Heartbeat.get("timestamp").getAsLong();
         long currentTime = new Date().getTime();
         if (currentTime - PackTime > 3000) {
             serverAlive = -1;
         }
         SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
         String uselessthings = sdf.format(new Date(PackTime));
-        switch (Heartbeat.getInt("stat")) {
+        switch (Heartbeat.get("stat").getAsInt()) {
             case 0 -> serverAlive = 0;
             //Ready
             case 1 -> {
@@ -117,8 +117,8 @@ public class ApiApplication implements ErrorController {
 
     @GetMapping("/qo/alive/download")
     public String queryAlive() {
-        JSONObject aliveJSON = new JSONObject();
-        aliveJSON.put("stat", serverAlive);
+        JsonObject aliveJSON = new JsonObject();
+        aliveJSON.addProperty("stat", serverAlive);
         return aliveJSON.toString();
     }
 
@@ -134,9 +134,9 @@ public class ApiApplication implements ErrorController {
 
     @RequestMapping("/app/latest")
     public ResponseEntity<String> update() {
-        JSONObject returnObj = new JSONObject();
-        returnObj.put("version", 9);
-        returnObj.put("die", false);
+        JsonObject returnObj = new JsonObject();
+        returnObj.addProperty("version", 9);
+        returnObj.addProperty("die", false);
         return ri.GeneralHttpHeader(returnObj.toString());
     }
 

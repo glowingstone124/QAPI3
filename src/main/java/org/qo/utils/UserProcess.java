@@ -1,16 +1,16 @@
 package org.qo.utils;
 
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import jakarta.servlet.http.HttpServletRequest;
 import kotlin.Pair;
 import kotlinx.coroutines.Dispatchers;
-import org.json.JSONArray;
 import org.qo.datas.ConnectionPool;
 import org.qo.services.loginService.Login;
 import org.qo.orm.UserORM;
 import org.qo.datas.Mapping.*;
-import org.json.JSONObject;
 import org.qo.services.mail.Mail;
 import org.qo.services.mail.MailPreset;
 import org.qo.redis.DatabaseType;
@@ -22,7 +22,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 
 import java.io.*;
-import java.nio.charset.StandardCharsets;
+
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
@@ -54,18 +54,25 @@ public class UserProcess {
     }
 
     public static String getServerStats() throws IOException {
-        JSONArray statusArray = new JSONArray(Files.readString(Path.of("stat.json")));
-        for (int i = 0; i < statusArray.length(); i++) {
-            JSONObject event = statusArray.getJSONObject(i);
-            String title = event.getString("title");
-            String date = event.getString("date");
-            String author = event.getString("author");
-            String summary = event.getString("summary");
-            if (summary == null || author == null || date == null || title == null) {
+        String jsonStr = Files.readString(Path.of("stat.json"));
+        JsonArray statusArray = JsonParser.parseString(jsonStr).getAsJsonArray();
+
+        for (JsonElement element : statusArray) {
+            if (!element.isJsonObject()) {
+                Logger.log("INVALID Status Message found.", ERROR);
+                return null;
+            }
+            JsonObject event = element.getAsJsonObject();
+
+            if (!hasValidField(event, "title") ||
+                    !hasValidField(event, "date") ||
+                    !hasValidField(event, "author") ||
+                    !hasValidField(event, "summary")) {
                 Logger.log("INVALID Status Message found.", ERROR);
                 return null;
             }
         }
+
         return statusArray.toString();
     }
 
@@ -97,38 +104,45 @@ public class UserProcess {
         }, Dispatchers.getIO());
     }
 
-    public static JSONObject getTime(String username) {
-        JSONObject result = null;
+    public static JsonObject getTime(String username) {
+        JsonObject result = null;
         try (Connection connection = ConnectionPool.getConnection()) {
-            result = new JSONObject();
+            result = new JsonObject();
             String query = "SELECT playtime FROM users WHERE username = ?";
             try (PreparedStatement preparedStatement = connection.prepareStatement(query)) {
                 preparedStatement.setString(1, username);
                 try (ResultSet resultSet = preparedStatement.executeQuery()) {
                     if (resultSet.next()) {
                         int time = resultSet.getInt("playtime");
-                        result.put("name", username);
-                        result.put("time", time);
+                        result.addProperty("name", username);
+                        result.addProperty("time", time);
                     } else {
-                        result.put("error", -1);
+                        result.addProperty("error", -1);
                     }
                 }
             }
         } catch (SQLException e) {
             e.printStackTrace();
-            result.put("error", e.getMessage());
+            assert result != null;
+            result.addProperty("error", e.getMessage());
         }
 
         return result;
     }
 
     public static String queryReg(String name) {
-        JSONObject responseJson = new JSONObject();
-        if (redis.exists("users:" + name, DatabaseType.QO_REG_DATABASE.getValue())) {
-            JsonObject retObj = (JsonObject) JsonParser.parseString(Objects.requireNonNull(redis.get(name, DatabaseType.QO_REG_DATABASE.getValue())));
+        JsonObject responseJson = new JsonObject();
+
+        String redisKey = "users:" + name;
+        int regDb = DatabaseType.QO_REG_DATABASE.getValue();
+
+        if (Boolean.TRUE.equals(redis.exists(redisKey, regDb).ignoreException())) {
+            String redisData = redis.get(name, regDb).ignoreException();
+            JsonObject retObj = JsonParser.parseString(Objects.requireNonNull(redisData)).getAsJsonObject();
             retObj.addProperty("code", 0);
             return retObj.toString();
         }
+
         Users result = userORM.read(name);
         if (result != null) {
             boolean temp = result.getTemp();
@@ -136,40 +150,46 @@ public class UserProcess {
             Boolean frozen = result.getFrozen();
             int eco = result.getEconomy();
             long playtime = result.getPlaytime();
-            responseJson.put("frozen", frozen);
-            responseJson.put("qq", uid);
-            responseJson.put("economy", eco);
-            responseJson.put("online", redis.exists("online" + name, DatabaseType.QO_ONLINE_DATABASE.getValue()));
-            responseJson.put("playtime", playtime);
-            responseJson.put("temp", temp);
-            redis.insert("user:" + name, responseJson.toString(), DatabaseType.QO_REG_DATABASE.getValue());
-            responseJson.put("code", 0);
-            if (temp) responseJson.put("code", 2);
+
+            responseJson.addProperty("frozen", frozen);
+            responseJson.addProperty("qq", uid);
+            responseJson.addProperty("economy", eco);
+            responseJson.addProperty("online", redis.exists("online" + name, DatabaseType.QO_ONLINE_DATABASE.getValue()).ignoreException());
+            responseJson.addProperty("playtime", playtime);
+            responseJson.addProperty("temp", temp);
+
+            redis.insert("user:" + name, responseJson.toString(), regDb);
+
+            responseJson.addProperty("code", temp ? 2 : 0);
             return responseJson.toString();
         }
-        responseJson.put("code", 1);
-        responseJson.put("qq", -1);
+
+        responseJson.addProperty("code", 1);
+        responseJson.addProperty("qq", -1);
         return responseJson.toString();
     }
 
     public static String queryReg(long qq) {
         UserORM userORM = new UserORM();
         Users user = userORM.read(qq);
-        JSONObject responseJson = new JSONObject();
+        JsonObject responseJson = new JsonObject();
+
         if (user != null) {
             String username = user.getUsername();
             Boolean frozen = user.getFrozen();
             int eco = Objects.requireNonNull(user.getEconomy());
             long playtime = Objects.requireNonNull(user.getPlaytime());
-            responseJson.put("code", 0);
-            responseJson.put("frozen", frozen);
-            responseJson.put("username", username);
-            responseJson.put("economy", eco);
-            responseJson.put("playtime", playtime);
-            return responseJson.toString();
+
+            responseJson.addProperty("code", 0);
+            responseJson.addProperty("frozen", frozen);
+            responseJson.addProperty("username", username);
+            responseJson.addProperty("economy", eco);
+            responseJson.addProperty("playtime", playtime);
+        } else {
+            responseJson.addProperty("code", 1);
+            responseJson.addProperty("username", -1);
         }
-        responseJson.put("code", 1);
-        responseJson.put("username", -1);
+
         return responseJson.toString();
     }
 
@@ -270,27 +290,38 @@ public class UserProcess {
     public static String AvatarTrans(String name) throws Exception {
         String apiURL = "https://api.mojang.com/users/profiles/minecraft/" + name;
         String avatarURL = "https://playerdb.co/api/player/minecraft/";
+
+        JsonObject returnObject = new JsonObject();
+
         if (!AvatarCache.has(name)) {
-            JSONObject uuidobj = new JSONObject(request.sendGetRequest(apiURL).get());
-            String uuid = uuidobj.getString("id");
-            JSONObject playerUUIDobj = new JSONObject(request.sendGetRequest(avatarURL + uuid).get());
-            if (playerUUIDobj.getBoolean("success")) {
-                JSONObject player = playerUUIDobj.getJSONObject("data").getJSONObject("player");
-                JSONObject returnObject = new JSONObject();
-                returnObject.put("url", player.getString("avatar"));
-                returnObject.put("name", player.getString("username"));
-                AvatarCache.cache(player.getString("avatar"), player.getString("username"));
+            String mojangJson = request.sendGetRequest(apiURL).get();
+            JsonObject uuidObj = JsonParser.parseString(mojangJson).getAsJsonObject();
+            String uuid = uuidObj.get("id").getAsString();
+            String playerDbJson = request.sendGetRequest(avatarURL + uuid).get();
+            JsonObject playerUUIDobj = JsonParser.parseString(playerDbJson).getAsJsonObject();
+
+            if (playerUUIDobj.get("success").getAsBoolean()) {
+                JsonObject player = playerUUIDobj
+                        .getAsJsonObject("data")
+                        .getAsJsonObject("player");
+
+                String avatar = player.get("avatar").getAsString();
+                String username = player.get("username").getAsString();
+
+                returnObject.addProperty("url", avatar);
+                returnObject.addProperty("name", username);
+                AvatarCache.cache(avatar, username);
                 return returnObject.toString();
             } else {
-                JSONObject returnObject = new JSONObject();
-                returnObject.put("url", "https://crafthead.net/avatar/8667ba71b85a4004af54457a9734eed7");
-                returnObject.put("name", name);
+                returnObject.addProperty("url", "https://crafthead.net/avatar/8667ba71b85a4004af54457a9734eed7");
+                returnObject.addProperty("name", name);
                 return returnObject.toString();
             }
         }
-        JSONObject returnObject = new JSONObject();
-        returnObject.put("url", "https://crafthead.net/avatar/8667ba71b85a4004af54457a9734eed7");
-        returnObject.put("name", name);
+
+        // 从缓存中返回默认内容
+        returnObject.addProperty("url", "https://crafthead.net/avatar/8667ba71b85a4004af54457a9734eed7");
+        returnObject.addProperty("name", name);
         return returnObject.toString();
     }
     /**
@@ -341,13 +372,13 @@ public class UserProcess {
     }
 
     public static void handlePlayerOnline(String name) {
-        if (!redis.exists("online" + name, DatabaseType.QO_ONLINE_DATABASE.getValue())) {
+        if (Boolean.FALSE.equals(redis.exists("online" + name, DatabaseType.QO_ONLINE_DATABASE.getValue()).ignoreException())) {
             redis.insert("online" + name, "true", DatabaseType.QO_ONLINE_DATABASE.getValue());
         }
     }
 
     public static void handlePlayerOffline(String name) {
-        if (redis.exists("online" + name, DatabaseType.QO_ONLINE_DATABASE.getValue())) {
+        if (Boolean.TRUE.equals(redis.exists("online" + name, DatabaseType.QO_ONLINE_DATABASE.getValue()).ignoreException())) {
             redis.delete("online" + name, DatabaseType.QO_ONLINE_DATABASE.getValue());
         }
     }
@@ -424,4 +455,7 @@ public class UserProcess {
         return sb.toString();
     }
 
+    private static boolean hasValidField(JsonObject obj, String field) {
+        return obj.has(field) && !obj.get(field).isJsonNull();
+    }
 }
