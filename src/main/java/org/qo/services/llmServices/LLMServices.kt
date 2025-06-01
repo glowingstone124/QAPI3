@@ -14,6 +14,7 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.http.contentType
 import io.ktor.http.isSuccess
 import io.ktor.serialization.kotlinx.json.json
+import io.ktor.utils.io.jvm.javaio.toInputStream
 import io.ktor.utils.io.readUTF8Line
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -74,21 +75,23 @@ class LLMServices(private val authorityNeededServicesImpl: AuthorityNeededServic
 		}
 
 		if (response.status.isSuccess()) {
-			val channel = response.bodyAsChannel()
-			while (!channel.isClosedForRead) {
-				val line = channel.readUTF8Line()?.removePrefix("data: ")?.trim()
-				if (line == null || line.isEmpty() || line == "[DONE]") break
+			val decoder = response.bodyAsChannel().toInputStream().bufferedReader()
+			decoder.lineSequence().forEach { line ->
+				if (!line.startsWith("data:")) return@forEach
+				val data = line.removePrefix("data:").trim()
+				if (data == "[DONE]") return@forEach
 
 				try {
-					val json = Json { ignoreUnknownKeys = true }
-					val resp = json.decodeFromString<ChatCompletionChunk>(line)
-					if (resp.choices[0].finish_reason != null) break
-					emit(resp.choices[0].delta.content ?: "")
-					println(resp.choices[0].delta.content)
+					val resp = Json { ignoreUnknownKeys = true }
+						.decodeFromString<ChatCompletionChunk>(data)
+					val content = resp.choices[0].delta.content
+					if (!content.isNullOrBlank()) {
+						emit(content)
+						println("接收内容: $content")
+					}
 				} catch (e: Exception) {
-					println("JSON解析错误: ${e.message}")
+					println("解析错误: ${e.message}")
 				}
-
 			}
 		} else {
 			throw RuntimeException("API 请求失败: ${response.status}")
