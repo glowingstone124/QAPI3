@@ -77,12 +77,17 @@ class LLMServices(private val authorityNeededServicesImpl: AuthorityNeededServic
 			val channel = response.bodyAsChannel()
 			while (!channel.isClosedForRead) {
 				val line = channel.readUTF8Line()?.removePrefix("data: ")?.trim()
-				if (line == null) break
-				//println("data: $dataJson")
-				val json = Json { ignoreUnknownKeys = true }
-				val resp = json.decodeFromString<ChatCompletionChunk>(line)
-				if (resp.choices[0].finish_reason != null) break
-				emit(resp.choices[0].delta.content ?: "")
+				if (line == null || line.isEmpty() || line == "[DONE]") break
+
+				try {
+					val json = Json { ignoreUnknownKeys = true }
+					val resp = json.decodeFromString<ChatCompletionChunk>(line)
+					if (resp.choices[0].finish_reason != null) break
+					emit(resp.choices[0].delta.content ?: "")
+				} catch (e: Exception) {
+					println("JSON解析错误: ${e.message}")
+				}
+
 			}
 		} else {
 			throw RuntimeException("API 请求失败: ${response.status}")
