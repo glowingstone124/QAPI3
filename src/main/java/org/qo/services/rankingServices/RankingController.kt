@@ -2,7 +2,6 @@ package org.qo.services.rankingServices
 
 import com.google.gson.Gson
 import org.qo.utils.ReturnInterface
-import org.qo.services.rankingServices.RankingImpl
 import org.qo.services.rankingServices.RankingImpl.Rank
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.GetMapping
