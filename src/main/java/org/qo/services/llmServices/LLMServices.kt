@@ -27,7 +27,7 @@ import java.nio.file.Path
 class LLMServices(private val authorityNeededServicesImpl: AuthorityNeededServicesImpl){
 	val redis = Redis()
 	val client = HttpClient(CIO)
-	val token = Files.readString(Path.of("LLMAPITOKEN"))
+	val token = Files.readString(Path.of("LLMAPITOKEN")).trim()
 	suspend fun generalPreProcess(token: String) : Boolean {
 		val result = authorityNeededServicesImpl.internalAuthorityCheck(token)
 		if (!result.second) {
