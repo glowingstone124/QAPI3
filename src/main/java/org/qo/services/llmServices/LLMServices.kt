@@ -28,7 +28,7 @@ import java.nio.file.Files
 import java.nio.file.Path
 
 @Service
-class LLMServices(private val authorityNeededServicesImpl: AuthorityNeededServicesImpl){
+class LLMServices(private val authorityNeededServicesImpl: AuthorityNeededServicesImpl) {
 	val redis = Redis()
 	val client = HttpClient(CIO) {
 		install(ContentNegotiation) {
@@ -41,7 +41,7 @@ class LLMServices(private val authorityNeededServicesImpl: AuthorityNeededServic
 	}
 
 	val token = Files.readString(Path.of("LLMAPITOKEN")).trim()
-	suspend fun generalPreProcess(token: String) : Boolean {
+	suspend fun generalPreProcess(token: String): Boolean {
 		val result = authorityNeededServicesImpl.internalAuthorityCheck(token)
 		if (!result.second) {
 			return false
@@ -52,10 +52,12 @@ class LLMServices(private val authorityNeededServicesImpl: AuthorityNeededServic
 		//This should never be reached
 		return false
 	}
+
 	suspend fun prepareDocuments() {
 
 	}
-	 fun accessOpenAI(prompt: String): Flow<String> = flow {
+
+	fun accessOpenAI(prompt: String): Flow<String> = flow {
 		val response = client.post("https://api.deepseek.com/v1/chat/completions") {
 			header(HttpHeaders.Authorization, "Bearer $token")
 			contentType(ContentType.Application.Json)
@@ -76,14 +78,12 @@ class LLMServices(private val authorityNeededServicesImpl: AuthorityNeededServic
 			while (!channel.isClosedForRead) {
 				val line = channel.readUTF8Line()
 				if (line == null) break
-				if (line.startsWith("data: ")) {
-					val dataJson = line.removePrefix("data: ").trim()
-					//println("data: $dataJson")
-					val json = Json { ignoreUnknownKeys = true }
-					val resp = json.decodeFromString<ChatCompletionChunk>(dataJson)
-					if (resp.choices[0].finish_reason == null) break
-					emit(resp.choices[0].delta.content ?: "")
-				}
+				val dataJson = line.removePrefix("data: ").trim()
+				//println("data: $dataJson")
+				val json = Json { ignoreUnknownKeys = true }
+				val resp = json.decodeFromString<ChatCompletionChunk>(dataJson)
+				if (resp.choices[0].finish_reason == null) break
+				emit(resp.choices[0].delta.content ?: "")
 			}
 		} else {
 			throw RuntimeException("API 请求失败: ${response.status}")
@@ -115,7 +115,7 @@ class LLMServices(private val authorityNeededServicesImpl: AuthorityNeededServic
 data class Message(val role: String, val content: String)
 
 @Serializable
-data class ChatRequest(val model: String,val messages: List<Message>, val stream: Boolean)
+data class ChatRequest(val model: String, val messages: List<Message>, val stream: Boolean)
 
 @Serializable
 data class ChatCompletionChunk(
