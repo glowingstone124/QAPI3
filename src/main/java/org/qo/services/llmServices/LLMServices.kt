@@ -55,7 +55,7 @@ class LLMServices(private val authorityNeededServicesImpl: AuthorityNeededServic
 	suspend fun prepareDocuments() {
 
 	}
-	suspend fun accessOpenAI(prompt: String): Flow<String> = flow {
+	 fun accessOpenAI(prompt: String): Flow<String> = flow {
 		val response = client.post("https://api.deepseek.com/v1/chat/completions") {
 			header(HttpHeaders.Authorization, "Bearer $token")
 			contentType(ContentType.Application.Json)
@@ -78,9 +78,11 @@ class LLMServices(private val authorityNeededServicesImpl: AuthorityNeededServic
 				if (line == null) break
 				if (line.startsWith("data: ")) {
 					val dataJson = line.removePrefix("data: ").trim()
-					if (dataJson == "[DONE]") break
-					println("data: $dataJson")
-					emit(dataJson)
+					//println("data: $dataJson")
+					val json = Json { ignoreUnknownKeys = true }
+					val resp = json.decodeFromString<ChatCompletionChunk>(dataJson)
+					if (resp.choices[0].finish_reason == null) break
+					emit(resp.choices[0].delta.content ?: "")
 				}
 			}
 		} else {
@@ -88,7 +90,7 @@ class LLMServices(private val authorityNeededServicesImpl: AuthorityNeededServic
 		}
 	}
 
-	suspend fun generateLLMStream(prompt: String, token: String): Pair<Flow<String>?, Boolean> {
+	fun generateLLMStream(prompt: String, token: String): Pair<Flow<String>?, Boolean> {
 		if (hasAlreadyRequested(token)) {
 			return Pair(null, false)
 		}
@@ -114,3 +116,42 @@ data class Message(val role: String, val content: String)
 
 @Serializable
 data class ChatRequest(val model: String,val messages: List<Message>, val stream: Boolean)
+
+@Serializable
+data class ChatCompletionChunk(
+	val id: String,
+	val `object`: String,
+	val created: Long,
+	val model: String,
+	val system_fingerprint: String,
+	val choices: List<Choice>,
+	val usage: Usage? = null
+)
+
+@Serializable
+data class Choice(
+	val index: Int,
+	val delta: Delta,
+	val logprobs: String? = null,
+	val finish_reason: String? = null
+)
+
+@Serializable
+data class Delta(
+	val content: String? = null
+)
+
+@Serializable
+data class Usage(
+	val prompt_tokens: Int,
+	val completion_tokens: Int,
+	val total_tokens: Int,
+	val prompt_tokens_details: PromptTokensDetails? = null,
+	val prompt_cache_hit_tokens: Int? = null,
+	val prompt_cache_miss_tokens: Int? = null
+)
+
+@Serializable
+data class PromptTokensDetails(
+	val cached_tokens: Int? = null
+)
