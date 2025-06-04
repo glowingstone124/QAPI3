@@ -2,6 +2,7 @@ package org.qo.services.llmServices
 
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
+import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.request.header
 import io.ktor.client.request.post
@@ -34,6 +35,9 @@ class LLMServices(private val authorityNeededServicesImpl: AuthorityNeededServic
 				prettyPrint = true
 				isLenient = true
 			})
+		}
+		install(HttpTimeout) {
+			requestTimeoutMillis = 50 * 1000
 		}
 	}
 
