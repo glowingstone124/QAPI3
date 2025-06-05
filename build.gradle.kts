@@ -97,6 +97,7 @@ tasks.named("processResources") {
 
 tasks.register("buildAndCopy") {
     dependsOn("build")
+
     doLast {
         val buildDir =  layout.buildDirectory.dir("libs").get().asFile
         val outputDir = File("/opt/server/api")
