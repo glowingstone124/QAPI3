@@ -294,36 +294,54 @@ public class UserProcess {
         JsonObject returnObject = new JsonObject();
 
         if (!AvatarCache.has(name)) {
-            String mojangJson = request.sendGetRequest(apiURL).get();
-            JsonObject uuidObj = JsonParser.parseString(mojangJson).getAsJsonObject();
-            String uuid = uuidObj.get("id").getAsString();
-            String playerDbJson = request.sendGetRequest(avatarURL + uuid).get();
-            JsonObject playerUUIDobj = JsonParser.parseString(playerDbJson).getAsJsonObject();
+            try {
+                String mojangJson = request.sendGetRequest(apiURL).get();
+                JsonObject uuidObj = JsonParser.parseString(mojangJson).getAsJsonObject();
+                String uuid = uuidObj.get("id").getAsString();
 
-            if (playerUUIDobj.get("success").getAsBoolean()) {
-                JsonObject player = playerUUIDobj
-                        .getAsJsonObject("data")
-                        .getAsJsonObject("player");
+                String playerDbJson = request.sendGetRequest(avatarURL + uuid)
+                        .exceptionally(ex -> {
+                            return null;
+                        }).get();
 
-                String avatar = player.get("avatar").getAsString();
-                String username = player.get("username").getAsString();
+                if (playerDbJson == null) {
+                    returnObject.addProperty("url", "https://crafthead.net/avatar/8667ba71b85a4004af54457a9734eed7");
+                    returnObject.addProperty("name", name);
+                    return returnObject.toString();
+                }
 
-                returnObject.addProperty("url", avatar);
-                returnObject.addProperty("name", username);
-                AvatarCache.cache(avatar, username);
-                return returnObject.toString();
-            } else {
+                JsonObject playerUUIDobj = JsonParser.parseString(playerDbJson).getAsJsonObject();
+
+                if (playerUUIDobj.get("success").getAsBoolean()) {
+                    JsonObject player = playerUUIDobj
+                            .getAsJsonObject("data")
+                            .getAsJsonObject("player");
+
+                    String avatar = player.get("avatar").getAsString();
+                    String username = player.get("username").getAsString();
+
+                    returnObject.addProperty("url", avatar);
+                    returnObject.addProperty("name", username);
+                    AvatarCache.cache(avatar, username);
+                    return returnObject.toString();
+                } else {
+                    returnObject.addProperty("url", "https://crafthead.net/avatar/8667ba71b85a4004af54457a9734eed7");
+                    returnObject.addProperty("name", name);
+                    return returnObject.toString();
+                }
+
+            } catch (Exception e) {
                 returnObject.addProperty("url", "https://crafthead.net/avatar/8667ba71b85a4004af54457a9734eed7");
                 returnObject.addProperty("name", name);
                 return returnObject.toString();
             }
         }
 
-        // 从缓存中返回默认内容
         returnObject.addProperty("url", "https://crafthead.net/avatar/8667ba71b85a4004af54457a9734eed7");
         returnObject.addProperty("name", name);
         return returnObject.toString();
     }
+
     /**
      * @param username 查询用户名
      */
