@@ -57,6 +57,17 @@ class AuthorityNeededServicesController(private val login: Login, private val ri
 		return ri.GeneralHttpHeader(authorityNeededServicesImpl.calculateFortune(token))
 	}
 
+	@GetMapping("/templogin")
+	suspend fun getPlayerRecentLogin(@RequestParam name: String): ResponseEntity<String> {
+		val returnObj = JsonObject()
+		val result = authorityNeededServicesImpl.getPlayerLogin(name)
+		returnObj.addProperty("ok", result.first)
+		if (result.first){
+			returnObj.addProperty("ip", result.second)
+		}
+		return ReturnInterface().GeneralHttpHeader(returnObj.toString())
+	}
+
 }
 data class Return(
 	val code: Int,

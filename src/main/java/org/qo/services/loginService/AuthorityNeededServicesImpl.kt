@@ -7,6 +7,8 @@ import org.qo.datas.Mapping
 import org.qo.services.messageServices.Msg
 import org.qo.utils.ReturnInterface
 import org.qo.orm.SQL
+import org.qo.redis.DatabaseType
+import org.qo.redis.Redis
 import org.springframework.stereotype.Service
 import java.security.MessageDigest
 import java.time.LocalDate
@@ -14,7 +16,7 @@ import java.time.LocalDate
 @Service
 class AuthorityNeededServicesImpl(private val login: Login, private val ri: ReturnInterface, private val ft: FortuneTools) {
 	val gson = Gson()
-
+	val redis = Redis()
 	data class WebChatWrapper(
 		val message: String,
 		val timestamp: Long,
@@ -116,6 +118,17 @@ class AuthorityNeededServicesImpl(private val login: Login, private val ri: Retu
 		}
 		return Pair(userORM.read(accountName!!),true)
 	}
+	fun getPlayerLogin(username: String): Pair<Boolean, String> {
+		redis.exists("login_history_$username", DatabaseType.QO_TEMP_DATABASE.value).ignoreException()?.let {
+			if (!it) {
+				return Pair(false,"");
+			} else {
+				val result = redis.get("login_history_$username",DatabaseType.QO_TEMP_DATABASE.value).ignoreException().orEmpty()
+				return Pair(true, result);
+			}
+		}
+		return Pair(false,"");
+	}
 }
 
 @Service
@@ -181,4 +194,5 @@ class FortuneTools {
 			wealth = luckLevel(wealthLuck)
 		)
 	}
+
 }
