@@ -415,7 +415,7 @@ public class UserProcess {
         if (computedPasswordHash.equals(user_hashed)) {
             String token = login.generateToken(64);
             login.insertInto(token, username);
-            redis.insert("login_history_" + username, ip, DatabaseType.QO_TEMP_DATABASE.getValue(), 6000).ignoreException();
+            redis.insert("login_history_" + username, ip, DatabaseType.QO_TEMP_DATABASE.getValue(), 60).ignoreException();
             return new Pair<>(true, token);
         }
         return new Pair<>(false, null);
