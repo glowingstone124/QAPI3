@@ -62,6 +62,9 @@ object Configuration {
             EnableRedis = false
             pool?.close()
         }
+        if (pool == null) {
+            Logger.log("Failed to init redis: Pool is NULL.", Logger.LogLevel.ERROR)
+        }
     }
 
     @Throws(IOException::class)
@@ -71,7 +74,7 @@ object Configuration {
             return
         }
         initPool()
-        Logger.log("Successfully enabled redis module.", Logger.LogLevel.INFO)
+        Logger.log("Redis module init complete.", Logger.LogLevel.INFO)
     }
 
     fun close() {
