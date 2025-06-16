@@ -71,6 +71,7 @@ object Configuration {
             return
         }
         initPool()
+        Logger.log("Successfully enabled redis module.", Logger.LogLevel.INFO)
     }
 
     fun close() {
