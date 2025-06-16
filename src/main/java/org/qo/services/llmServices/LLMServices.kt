@@ -110,7 +110,7 @@ class LLMServices(private val authorityNeededServicesImpl: AuthorityNeededServic
 		val result = redis.exists(token, DatabaseType.QO_ASSISTANT_DATABASE.value).ignoreException()
 		result?.let {
 			if (!it) {
-				redis.insert(token, "true", DatabaseType.QO_ASSISTANT_DATABASE.value, expires = 2)
+				redis.insert(token, "true", DatabaseType.QO_ASSISTANT_DATABASE.value, expires = 2).ignoreException()
 				return false
 			}
 			return true

@@ -158,7 +158,7 @@ public class UserProcess {
             responseJson.addProperty("playtime", playtime);
             responseJson.addProperty("temp", temp);
 
-            redis.insert("user:" + name, responseJson.toString(), regDb);
+            redis.insert("user:" + name, responseJson.toString(), regDb).ignoreException();
 
             responseJson.addProperty("code", temp ? 2 : 0);
             return responseJson.toString();
@@ -217,7 +217,7 @@ public class UserProcess {
                     playerJson.addProperty("frozen", false);
                     playerJson.addProperty("pro", 0);
                     playerJson.addProperty("playtime", 0);
-                    redis.insert("user:" + name, playerJson.toString(), DatabaseType.QO_REG_DATABASE.getValue());
+                    redis.insert("user:" + name, playerJson.toString(), DatabaseType.QO_REG_DATABASE.getValue()).ignoreException();
                 }, Dispatchers.getIO());
                 Logger.log(name + " registered from " + IPUtil.getIpAddr(request), INFO);
                 Mail mail = new Mail();
@@ -391,13 +391,13 @@ public class UserProcess {
 
     public static void handlePlayerOnline(String name) {
         if (Boolean.FALSE.equals(redis.exists("online" + name, DatabaseType.QO_ONLINE_DATABASE.getValue()).ignoreException())) {
-            redis.insert("online" + name, "true", DatabaseType.QO_ONLINE_DATABASE.getValue());
+            redis.insert("online" + name, "true", DatabaseType.QO_ONLINE_DATABASE.getValue()).ignoreException();
         }
     }
 
     public static void handlePlayerOffline(String name) {
         if (Boolean.TRUE.equals(redis.exists("online" + name, DatabaseType.QO_ONLINE_DATABASE.getValue()).ignoreException())) {
-            redis.delete("online" + name, DatabaseType.QO_ONLINE_DATABASE.getValue());
+            redis.delete("online" + name, DatabaseType.QO_ONLINE_DATABASE.getValue()).ignoreException();
         }
     }
 
@@ -415,7 +415,7 @@ public class UserProcess {
         if (computedPasswordHash.equals(user_hashed)) {
             String token = login.generateToken(64);
             login.insertInto(token, username);
-            redis.insert("login_history_" + username, ip, DatabaseType.QO_TEMP_DATABASE.getValue(), 6000);
+            redis.insert("login_history_" + username, ip, DatabaseType.QO_TEMP_DATABASE.getValue(), 6000).ignoreException();
             return new Pair<>(true, token);
         }
         return new Pair<>(false, null);
