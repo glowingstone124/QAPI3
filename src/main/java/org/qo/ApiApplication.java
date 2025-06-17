@@ -152,8 +152,8 @@ public class ApiApplication implements ErrorController {
     }
 
     @PostMapping("/qo/online")
-    public void handleOnlineRequest(@RequestParam String name) {
-        handlePlayerOnline(name);
+    public void handleOnlineRequest(@RequestParam String name, @RequestParam String ip) {
+        handlePlayerOnline(name, ip);
     }
 
     @PostMapping("/qo/offline")
@@ -269,12 +269,12 @@ public class ApiApplication implements ErrorController {
         return new ResponseEntity<>(ipWhitelistServices.whitelistedWrapper(ip), headers, HttpStatus.OK);
     }
     @GetMapping("/qo/game/login")
-    public ResponseEntity<String> login(@RequestParam String username, @RequestParam String password, @RequestParam String ip, HttpServletRequest request) throws NoSuchAlgorithmException {
+    public ResponseEntity<String> login(@RequestParam String username, @RequestParam String password, @RequestParam(required = false) String ip,@RequestParam(required = false) boolean web, HttpServletRequest request) throws NoSuchAlgorithmException {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
         if (ua.isCLIToolRequest(request)) return new ResponseEntity<>("failed", headers, HttpStatus.BAD_REQUEST);
         JsonObject retObj = new JsonObject();
-        var result = performLogin(username, password, ip);
+        var result = performLogin(username, password, ip, web);
         retObj.addProperty("result", result.getFirst());
         retObj.addProperty("token", result.getSecond());
         return new ResponseEntity<>(retObj.toString(), headers, HttpStatus.OK);

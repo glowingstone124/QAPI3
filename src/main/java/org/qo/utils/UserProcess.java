@@ -410,7 +410,7 @@ public class UserProcess {
         }
     }
 
-    public static Pair<Boolean, String> performLogin(String username, String password, String ip) throws NoSuchAlgorithmException {
+    public static Pair<Boolean, String> performLogin(String username, String password, String ip, boolean web) throws NoSuchAlgorithmException {
         Users user = userORM.read(username);
         if (user == null) {
             System.out.println("[DEBUG@performLogin,ORM]User " + username + " not found");
@@ -424,7 +424,9 @@ public class UserProcess {
         if (computedPasswordHash.equals(user_hashed)) {
             String token = login.generateToken(64);
             login.insertInto(token, username);
-            redis.insert("login_history_" + username, ip, DatabaseType.QO_TEMP_DATABASE.getValue(), 60).ignoreException();
+            if (!web && ip != null) {
+                redis.insert("login_history_" + username, ip, DatabaseType.QO_TEMP_DATABASE.getValue(), 60).ignoreException();
+            }
             return new Pair<>(true, token);
         }
         return new Pair<>(false, null);
