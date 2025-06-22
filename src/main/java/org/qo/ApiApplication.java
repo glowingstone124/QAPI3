@@ -149,7 +149,7 @@ public class ApiApplication implements ErrorController {
             server_pair.add("players",singular_users);
             onlines.add(server_pair);
         });
-        greetJson.add("time",UserProcess.getTime(username));
+        greetJson.add("online",onlines);
 
         return new ResponseEntity<>(greetJson.toString(), headers, HttpStatus.OK);
     }
