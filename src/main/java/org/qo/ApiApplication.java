@@ -1,5 +1,6 @@
 package org.qo;
 
+import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import jakarta.annotation.PostConstruct;
@@ -30,6 +31,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.NoSuchAlgorithmException;
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -132,6 +134,26 @@ public class ApiApplication implements ErrorController {
         return ri.GeneralHttpHeader(UserProcess.getTime(username).toString());
     }
 
+    @GetMapping("/qo/download/logingreeting")
+    public ResponseEntity<String> loginGreeting(@RequestParam(name = "username") String username) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        JsonObject greetJson = new JsonObject();
+        JsonArray onlines = new JsonArray();
+        greetJson.add("time",UserProcess.getTime(username));
+        status.getStatusMap().forEach((id,info) -> {
+            JsonArray singular_users = new JsonArray();
+            info.get("players").getAsJsonArray().forEach((elem) -> singular_users.add(elem.getAsJsonObject().get("name")));
+            JsonObject server_pair = new JsonObject();
+            server_pair.addProperty("id",id);
+            server_pair.add("players",singular_users);
+            onlines.add(server_pair);
+        });
+        greetJson.add("time",UserProcess.getTime(username));
+
+        return new ResponseEntity<>(greetJson.toString(), headers, HttpStatus.OK);
+    }
+
     @RequestMapping("/app/latest")
     public ResponseEntity<String> update() {
         JsonObject returnObj = new JsonObject();
@@ -162,7 +184,7 @@ public class ApiApplication implements ErrorController {
     }
 
     @GetMapping("/qo/download/stats")
-    public ResponseEntity<String> getServerStatus() throws IOException {
+    public ResponseEntity<String> getServerStatistic() throws IOException {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
         return new ResponseEntity<>(getServerStats(), headers, HttpStatus.OK);
