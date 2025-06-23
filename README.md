@@ -109,4 +109,8 @@ GET `/qo/download/registry?name=glowingstone124` ->
     "playtime": 1712
 }
 ```
+## For Contributors
 
+When integrating this project with GoCi, please notice there are some flags can be use.
+
+[SKIP CI]: when pushing a commit which description contains this, GoCi will automatically skip build this commit.
