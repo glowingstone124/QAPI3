@@ -14,7 +14,7 @@ import java.security.MessageDigest
 import java.time.LocalDate
 
 @Service
-class AuthorityNeededServicesImpl(private val login: Login, private val ri: ReturnInterface, private val ft: FortuneTools) {
+class AuthorityNeededServicesImpl(private val login: Login, private val ri: ReturnInterface, private val ft: FortuneTools, private val playerCardCustomizationImpl: PlayerCardCustomizationImpl) {
 	val gson = Gson()
 	val redis = Redis()
 	data class WebChatWrapper(
@@ -79,6 +79,10 @@ class AuthorityNeededServicesImpl(private val login: Login, private val ri: Retu
 		return ipCountResult.toString()
 	}
 
+	/**
+	 * precheck a username is presented in database.
+	 * @return null if everything is ok, or reason
+	 */
 	suspend fun doPrecheck(accountName: String?, errorCode: Int): String? {
 		if (accountName == null) {
 			val errorMessage = getErrorMessage(errorCode)

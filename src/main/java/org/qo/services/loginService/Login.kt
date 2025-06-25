@@ -39,6 +39,10 @@ class Login {
 		)
 	}
 
+	/**
+	 * Validate a token is valid or not.
+	 * @return (username,0) if success, (null, 3) if failed.
+	*/
 	suspend fun validate(loginToken: String): Pair<String?,Int> {
 		val result = loginTokenORM.read(loginToken)
 		if (result == null) return Pair(null,1)

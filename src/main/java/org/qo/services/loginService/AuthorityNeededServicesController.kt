@@ -3,6 +3,7 @@ package org.qo.services.loginService
 import com.google.gson.Gson
 import com.google.gson.JsonArray
 import com.google.gson.JsonObject
+import io.asyncer.r2dbc.mysql.message.server.DecodeContext.result
 import org.qo.utils.ReturnInterface
 import org.qo.services.loginService.IPWhitelistServices.WhitelistReasons
 import org.qo.orm.UserORM
@@ -18,7 +19,7 @@ import org.springframework.web.bind.annotation.RestController
 val userORM = UserORM()
 @RestController
 @RequestMapping("/qo/authorization")
-class AuthorityNeededServicesController(private val login: Login, private val ri: ReturnInterface, private val ipWhitelistServices: IPWhitelistServices, private val authorityNeededServicesImpl: AuthorityNeededServicesImpl) {
+class AuthorityNeededServicesController(private val login: Login, private val ri: ReturnInterface, private val ipWhitelistServices: IPWhitelistServices, private val authorityNeededServicesImpl: AuthorityNeededServicesImpl, private val playerCardCustomizationImpl: PlayerCardCustomizationImpl) {
 
 	@PostMapping("/message/upload")
 	suspend fun insertWebMessage(@RequestBody msg: String, @RequestHeader token:String): ResponseEntity<String> {
@@ -66,6 +67,35 @@ class AuthorityNeededServicesController(private val login: Login, private val ri
 			returnObj.addProperty("ip", result.second)
 		}
 		return ReturnInterface().GeneralHttpHeader(returnObj.toString())
+	}
+
+	@GetMapping("/cards/obtained")
+	suspend fun getPlayerCardList(@RequestHeader token: String): ResponseEntity<String> {
+		val returnObj = JsonObject()
+		val (username, errorCode) =  login.validate(token)
+		if (authorityNeededServicesImpl.doPrecheck(username, errorCode) != null){
+			return ri.GeneralHttpHeader(returnObj.apply {
+				addProperty("error", "invalid username")
+			}.toString())
+		}
+		return ReturnInterface().GeneralHttpHeader(playerCardCustomizationImpl
+			.getPlayerCardList(username!!)
+			.convertToJsonArray()
+			.toString()
+		)
+	}
+	@GetMapping("/cards/info")
+	suspend fun getCardInfo(@RequestParam id: Long): ResponseEntity<String> {
+		val returnObj = JsonObject()
+		val result = playerCardCustomizationImpl.getCardInformation(id)
+		if (result == null){
+			return ri.GeneralHttpHeader(
+				returnObj.apply {
+					addProperty("error", "card not found")
+				}.toString()
+			)
+		}
+		return ri.GeneralHttpHeader(result.toString())
 	}
 
 }

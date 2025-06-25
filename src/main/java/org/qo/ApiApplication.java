@@ -136,8 +136,6 @@ public class ApiApplication implements ErrorController {
 
     @GetMapping("/qo/download/logingreeting")
     public ResponseEntity<String> loginGreeting(@RequestParam(name = "username") String username) {
-        HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(MediaType.APPLICATION_JSON);
         JsonObject greetJson = new JsonObject();
         JsonArray onlines = new JsonArray();
         greetJson.add("time",UserProcess.getTime(username));
@@ -151,7 +149,7 @@ public class ApiApplication implements ErrorController {
         });
         greetJson.add("online",onlines);
 
-        return new ResponseEntity<>(greetJson.toString(), headers, HttpStatus.OK);
+        return ri.GeneralHttpHeader(greetJson.toString());
     }
 
     @RequestMapping("/app/latest")
