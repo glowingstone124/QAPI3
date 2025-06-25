@@ -60,7 +60,9 @@ class CardOrm : CrudDao<Mapping.Cards> {
 			name = rs.getString("name"),
 			id = rs.getLong("id"),
 			special = rs.getString("special"),
-			rarity = Mapping.CardsRarityEnum.valueOf(rs.getString("rarity")),
+			rarity = Mapping.CardsRarityEnum.entries.find {
+				it.level == rs.getInt("rarity")
+			}!!,
 			file_url = rs.getString("file_url"),
 		)
 	}

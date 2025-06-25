@@ -57,11 +57,11 @@ class Mapping {
 		}
 	}
 
-	enum class CardsRarityEnum(val displayName: String, val level: Int) {
-		COMMON("common", 1),
-		UNCOMMON("uncommon", 2),
-		RARE("rare", 3),
-		LIMITED("limited", 4)
+	enum class CardsRarityEnum(val level: Int) {
+		COMMON( 1),
+		UNCOMMON( 2),
+		RARE(3),
+		LIMITED(4)
 	}
 
 	data class UserCardRecord(
