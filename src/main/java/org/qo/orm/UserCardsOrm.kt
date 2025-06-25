@@ -12,72 +12,85 @@ class UserCardsOrm : CrudDao<Mapping.UserCardRecord> {
 	private val connection: Connection = ConnectionPool.getConnection()
 
 	override fun create(item: Mapping.UserCardRecord): Long {
-		val sql = "INSERT INTO user_cards (uid, username, card_id, obtained_time) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE username = VALUES(username), obtained_time = VALUES (obtained_time)"
-		connection.prepareStatement(sql).use { stmt ->
-			stmt.setLong(1, item.uid)
-			stmt.setString(2, item.username)
-			stmt.setLong(3, item.cardId)
-			stmt.setLong(4, item.obtainedTimeStamp)
-			stmt.executeUpdate()
+		ConnectionPool.getConnection().use { connection ->
+			val sql =
+				"INSERT INTO user_cards (uid, username, card_id, obtained_time) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE username = VALUES(username), obtained_time = VALUES (obtained_time)"
+			connection.prepareStatement(sql).use { stmt ->
+				stmt.setLong(1, item.uid)
+				stmt.setString(2, item.username)
+				stmt.setLong(3, item.cardId)
+				stmt.setLong(4, item.obtainedTimeStamp)
+				stmt.executeUpdate()
+			}
+			return item.cardId
 		}
-		return item.cardId
 	}
 
 	override fun read(input: Any): Mapping.UserCardRecord? {
-		val (uid, cardId) = input as Pair<Long, Long>
-		val sql = "SELECT * FROM user_cards WHERE uid = ? AND card_id = ?"
-		connection.prepareStatement(sql).use { stmt ->
-			stmt.setLong(1, uid)
-			stmt.setLong(2, cardId)
-			val rs = stmt.executeQuery()
-			return if (rs.next()) parse(rs) else null
+		ConnectionPool.getConnection().use { connection ->
+			val (uid, cardId) = input as Pair<Long, Long>
+			val sql = "SELECT * FROM user_cards WHERE uid = ? AND card_id = ?"
+			connection.prepareStatement(sql).use { stmt ->
+				stmt.setLong(1, uid)
+				stmt.setLong(2, cardId)
+				val rs = stmt.executeQuery()
+				return if (rs.next()) parse(rs) else null
+			}
 		}
 	}
 
 	override fun update(item: Mapping.UserCardRecord): Boolean {
-		val sql = "UPDATE user_cards SET username = ?, obtained_time = ? WHERE uid = ? AND card_id = ?"
-		connection.prepareStatement(sql).use { stmt ->
-			stmt.setString(1, item.username)
-			stmt.setLong(2, item.obtainedTimeStamp)
-			stmt.setLong(3, item.uid)
-			stmt.setLong(4, item.cardId)
-			return stmt.executeUpdate() > 0
+		ConnectionPool.getConnection().use { connection ->
+			val sql = "UPDATE user_cards SET username = ?, obtained_time = ? WHERE uid = ? AND card_id = ?"
+			connection.prepareStatement(sql).use { stmt ->
+				stmt.setString(1, item.username)
+				stmt.setLong(2, item.obtainedTimeStamp)
+				stmt.setLong(3, item.uid)
+				stmt.setLong(4, item.cardId)
+				return stmt.executeUpdate() > 0
+			}
 		}
 	}
 
 	override fun delete(input: Any): Boolean {
-		val (uid, cardId) = input as Pair<Long, Long>
-		val sql = "DELETE FROM user_cards WHERE uid = ? AND card_id = ?"
-		connection.prepareStatement(sql).use { stmt ->
-			stmt.setLong(1, uid)
-			stmt.setLong(2, cardId)
-			return stmt.executeUpdate() > 0
+		ConnectionPool.getConnection().use { connection ->
+			val (uid, cardId) = input as Pair<Long, Long>
+			val sql = "DELETE FROM user_cards WHERE uid = ? AND card_id = ?"
+			connection.prepareStatement(sql).use { stmt ->
+				stmt.setLong(1, uid)
+				stmt.setLong(2, cardId)
+				return stmt.executeUpdate() > 0
+			}
 		}
 	}
 
 	fun getCardsByUsername(username: String): List<Mapping.UserCardRecord> {
-		val sql = "SELECT * FROM user_cards WHERE username = ?"
-		connection.prepareStatement(sql).use { stmt ->
-			stmt.setString(1, username)
-			val rs = stmt.executeQuery()
-			val result = mutableListOf<Mapping.UserCardRecord>()
-			while (rs.next()) {
-				result.add(parse(rs))
+		ConnectionPool.getConnection().use { connection ->
+			val sql = "SELECT * FROM user_cards WHERE username = ?"
+			connection.prepareStatement(sql).use { stmt ->
+				stmt.setString(1, username)
+				val rs = stmt.executeQuery()
+				val result = mutableListOf<Mapping.UserCardRecord>()
+				while (rs.next()) {
+					result.add(parse(rs))
+				}
+				return result
 			}
-			return result
 		}
 	}
 
 	fun getUsersByCardId(cardId: Long): List<Mapping.UserCardRecord> {
-		val sql = "SELECT * FROM user_cards WHERE card_id = ?"
-		connection.prepareStatement(sql).use { stmt ->
-			stmt.setLong(1, cardId)
-			val rs = stmt.executeQuery()
-			val result = mutableListOf<Mapping.UserCardRecord>()
-			while (rs.next()) {
-				result.add(parse(rs))
+		ConnectionPool.getConnection().use { connection ->
+			val sql = "SELECT * FROM user_cards WHERE card_id = ?"
+			connection.prepareStatement(sql).use { stmt ->
+				stmt.setLong(1, cardId)
+				val rs = stmt.executeQuery()
+				val result = mutableListOf<Mapping.UserCardRecord>()
+				while (rs.next()) {
+					result.add(parse(rs))
+				}
+				return result
 			}
-			return result
 		}
 	}
 

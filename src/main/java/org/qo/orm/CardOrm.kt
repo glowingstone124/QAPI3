@@ -9,7 +9,6 @@ import java.sql.ResultSet
 @Service
 class CardOrm : CrudDao<Mapping.Cards> {
 
-	private val connection: Connection = ConnectionPool.getConnection()
 
 	companion object {
 		const val CREATE_CARD_SQL = "INSERT INTO cards (id, name, special, rarity, file_url) VALUES (?, ?, ?, ?, ?)"
@@ -20,50 +19,60 @@ class CardOrm : CrudDao<Mapping.Cards> {
 	}
 
 	override fun create(item: Mapping.Cards): Long {
-		connection.prepareStatement(CREATE_CARD_SQL).use { stmt ->
-			stmt.setLong(1, item.id)
-			stmt.setString(2, item.name)
-			stmt.setString(3, item.special)
-			stmt.setString(4, item.rarity.name)
-			stmt.setString(5, item.file_url)
-			stmt.executeUpdate()
+		ConnectionPool.getConnection().use { connection ->
+			connection.prepareStatement(CREATE_CARD_SQL).use { stmt ->
+				stmt.setLong(1, item.id)
+				stmt.setString(2, item.name)
+				stmt.setString(3, item.special)
+				stmt.setString(4, item.rarity.name)
+				stmt.setString(5, item.file_url)
+				stmt.executeUpdate()
+			}
 		}
 		return item.id
 	}
 
 	override fun read(input: Any): Mapping.Cards? {
-		connection.prepareStatement(SEARCH_CARD_SQL).use { stmt ->
-			stmt.setLong(1, input as Long)
-			val rs = stmt.executeQuery()
-			return if (rs.next()) parseCard(rs) else null
+		ConnectionPool.getConnection().use { connection ->
+			connection.prepareStatement(SEARCH_CARD_SQL).use { stmt ->
+				stmt.setLong(1, input as Long)
+				val rs = stmt.executeQuery()
+				return if (rs.next()) parseCard(rs) else null
+			}
 		}
 	}
 
 	fun readAll(): List<Mapping.Cards> {
-		val cardList = mutableListOf<Mapping.Cards>()
-		connection.prepareStatement(SEARCH_ALL_CARDS_SQL).use { stmt ->
-			val rs = stmt.executeQuery()
-			while (rs.next()) {
-				cardList.add(parseCard(rs))
+		ConnectionPool.getConnection().use { connection ->
+			val cardList = mutableListOf<Mapping.Cards>()
+			connection.prepareStatement(SEARCH_ALL_CARDS_SQL).use { stmt ->
+				val rs = stmt.executeQuery()
+				while (rs.next()) {
+					cardList.add(parseCard(rs))
+				}
 			}
+			return cardList
 		}
-		return cardList
 	}
 
 	override fun update(item: Mapping.Cards): Boolean {
-		connection.prepareStatement(UPDATE_CARD_SQL).use { stmt ->
-			stmt.setString(1, item.name)
-			stmt.setString(2, item.special)
-			stmt.setString(3, item.rarity.name)
-			stmt.setLong(4, item.id)
-			return stmt.executeUpdate() > 0
+		ConnectionPool.getConnection().use { connection ->
+			connection.prepareStatement(UPDATE_CARD_SQL).use { stmt ->
+				stmt.setString(1, item.name)
+				stmt.setString(2, item.special)
+				stmt.setString(3, item.rarity.name)
+				stmt.setLong(4, item.id)
+				return stmt.executeUpdate() > 0
+			}
 		}
 	}
 
 	override fun delete(input: Any): Boolean {
-		connection.prepareStatement(DELETE_CARD_SQL).use { stmt ->
-			stmt.setLong(1, input as Long)
-			return stmt.executeUpdate() > 0
+		ConnectionPool.getConnection().use { connection ->
+			connection.prepareStatement(DELETE_CARD_SQL).use { stmt ->
+				stmt.setLong(1, input as Long)
+				return stmt.executeUpdate() > 0
+			}
 		}
 	}
 
