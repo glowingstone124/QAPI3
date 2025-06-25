@@ -20,4 +20,8 @@ class PlayerCardCustomizationImpl(private val cardOrm: CardOrm, private val user
 	fun getCardInformation(id: Long): Mapping.Cards? {
 		return cardOrm.read(id)
 	}
+
+	fun getAllCards(): List<Mapping.Cards> {
+		return cardOrm.readAll()
+	}
 }

@@ -16,6 +16,7 @@ class CardOrm : CrudDao<Mapping.Cards> {
 		const val SEARCH_CARD_SQL = "SELECT * FROM cards WHERE id = ?"
 		const val UPDATE_CARD_SQL = "UPDATE cards SET name = ?, special = ?, rarity = ? WHERE id = ?"
 		const val DELETE_CARD_SQL = "DELETE FROM cards WHERE id = ?"
+		const val SEARCH_ALL_CARDS_SQL = "SELECT * FROM cards"
 	}
 
 	override fun create(item: Mapping.Cards): Long {
@@ -36,6 +37,17 @@ class CardOrm : CrudDao<Mapping.Cards> {
 			val rs = stmt.executeQuery()
 			return if (rs.next()) parseCard(rs) else null
 		}
+	}
+
+	fun readAll(): List<Mapping.Cards> {
+		val cardList = mutableListOf<Mapping.Cards>()
+		connection.prepareStatement(SEARCH_ALL_CARDS_SQL).use { stmt ->
+			val rs = stmt.executeQuery()
+			while (rs.next()) {
+				cardList.add(parseCard(rs))
+			}
+		}
+		return cardList
 	}
 
 	override fun update(item: Mapping.Cards): Boolean {
