@@ -28,7 +28,8 @@ class Mapping {
 		val playtime: Int? = 0,
 		val temp: Boolean?,
 		val invite: Int?,
-		var password: String
+		var password: String,
+		val profile_id: String,
 	) {
 		override fun equals(other: Any?): Boolean {
 			if (this === other) return true

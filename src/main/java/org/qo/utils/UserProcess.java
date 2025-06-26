@@ -186,6 +186,7 @@ public class UserProcess {
             responseJson.addProperty("username", username);
             responseJson.addProperty("economy", eco);
             responseJson.addProperty("playtime", playtime);
+            responseJson.addProperty("profile_id", user.getProfile_id());
         } else {
             responseJson.addProperty("code", 1);
             responseJson.addProperty("username", -1);
@@ -204,7 +205,7 @@ public class UserProcess {
             }
             if (Objects.equals(userORM.read(uid), null) && name != null && uid != null) {
                 try {
-                    userORM.create(new Users(name, uid, true, 3, 0, false, 0, false, 0, computePassword(password, true)));
+                    userORM.create(new Users(name, uid, true, 3, 0, false, 0, false, 0, computePassword(password, true), UUID.randomUUID().toString()));
                     String token = Algorithm.generateRandomString(16);
                     Msg.Companion.putSys("用户 " + uid + "注册了一个账号：" + name + "，若非本人操作请忽略，确认账号请在消息发出后2小时内输入/approve-register " + token);
                     verify_list.add(new registry_verify_class(name, token, uid, System.currentTimeMillis()));

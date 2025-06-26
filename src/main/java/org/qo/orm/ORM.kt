@@ -43,7 +43,7 @@ class UserORM() : CrudDao<Users>  {
 
     companion object {
         private const val INSERT_USER_SQL =
-            "INSERT INTO users (username, uid, frozen, remain, economy, signed, playtime, password, temp, invite) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            "INSERT INTO users (username, uid, frozen, remain, economy, signed, playtime, password, temp, invite, profile_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?,?)"
         private const val SELECT_USER_BY_ID_SQL = "SELECT * FROM users WHERE uid = ?"
         private const val SELECT_USER_BY_USERNAME_SQL = "SELECT * FROM users WHERE username = ?"
         private const val DELETE_USER_BY_ID_SQL = "DELETE FROM users WHERE uid = ?"
@@ -177,6 +177,7 @@ class UserORM() : CrudDao<Users>  {
         stmt.setString(8, user.password)
         stmt.setBoolean(9, user.temp == true)
         stmt.setInt(10, user.invite ?: 0)
+        stmt.setString(11, user.profile_id)
     }
 
     private suspend fun mapResultSetToUser(rs: ResultSet): Users = withContext(Dispatchers.IO) {
@@ -190,7 +191,8 @@ class UserORM() : CrudDao<Users>  {
             playtime = rs.getInt("playtime"),
             password = rs.getString("password"),
             temp = rs.getBoolean("temp"),
-            invite = rs.getInt("invite")
+            invite = rs.getInt("invite"),
+            profile_id = rs.getString("profile_id"),
         )
     }
 
