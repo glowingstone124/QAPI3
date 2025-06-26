@@ -64,6 +64,16 @@ class UserORM() : CrudDao<Users>  {
         }
     }
 
+    fun getProfileWithUser(username: String): String {
+        ConnectionPool.getConnection().use { connection ->
+            connection.prepareStatement(SELECT_USER_BY_USERNAME_SQL).use { statement ->
+                statement.setString(1, username)
+                statement.executeQuery().use { resultSet ->
+                    return resultSet.getString("profile_id") ?: ""
+                }
+            }
+        }
+    }
 
     override fun create(user: Users): Long = runBlocking {
         withContext(Dispatchers.IO) {

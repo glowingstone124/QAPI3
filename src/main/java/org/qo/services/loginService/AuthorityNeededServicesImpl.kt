@@ -47,6 +47,7 @@ class AuthorityNeededServicesImpl(private val login: Login, private val ri: Retu
 			addProperty("username", accountName)
 			addProperty("uid", userInfo!!.uid)
 			addProperty("playtime", userInfo.playtime)
+			addProperty("profile_id", userORM.getProfileWithUser(accountName))
 		}
 		val loginHistory = login.queryLoginHistory(username = accountName).convertToJsonArray()
 		returnObject.add("logins", loginHistory)
