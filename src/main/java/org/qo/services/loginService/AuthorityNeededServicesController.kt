@@ -45,8 +45,7 @@ class AuthorityNeededServicesController(private val login: Login, private val ri
 				addProperty("code","1")
 			}.toString())
 		}
-		val jsonStr = Gson().toJson(result)
-		val jsonObj = JsonParser.parseString(jsonStr).asJsonObject.apply{addProperty("code", 0)}
+		val jsonObj = JsonParser.parseString(result).asJsonObject.apply{addProperty("code", 0)}
 		return ri.GeneralHttpHeader(jsonObj.toString())
 	}
 

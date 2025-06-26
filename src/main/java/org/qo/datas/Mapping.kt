@@ -95,7 +95,6 @@ object CardsRarityEnumAdapter : JsonSerializer<Mapping.CardsRarityEnum>, JsonDes
 		return JsonPrimitive(src?.level)
 	}
 
-	// 反序列化时根据等级解析
 	override fun deserialize(
 		json: JsonElement?,
 		typeOfT: Type?,

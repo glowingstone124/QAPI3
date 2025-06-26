@@ -1,5 +1,8 @@
 package org.qo.services.loginService
 
+import com.google.gson.Gson
+import com.google.gson.JsonArray
+import com.google.gson.JsonObject
 import org.qo.datas.Mapping
 import org.qo.orm.CardOrm
 import org.qo.orm.CardProfileOrm
@@ -8,14 +11,20 @@ import org.qo.orm.UserORM
 import org.springframework.stereotype.Service
 
 @Service
-class PlayerCardCustomizationImpl(private val cardOrm: CardOrm, private val userCardsOrm: UserCardsOrm, private val cardProfileOrm: CardProfileOrm) {
+class PlayerCardCustomizationImpl(
+	private val cardOrm: CardOrm,
+	private val userCardsOrm: UserCardsOrm,
+	private val cardProfileOrm: CardProfileOrm
+) {
 	val userORM = UserORM()
+
 	/**
 	 * Return a player's owned cards
 	 */
 	fun getPlayerCardList(username: String): List<Mapping.UserCardRecord> {
 		return userCardsOrm.getCardsByUsername(username)
 	}
+
 	/**
 	 * Query a card with its id, return 'null' when it doesn't exist.
 	 * @return Mapping.Cards?
@@ -28,8 +37,8 @@ class PlayerCardCustomizationImpl(private val cardOrm: CardOrm, private val user
 		return cardOrm.readAll()
 	}
 
-	fun getProfileDetail(uuid: String): Mapping.CardProfile? {
-		val defaultCard= Mapping.CardProfile(
+	fun getProfileDetail(uuid: String): String? {
+		var card = Mapping.CardProfile(
 			uuid,
 			1,
 			0,
@@ -40,9 +49,43 @@ class PlayerCardCustomizationImpl(private val cardOrm: CardOrm, private val user
 			return null
 		}
 		if (cardProfileOrm.read(uuid) == null) {
-			cardProfileOrm.create(defaultCard)
-			return defaultCard
+			cardProfileOrm.create(card)
+			return Gson().toJson(card)
 		}
-		return cardProfileOrm.read(uuid)
+		card = cardProfileOrm.read(uuid)!!
+		val jsonArray = JsonArray().apply {
+			add(JsonObject().apply {
+				addProperty(
+					getStatistic(card.statistic1!!, uuid).first,
+					getStatistic(card.statistic1, uuid).second
+				)
+			})
+			add(JsonObject().apply {
+				addProperty(
+					getStatistic(card.statistic2!!, uuid).first,
+					getStatistic(card.statistic2, uuid).second
+				)
+			})
+			add(JsonObject().apply {
+				addProperty(
+					getStatistic(card.statistic3!!, uuid).first,
+					getStatistic(card.statistic3, uuid).second
+				)
+			})
+		}
+		val jsonObj = JsonObject().apply {
+			addProperty("uuid", uuid)
+			addProperty("cardId", card.cardId)
+			add("statistic", jsonArray)
+		}
+		return jsonObj.toString()
+	}
+
+	private fun getStatistic(type: Int, token: String): Pair<String, String> {
+		val user = userORM.read(userORM.getUserWithProfile(token))
+		return when (type) {
+			1 -> "Play time" to (user?.playtime?.toString() ?: "")
+			else -> "" to ""
+		}
 	}
 }

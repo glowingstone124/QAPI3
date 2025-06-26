@@ -4,6 +4,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.reactive.awaitSingle
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
+import org.apache.catalina.User
 import org.qo.datas.Mapping.Users
 import org.qo.datas.ConnectionPool
 import org.springframework.context.annotation.Profile
@@ -47,6 +48,7 @@ class UserORM() : CrudDao<Users>  {
             "INSERT INTO users (username, uid, frozen, remain, economy, signed, playtime, password, temp, invite, profile_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?,?)"
         private const val SELECT_USER_BY_ID_SQL = "SELECT * FROM users WHERE uid = ?"
         private const val SELECT_USER_BY_USERNAME_SQL = "SELECT * FROM users WHERE username = ?"
+        private const val SELECT_USER_BY_UUID_SQL = "SELECT * FROM users WHERE profile_id = ?"
         private const val DELETE_USER_BY_ID_SQL = "DELETE FROM users WHERE uid = ?"
         private const val DELETE_USER_BY_USERNAME_SQL = "DELETE FROM users WHERE username = ?"
         private const val SEARCH_USER_BY_PROFILE_UUID = "SELECT username FROM users WHERE profile_id = ? LIMIT 1"
@@ -70,6 +72,20 @@ class UserORM() : CrudDao<Users>  {
                 statement.executeQuery().use { resultSet ->
                     return if (resultSet.next()) {
                         resultSet.getString("profile_id") ?: ""
+                    } else {
+                        ""
+                    }
+                }
+            }
+        }
+    }
+    fun getUserWithProfile(uuid: String): String {
+        ConnectionPool.getConnection().use { connection ->
+            connection.prepareStatement(SELECT_USER_BY_UUID_SQL).use { statement ->
+                statement.setString(1, uuid)
+                statement.executeQuery().use { resultSet ->
+                    return if (resultSet.next()) {
+                        resultSet.getString("username") ?: ""
                     } else {
                         ""
                     }
