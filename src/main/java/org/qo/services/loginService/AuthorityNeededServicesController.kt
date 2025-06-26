@@ -3,6 +3,7 @@ package org.qo.services.loginService
 import com.google.gson.Gson
 import com.google.gson.JsonArray
 import com.google.gson.JsonObject
+import com.google.gson.JsonParser
 import io.asyncer.r2dbc.mysql.message.server.DecodeContext.result
 import org.qo.utils.ReturnInterface
 import org.qo.services.loginService.IPWhitelistServices.WhitelistReasons
@@ -33,6 +34,20 @@ class AuthorityNeededServicesController(private val login: Login, private val ri
 	@GetMapping("/account")
 	suspend fun getAccountInfo(@RequestHeader token: String): ResponseEntity<String> {
 		return ri.GeneralHttpHeader(authorityNeededServicesImpl.getAccountInfo(token))
+	}
+
+	@GetMapping("/account/card")
+	fun getAccountCardInfo(@RequestParam profileUuid: String): ResponseEntity<String> {
+		val result = playerCardCustomizationImpl.getProfileDetail(profileUuid)
+		if (result == null) {
+			return ri.GeneralHttpHeader(JsonObject().apply {
+				addProperty("error", "no profile found")
+				addProperty("code","1")
+			}.toString())
+		}
+		val jsonStr = Gson().toJson(result)
+		val jsonObj = JsonParser.parseString(jsonStr).asJsonObject.apply{addProperty("code", 0)}
+		return ri.GeneralHttpHeader(jsonObj.toString())
 	}
 
 	@GetMapping("/ip/query")

@@ -75,6 +75,14 @@ class Mapping {
 			return GsonProvider.gson.toJson(this).toString()
 		}
 	}
+
+	data class CardProfile (
+		val uuid: String,
+		val cardId: Long?,
+		val statistic1:Int?,
+		val statistic2:Int?,
+		val statistic3:Int?,
+	)
 }
 
 object CardsRarityEnumAdapter : JsonSerializer<Mapping.CardsRarityEnum>, JsonDeserializer<Mapping.CardsRarityEnum> {

@@ -9,7 +9,6 @@ import java.sql.ResultSet
 @Service
 class UserCardsOrm : CrudDao<Mapping.UserCardRecord> {
 
-	private val connection: Connection = ConnectionPool.getConnection()
 
 	override fun create(item: Mapping.UserCardRecord): Long {
 		ConnectionPool.getConnection().use { connection ->

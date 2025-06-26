@@ -6,6 +6,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import org.qo.datas.Mapping.Users
 import org.qo.datas.ConnectionPool
+import org.springframework.context.annotation.Profile
 import java.sql.PreparedStatement
 import java.sql.ResultSet
 
@@ -48,8 +49,21 @@ class UserORM() : CrudDao<Users>  {
         private const val SELECT_USER_BY_USERNAME_SQL = "SELECT * FROM users WHERE username = ?"
         private const val DELETE_USER_BY_ID_SQL = "DELETE FROM users WHERE uid = ?"
         private const val DELETE_USER_BY_USERNAME_SQL = "DELETE FROM users WHERE username = ?"
+        private const val SEARCH_USER_BY_PROFILE_UUID = "SELECT username FROM users WHERE profile_id = ? LIMIT 1"
         private const val COUNT_USERS_SQL = "SELECT COUNT(*) AS total FROM users"
     }
+
+    fun userWithProfileIDExists(uuid: String): Boolean {
+        ConnectionPool.getConnection().use { connection ->
+            connection.prepareStatement(SEARCH_USER_BY_PROFILE_UUID).use { statement ->
+                statement.setString(1, uuid)
+                statement.executeQuery().use { resultSet ->
+                    return resultSet.next()
+                }
+            }
+        }
+    }
+
 
     override fun create(user: Users): Long = runBlocking {
         withContext(Dispatchers.IO) {
