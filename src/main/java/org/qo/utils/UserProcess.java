@@ -158,6 +158,7 @@ public class UserProcess {
             responseJson.addProperty("online", redis.exists("online" + name, DatabaseType.QO_ONLINE_DATABASE.getValue()).ignoreException());
             responseJson.addProperty("playtime", playtime);
             responseJson.addProperty("temp", temp);
+            responseJson.addProperty("profile_id", result.getProfile_id());
 
             redis.insert("user:" + name, responseJson.toString(), regDb).ignoreException();
 
