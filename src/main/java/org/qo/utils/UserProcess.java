@@ -479,11 +479,7 @@ public class UserProcess {
         }
     }
     private static String toHex(byte[] bytes) {
-        StringBuilder sb = new StringBuilder();
-        for (byte b : bytes) {
-            sb.append(String.format("%02x", b));
-        }
-        return sb.toString();
+        return Algorithm.toHex(bytes);
     }
 
     private static boolean hasValidField(JsonObject obj, String field) {

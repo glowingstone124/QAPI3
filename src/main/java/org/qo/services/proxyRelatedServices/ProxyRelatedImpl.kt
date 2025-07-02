@@ -63,6 +63,10 @@ class ProxyRelatedImpl(private val fileUpdateHook: FileUpdateHook) {
         return proxyList.map { SimplifiedProxy(it.name, it.url, it.stat) }
     }
 
+    fun getProxy(token:String): Proxy? {
+        return proxyList.find { it.token == token }
+    }
+
 }
 data class SimplifiedProxy(
     val name: String,
