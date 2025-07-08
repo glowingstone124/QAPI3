@@ -14,7 +14,7 @@ import org.springframework.stereotype.Service
 class PlayerCardCustomizationImpl(
 	private val cardOrm: CardOrm,
 	private val userCardsOrm: UserCardsOrm,
-	private val cardProfileOrm: CardProfileOrm
+	private val cardProfileOrm: CardProfileOrm,
 ) {
 	val userORM = UserORM()
 
@@ -37,13 +37,19 @@ class PlayerCardCustomizationImpl(
 		return cardOrm.readAll()
 	}
 
+	fun getProfileDetailWithGivenName(name: String): Mapping.CardProfile? {
+		val profileId = userORM.getProfileWithUser(name)
+		return cardProfileOrm.read(profileId)
+	}
+
 	fun getProfileDetail(uuid: String): String? {
 		var card = Mapping.CardProfile(
 			uuid,
 			1,
 			0,
 			0,
-			0
+			0,
+			"default"
 		)
 		if (!userORM.userWithProfileIDExists(uuid)) {
 			return null

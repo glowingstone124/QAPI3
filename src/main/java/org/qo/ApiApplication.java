@@ -53,14 +53,16 @@ public class ApiApplication implements ErrorController {
     private final ProxyRelatedImpl proxyRelatedImpl;
     private final Status status;
     public Login login;
+    private UserProcess userProcess;
     public IPWhitelistServices ipWhitelistServices;
     @Autowired
-    public ApiApplication(UAUtil uaUtil, ReturnInterface ri, Status status, Login login, IPWhitelistServices ipWhitelistServices, ProxyRelatedImpl proxyRelatedImpl) {
+    public ApiApplication(UAUtil uaUtil, ReturnInterface ri, Status status, Login login, IPWhitelistServices ipWhitelistServices, ProxyRelatedImpl proxyRelatedImpl, UserProcess userProcess) {
         this.ri = ri;
         this.ua = uaUtil;
         this.status = status;
         this.login = login;
         this.ipWhitelistServices = ipWhitelistServices;
+        this.userProcess = userProcess;
         this.proxyRelatedImpl = proxyRelatedImpl;
     }
 
@@ -256,7 +258,7 @@ public class ApiApplication implements ErrorController {
         if (name == null || name.isEmpty()) {
             return ri.GeneralHttpHeader("no input");
         }
-        return ri.GeneralHttpHeader(AvatarTrans(name));
+        return ri.GeneralHttpHeader(userProcess.AvatarTrans(name));
     }
 
     @RequestMapping("/qo/download/registry")

@@ -4,13 +4,16 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import jakarta.annotation.Resource;
 import jakarta.servlet.http.HttpServletRequest;
 import kotlin.Pair;
 import kotlinx.coroutines.Dispatchers;
 import org.qo.datas.ConnectionPool;
+import org.qo.services.loginService.AvatarRelatedImpl;
 import org.qo.services.loginService.Login;
 import org.qo.orm.UserORM;
 import org.qo.datas.Mapping.*;
+import org.qo.services.loginService.PlayerCardCustomizationImpl;
 import org.qo.services.mail.Mail;
 import org.qo.services.mail.MailPreset;
 import org.qo.redis.DatabaseType;
@@ -35,6 +38,10 @@ import static org.qo.utils.Logger.LogLevel.*;
 
 @Service
 public class UserProcess {
+    @Resource
+    private PlayerCardCustomizationImpl playerCardCustomizationImpl;
+    @Resource
+    private AvatarRelatedImpl avatarRelatedImpl;
     public static final String CODE_CONFIGURATION = "data/code.json";
     public static ConcurrentLinkedDeque<registry_verify_class> verify_list = new ConcurrentLinkedDeque<>();
     public static ConcurrentLinkedDeque<password_verify_class> pwdupd_list = new ConcurrentLinkedDeque<>();
@@ -290,59 +297,70 @@ public class UserProcess {
         return false;
     }
 
-    public static String AvatarTrans(String name) throws Exception {
-        String apiURL = "https://api.mojang.com/users/profiles/minecraft/" + name;
-        String avatarURL = "https://playerdb.co/api/player/minecraft/";
-
+    public String AvatarTrans(String name) throws Exception {
+        CardProfile profileDetailWithGivenName = playerCardCustomizationImpl.getProfileDetailWithGivenName(name);
         JsonObject returnObject = new JsonObject();
+        //Previous Logic: get corresponding avatar from mojang
+        if (profileDetailWithGivenName == null || profileDetailWithGivenName.getAvatar().equals("default")) {
+            String apiURL = "https://api.mojang.com/users/profiles/minecraft/" + name;
+            String avatarURL = "https://playerdb.co/api/player/minecraft/";
 
-        if (!AvatarCache.has(name)) {
-            try {
-                String mojangJson = request.sendGetRequest(apiURL).get();
-                JsonObject uuidObj = JsonParser.parseString(mojangJson).getAsJsonObject();
-                String uuid = uuidObj.get("id").getAsString();
 
-                String playerDbJson = request.sendGetRequest(avatarURL + uuid)
-                        .exceptionally(ex -> {
-                            return null;
-                        }).get();
+            if (!AvatarCache.has(name)) {
+                try {
+                    String mojangJson = request.sendGetRequest(apiURL).get();
+                    JsonObject uuidObj = JsonParser.parseString(mojangJson).getAsJsonObject();
+                    String uuid = uuidObj.get("id").getAsString();
 
-                if (playerDbJson == null) {
+                    String playerDbJson = request.sendGetRequest(avatarURL + uuid)
+                            .exceptionally(ex -> {
+                                return null;
+                            }).get();
+
+                    if (playerDbJson == null) {
+                        returnObject.addProperty("url", "https://crafthead.net/avatar/8667ba71b85a4004af54457a9734eed7");
+                        returnObject.addProperty("name", name);
+                        return returnObject.toString();
+                    }
+
+                    JsonObject playerUUIDobj = JsonParser.parseString(playerDbJson).getAsJsonObject();
+
+                    if (playerUUIDobj.get("success").getAsBoolean()) {
+                        JsonObject player = playerUUIDobj
+                                .getAsJsonObject("data")
+                                .getAsJsonObject("player");
+
+                        String avatar = player.get("avatar").getAsString();
+                        String username = player.get("username").getAsString();
+
+                        returnObject.addProperty("url", avatar);
+                        returnObject.addProperty("name", username);
+                        AvatarCache.cache(avatar, username);
+                        return returnObject.toString();
+                    } else {
+                        returnObject.addProperty("url", "https://crafthead.net/avatar/8667ba71b85a4004af54457a9734eed7");
+                        returnObject.addProperty("name", name);
+                        return returnObject.toString();
+                    }
+
+                } catch (Exception e) {
                     returnObject.addProperty("url", "https://crafthead.net/avatar/8667ba71b85a4004af54457a9734eed7");
                     returnObject.addProperty("name", name);
                     return returnObject.toString();
                 }
-
-                JsonObject playerUUIDobj = JsonParser.parseString(playerDbJson).getAsJsonObject();
-
-                if (playerUUIDobj.get("success").getAsBoolean()) {
-                    JsonObject player = playerUUIDobj
-                            .getAsJsonObject("data")
-                            .getAsJsonObject("player");
-
-                    String avatar = player.get("avatar").getAsString();
-                    String username = player.get("username").getAsString();
-
-                    returnObject.addProperty("url", avatar);
-                    returnObject.addProperty("name", username);
-                    AvatarCache.cache(avatar, username);
-                    return returnObject.toString();
-                } else {
-                    returnObject.addProperty("url", "https://crafthead.net/avatar/8667ba71b85a4004af54457a9734eed7");
-                    returnObject.addProperty("name", name);
-                    return returnObject.toString();
-                }
-
-            } catch (Exception e) {
-                returnObject.addProperty("url", "https://crafthead.net/avatar/8667ba71b85a4004af54457a9734eed7");
-                returnObject.addProperty("name", name);
-                return returnObject.toString();
             }
+
+            returnObject.addProperty("url", "https://crafthead.net/avatar/8667ba71b85a4004af54457a9734eed7");
+            returnObject.addProperty("name", name);
+            return returnObject.toString();
+        } else {
+            //New: get user-defined avatar from QO server
+            var url = avatarRelatedImpl.getAvatarUrl(profileDetailWithGivenName.getAvatar());
+            returnObject.addProperty("url", url);
+            returnObject.addProperty("name", name);
+            return returnObject.toString();
         }
 
-        returnObject.addProperty("url", "https://crafthead.net/avatar/8667ba71b85a4004af54457a9734eed7");
-        returnObject.addProperty("name", name);
-        return returnObject.toString();
     }
 
     /**

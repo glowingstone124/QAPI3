@@ -82,6 +82,7 @@ class Mapping {
 		val statistic1:Int?,
 		val statistic2:Int?,
 		val statistic3:Int?,
+		val avatar:String,
 	)
 }
 

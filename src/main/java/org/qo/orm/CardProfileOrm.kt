@@ -11,7 +11,7 @@ import kotlin.use
 class CardProfileOrm : CrudDao<Mapping.CardProfile> {
 	companion object {
 		private const val INSERT_PC_SQL =
-			"INSERT INTO card_profile (uuid, cardId, statistic1,statistic2,statistic3) VALUES (?, ?, ?, ?, ?)"
+			"INSERT INTO card_profile (uuid, cardId, statistic1,statistic2,statistic3,avatar) VALUES (?, ?, ?, ?, ?,?)"
 		private const val SELECT_PROFILE_BY_ID_SQL = "SELECT * FROM card_profile WHERE uuid = ?"
 	}
 
@@ -23,6 +23,7 @@ class CardProfileOrm : CrudDao<Mapping.CardProfile> {
 				stmt.setInt(3, item.statistic1!!)
 				stmt.setInt(4, item.statistic2!!)
 				stmt.setInt(5, item.statistic3!!)
+				stmt.setString(6, item.avatar)
 				stmt.executeUpdate()
 			}
 			return 0
@@ -61,8 +62,9 @@ class CardProfileOrm : CrudDao<Mapping.CardProfile> {
 				updates.add("statistic3 = ?")
 				params.add(item.statistic3)
 			}
+			updates.add("avatar = ?")
+			params.add(item.avatar)
 
-			// 没有任何要更新的字段，直接返回 false
 			if (updates.isEmpty()) return false
 
 			val sql = "UPDATE card_profile SET ${updates.joinToString(", ")} WHERE uuid = ?"
@@ -99,6 +101,7 @@ class CardProfileOrm : CrudDao<Mapping.CardProfile> {
 			statistic1 = rs.getInt("statistic1"),
 			statistic2 = rs.getInt("statistic2"),
 			statistic3 = rs.getInt("statistic3"),
+			avatar = rs.getString("avatar"),
 		)
 	}
 }
