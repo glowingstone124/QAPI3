@@ -14,7 +14,7 @@ import java.security.MessageDigest
 import java.time.LocalDate
 
 @Service
-class AuthorityNeededServicesImpl(private val login: Login, private val ri: ReturnInterface, private val ft: FortuneTools, private val playerCardCustomizationImpl: PlayerCardCustomizationImpl) {
+class AuthorityNeededServicesImpl(private val login: Login, private val ri: ReturnInterface, private val ft: FortuneTools) {
 	val gson = Gson()
 	val redis = Redis()
 	data class WebChatWrapper(
