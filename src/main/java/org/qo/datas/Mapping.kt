@@ -77,12 +77,12 @@ class Mapping {
 	}
 
 	data class CardProfile (
-		val uuid: String,
+		val uuid: String = "",
 		val cardId: Long?,
 		val statistic1:Int?,
 		val statistic2:Int?,
 		val statistic3:Int?,
-		val avatar:String,
+		val avatar:String?,
 	)
 }
 

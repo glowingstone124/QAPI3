@@ -4,7 +4,8 @@ import com.google.gson.Gson
 import com.google.gson.JsonArray
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
-import io.asyncer.r2dbc.mysql.message.server.DecodeContext.result
+import org.qo.datas.GsonProvider.gson
+import org.qo.datas.Mapping
 import org.qo.utils.ReturnInterface
 import org.qo.services.loginService.IPWhitelistServices.WhitelistReasons
 import org.qo.orm.UserORM
@@ -34,6 +35,16 @@ class AuthorityNeededServicesController(private val login: Login, private val ri
 	@GetMapping("/account")
 	suspend fun getAccountInfo(@RequestHeader token: String): ResponseEntity<String> {
 		return ri.GeneralHttpHeader(authorityNeededServicesImpl.getAccountInfo(token))
+	}
+
+	@PostMapping("/account/card/custom")
+	suspend fun uploadCardDiff(@RequestBody jsonBody: String, @RequestHeader token: String): ResponseEntity<String> {
+		val card= gson.fromJson(jsonBody, Mapping.CardProfile::class.java)
+		val result =playerCardCustomizationImpl.updatePlayerAccountCardInfo(token, card)
+		return ri.GeneralHttpHeader(JsonObject().apply {
+			addProperty("result", result.first)
+			addProperty("message", result.second)
+		}.toString())
 	}
 
 	@GetMapping("/account/card")

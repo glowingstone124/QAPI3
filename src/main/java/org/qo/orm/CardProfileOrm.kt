@@ -62,8 +62,10 @@ class CardProfileOrm : CrudDao<Mapping.CardProfile> {
 				updates.add("statistic3 = ?")
 				params.add(item.statistic3)
 			}
-			updates.add("avatar = ?")
-			params.add(item.avatar)
+			if (item.avatar != null) {
+				updates.add("avatar = ?")
+				params.add(item.avatar)
+			}
 
 			if (updates.isEmpty()) return false
 
