@@ -340,23 +340,27 @@ public class UserProcess {
                     } else {
                         returnObject.addProperty("url", "https://crafthead.net/avatar/8667ba71b85a4004af54457a9734eed7");
                         returnObject.addProperty("name", name);
+                        returnObject.addProperty("special", false);
                         return returnObject.toString();
                     }
 
                 } catch (Exception e) {
                     returnObject.addProperty("url", "https://crafthead.net/avatar/8667ba71b85a4004af54457a9734eed7");
                     returnObject.addProperty("name", name);
+                    returnObject.addProperty("special", false);
                     return returnObject.toString();
                 }
             }
 
             returnObject.addProperty("url", "https://crafthead.net/avatar/8667ba71b85a4004af54457a9734eed7");
             returnObject.addProperty("name", name);
+            returnObject.addProperty("special", false);
             return returnObject.toString();
         } else {
             //New: get user-defined avatar from QO server
             var url = avatarRelatedImpl.getAvatarUrl(profileDetailWithGivenName.getAvatar());
             returnObject.addProperty("url", url);
+            returnObject.addProperty("special", true);
             returnObject.addProperty("name", name);
             return returnObject.toString();
         }
