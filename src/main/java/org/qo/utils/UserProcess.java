@@ -335,6 +335,7 @@ public class UserProcess {
 
                         returnObject.addProperty("url", avatar);
                         returnObject.addProperty("name", username);
+                        returnObject.addProperty("special", false);
                         AvatarCache.cache(avatar, username);
                         return returnObject.toString();
                     } else {
