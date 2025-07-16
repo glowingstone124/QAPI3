@@ -58,7 +58,6 @@ object Init {
 			downloadMutex.withLock {
 				if (!path.exists() || force || isFileOlderThanHours(path, 72)) {
 					downloadMmdb()
-					initializeDatabase()
 				}
 			}
 		} else {
@@ -77,6 +76,7 @@ object Init {
 			}
 
 			Logger.log("Download complete.", INFO)
+			initializeDatabase()
 		} catch (e: Exception) {
 			Logger.log("Download failed: ${e.message}", ERROR)
 			throw e
@@ -101,7 +101,7 @@ object Init {
 			Duration.between(lastModified, Instant.now()).toHours() >= hours
 		} catch (e: Exception) {
 			Logger.log("检查文件时间失败：${e.message}", WARNING)
-			true // 出错时当作旧文件处理
+			true
 		}
 	}
 }
