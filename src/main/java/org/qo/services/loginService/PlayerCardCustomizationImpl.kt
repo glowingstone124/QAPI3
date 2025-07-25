@@ -55,6 +55,7 @@ class PlayerCardCustomizationImpl(
 				}
 			}
 		}
+		return list
 	}
 
 	suspend fun updatePlayerAccountCardInfo(token: String, cardInfo: Mapping.CardProfile): Pair<Boolean, String> {
