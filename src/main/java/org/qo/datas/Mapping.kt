@@ -84,6 +84,11 @@ class Mapping {
 		val statistic3:Int?,
 		val avatar:String?,
 	)
+
+	data class Avatar(
+		val id: String,
+		val url: String,
+	)
 }
 
 object CardsRarityEnumAdapter : JsonSerializer<Mapping.CardsRarityEnum>, JsonDeserializer<Mapping.CardsRarityEnum> {

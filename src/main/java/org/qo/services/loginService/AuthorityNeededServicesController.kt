@@ -126,6 +126,11 @@ class AuthorityNeededServicesController(private val login: Login, private val ri
 	suspend fun getAllCards():ResponseEntity<String> {
 		return ri.GeneralHttpHeader(playerCardCustomizationImpl.getAllCards().convertToJsonArray().toString())
 	}
+
+	@GetMapping("/avatars/all")
+	suspend fun getAllAvatars():ResponseEntity<String> {
+		return ri.GeneralHttpHeader(playerCardCustomizationImpl.getAllAvatars().convertToJsonArray().toString())
+	}
 }
 data class Return(
 	val code: Int,

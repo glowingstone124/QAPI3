@@ -44,6 +44,19 @@ class PlayerCardCustomizationImpl(
 		return userCardsOrm.getCardsByUsername(username)
 	}
 
+	suspend fun getAllAvatars() : List<Mapping.Avatar> {
+		val list = mutableListOf<Mapping.Avatar>()
+		ConnectionPool.getConnection().use { connection ->
+			connection.prepareStatement("SELECT * FROM avatars").use { preparedStatement ->
+				preparedStatement.executeQuery().use { resultSet ->
+					while (resultSet.next()) {
+						list.add(Mapping.Avatar(resultSet.getString("id"), resultSet.getString("url")))
+					}
+				}
+			}
+		}
+	}
+
 	suspend fun updatePlayerAccountCardInfo(token: String, cardInfo: Mapping.CardProfile): Pair<Boolean, String> {
 		val (accountName, errorCode) = login.validate(token)
 		val precheckResult = authorityNeededServicesImpl.doPrecheck(accountName, errorCode)
