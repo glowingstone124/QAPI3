@@ -1,6 +1,6 @@
 import java.util.Properties
 plugins {
-    id("org.springframework.boot") version "3.1.5"
+    id("org.springframework.boot") version "3.5.4"
     id("io.spring.dependency-management") version "1.1.3"
     kotlin("plugin.serialization") version "2.0.20"
     kotlin("jvm") version "2.0.20"
@@ -27,7 +27,6 @@ dependencies {
     implementation("org.jetbrains.kotlin:kotlin-stdlib")
     // Springboot
     implementation("org.springframework.boot:spring-boot-starter-webflux")
-    implementation("org.springframework.boot:spring-boot-starter-thymeleaf")
     implementation("org.springframework.boot:spring-boot-starter")
     implementation("org.springframework.boot:spring-boot-starter-quartz")
     implementation("org.springframework.boot:spring-boot-starter-reactor-netty")
