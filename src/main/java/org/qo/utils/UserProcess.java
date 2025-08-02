@@ -453,6 +453,8 @@ public class UserProcess {
                 redis.insert("login_history_" + username, ip, DatabaseType.QO_TEMP_DATABASE.getValue(), 60).ignoreException();
             }
             return new Pair<>(true, token);
+        } else {
+            redis.delete("login_history_" + username, DatabaseType.QO_TEMP_DATABASE.getValue()).ignoreException();
         }
         return new Pair<>(false, null);
     }

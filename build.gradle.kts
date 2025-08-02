@@ -36,7 +36,7 @@ dependencies {
     implementation("redis.clients:jedis:3.6.3")
     implementation("org.mockito:mockito-core:5.13.0")
 
-    implementation("javax.servlet:javax.servlet-api:4.0.1")
+    //implementation("javax.servlet:javax.servlet-api:4.0.1")
     implementation("org.xerial:sqlite-jdbc:3.34.0")
     implementation("com.google.code.gson:gson:2.10.1")
     implementation("org.commonmark:commonmark:0.20.0")
