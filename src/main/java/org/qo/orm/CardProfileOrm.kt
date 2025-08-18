@@ -11,7 +11,7 @@ import kotlin.use
 class CardProfileOrm : CrudDao<Mapping.CardProfile> {
 	companion object {
 		private const val INSERT_PC_SQL =
-			"INSERT INTO card_profile (uuid, cardId, statistic1,statistic2,statistic3,avatar) VALUES (?, ?, ?, ?, ?,?)"
+			"INSERT INTO card_profile (uuid, cardId, statistic1,statistic2,statistic3,avatar,owned) VALUES (?, ?, ?, ?, ?,?,?)"
 		private const val SELECT_PROFILE_BY_ID_SQL = "SELECT * FROM card_profile WHERE uuid = ?"
 	}
 
@@ -24,6 +24,7 @@ class CardProfileOrm : CrudDao<Mapping.CardProfile> {
 				stmt.setInt(4, item.statistic2!!)
 				stmt.setInt(5, item.statistic3!!)
 				stmt.setString(6, item.avatar)
+				stmt.setString(7, item.owned)
 				stmt.executeUpdate()
 			}
 			return 0
@@ -104,6 +105,7 @@ class CardProfileOrm : CrudDao<Mapping.CardProfile> {
 			statistic2 = rs.getInt("statistic2"),
 			statistic3 = rs.getInt("statistic3"),
 			avatar = rs.getString("avatar"),
+			owned = rs.getString("owned")
 		)
 	}
 }

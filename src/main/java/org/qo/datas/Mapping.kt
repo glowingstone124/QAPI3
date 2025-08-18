@@ -83,6 +83,7 @@ class Mapping {
 		val statistic2:Int?,
 		val statistic3:Int?,
 		val avatar:String?,
+		val owned: String?,
 	)
 
 	data class Avatar(

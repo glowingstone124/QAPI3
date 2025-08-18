@@ -104,8 +104,7 @@ class AuthorityNeededServicesController(private val login: Login, private val ri
 			}.toString())
 		}
 		return ReturnInterface().GeneralHttpHeader(playerCardCustomizationImpl
-			.getPlayerCardList(username!!)
-			.convertToJsonArray()
+			.getPlayerCardListAsJson(username!!)
 			.toString()
 		)
 	}

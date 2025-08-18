@@ -40,8 +40,21 @@ class PlayerCardCustomizationImpl(
 		}
 	}
 
-	fun getPlayerCardList(username: String): List<Mapping.UserCardRecord> {
-		return userCardsOrm.getCardsByUsername(username)
+	fun getPlayerCardList(username: String): List<Int> {
+		return cardProfileOrm.read(userORM.getProfileWithUser(username))?.owned?.split(",")?.map { it.trim().toInt() }
+			?: listOf()
+	}
+
+	fun getPlayerCardListAsJson(username: String): JsonArray {
+		val rawList = cardProfileOrm.read(userORM.getProfileWithUser(username))?.owned?.split(",")?.map { it.trim().toInt() }
+			?: listOf()
+		val jsonArr = JsonArray()
+		for (i in rawList) {
+			jsonArr.add(JsonObject().apply {
+				addProperty("cardId", i)
+			})
+		}
+		return jsonArr
 	}
 
 	suspend fun getAllAvatars() : List<Mapping.Avatar> {
@@ -67,14 +80,8 @@ class PlayerCardCustomizationImpl(
 		val profileDetailClazz = getProfileDetailWithGivenName(accountName!!)
 
 		val modifiedCardId = cardInfo.cardId.let { cardId ->
-			getPlayerCardList(accountName).let { cards ->
-				cards.find {
-					it.cardId == cardId
-				}.let{
-					return@let it?.cardId
-				}
-			}
-		}
+			getPlayerCardList(accountName).find { it.toLong() == cardId }
+		}?.toLong()
 
 		val st1 = cardInfo.statistic1?.takeIf { statisticMapping.containsKey(it) }
 		val st2 = cardInfo.statistic2?.takeIf { statisticMapping.containsKey(it) }
@@ -88,7 +95,8 @@ class PlayerCardCustomizationImpl(
 			statistic2 = st2,
 			statistic3 = st3,
 			avatar = avatar,
-			uuid = profileDetailClazz!!.uuid
+			uuid = profileDetailClazz!!.uuid,
+			owned = profileDetailClazz.owned,
 		)
 		cardProfileOrm.update(modifiedClazz)
 		return Pair(true, "Updated Successfully")
@@ -117,7 +125,8 @@ class PlayerCardCustomizationImpl(
 			0,
 			0,
 			0,
-			"default"
+			"default",
+			"1,2,3,4,5,6,7,8"
 		)
 		if (!userORM.userWithProfileIDExists(uuid)) {
 			return null
