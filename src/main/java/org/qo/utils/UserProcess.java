@@ -9,6 +9,8 @@ import jakarta.servlet.http.HttpServletRequest;
 import kotlin.Pair;
 import kotlinx.coroutines.Dispatchers;
 import org.qo.datas.ConnectionPool;
+import org.qo.orm.AffiliatedAccountORM;
+import org.qo.services.loginService.AffiliatedAccountServices;
 import org.qo.services.loginService.AvatarRelatedImpl;
 import org.qo.services.loginService.Login;
 import org.qo.orm.UserORM;
@@ -21,9 +23,11 @@ import org.qo.redis.Redis;
 import org.qo.server.AvatarCache;
 import org.qo.services.messageServices.Msg;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationContext;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 
+import javax.swing.*;
 import java.io.*;
 
 import java.nio.file.Files;
@@ -42,6 +46,8 @@ public class UserProcess {
     private PlayerCardCustomizationImpl playerCardCustomizationImpl;
     @Resource
     private AvatarRelatedImpl avatarRelatedImpl;
+    @Resource
+    private AffiliatedAccountServices affiliatedAccountServices;
     public static final String CODE_CONFIGURATION = "data/code.json";
     public static ConcurrentLinkedDeque<registry_verify_class> verify_list = new ConcurrentLinkedDeque<>();
     public static ConcurrentLinkedDeque<password_verify_class> pwdupd_list = new ConcurrentLinkedDeque<>();
@@ -152,6 +158,7 @@ public class UserProcess {
         }
 
         Users result = userORM.read(name);
+        var service = SpringContextUtil.Companion.getCtx().getBean(AffiliatedAccountServices.class);
         if (result != null) {
             boolean temp = result.getTemp();
             Long uid = result.getUid();
@@ -166,11 +173,14 @@ public class UserProcess {
             responseJson.addProperty("playtime", playtime);
             responseJson.addProperty("temp", temp);
             responseJson.addProperty("profile_id", result.getProfile_id());
-
+            responseJson.addProperty("affiliated", false);
             redis.insert("user:" + name, responseJson.toString(), regDb).ignoreException();
 
             responseJson.addProperty("code", temp ? 2 : 0);
             return responseJson.toString();
+        } else if (service.validateAffiliatedAccount(name).getFirst()) {
+            responseJson.addProperty("affiliated", true);
+            responseJson.addProperty("host", service.validateAffiliatedAccount(name).getSecond().getHost());
         }
 
         responseJson.addProperty("code", 1);
@@ -213,7 +223,7 @@ public class UserProcess {
             }
             if (Objects.equals(userORM.read(uid), null) && name != null && uid != null) {
                 try {
-                    userORM.create(new Users(name, uid, true, 3, 0, false, 0, false, 0, computePassword(password, true), UUID.randomUUID().toString()));
+                    userORM.create(new Users(name, uid, true, 3, 0, false, 0, false, 3, computePassword(password, true), UUID.randomUUID().toString()));
                     String token = Algorithm.generateRandomString(16);
                     Msg.Companion.putSys("用户 " + uid + "注册了一个账号：" + name + "，若非本人操作请忽略，确认账号请在消息发出后2小时内输入/approve-register " + token);
                     verify_list.add(new registry_verify_class(name, token, uid, System.currentTimeMillis()));
@@ -437,24 +447,43 @@ public class UserProcess {
 
     public static Pair<Boolean, String> performLogin(String username, String password, String ip, boolean web) throws NoSuchAlgorithmException {
         Users user = userORM.read(username);
+        boolean tempFlag = false;
+        Pair<Boolean, AffiliatedAccountServices.AffiliatedAccount> tempResult = null;
         if (user == null) {
-            System.out.println("[DEBUG@performLogin,ORM]User " + username + " not found");
-            return new Pair<>(false, null);
-        }
-
-        String[] passwordParts = user.getPassword().split("\\$");
-        String user_salt = passwordParts[2];
-        String user_hashed = passwordParts[3];
-        String computedPasswordHash = Algorithm.hash(Algorithm.hash(password, MessageDigest.getInstance("SHA-256")) + user_salt, MessageDigest.getInstance("SHA-256"));
-        if (computedPasswordHash.equals(user_hashed)) {
-            String token = login.generateToken(64);
-            login.insertInto(token, username);
-            if (!web && ip != null) {
-                redis.insert("login_history_" + username, ip, DatabaseType.QO_TEMP_DATABASE.getValue(), 60).ignoreException();
+            ApplicationContext ctx = SpringContextUtil.Companion.getCtx();
+            AffiliatedAccountServices service = ctx.getBean(AffiliatedAccountServices.class);
+            tempResult = service.validateAffiliatedAccount(username);
+            if (!tempResult.getFirst()) {
+                System.out.println("[DEBUG@performLogin,ORM]User " + username + " not found");
+                return new Pair<>(false, null);
+            } else {
+                tempFlag = true;
             }
-            return new Pair<>(true, token);
+        }
+        if (!tempFlag) {
+            String[] passwordParts = user.getPassword().split("\\$");
+            String user_salt = passwordParts[2];
+            String user_hashed = passwordParts[3];
+            String computedPasswordHash = Algorithm.hash(Algorithm.hash(password, MessageDigest.getInstance("SHA-256")) + user_salt, MessageDigest.getInstance("SHA-256"));
+            if (computedPasswordHash.equals(user_hashed)) {
+                String token = login.generateToken(64);
+                login.insertInto(token, username);
+                if (!web && ip != null) {
+                    redis.insert("login_history_" + username, ip, DatabaseType.QO_TEMP_DATABASE.getValue(), 60).ignoreException();
+                }
+                return new Pair<>(true, token);
+            } else {
+                redis.delete("login_history_" + username, DatabaseType.QO_TEMP_DATABASE.getValue()).ignoreException();
+            }
+            return new Pair<>(false, null);
         } else {
-            redis.delete("login_history_" + username, DatabaseType.QO_TEMP_DATABASE.getValue()).ignoreException();
+            String[] passwordParts = tempResult.getSecond().getPassword().split("\\$");
+            String user_salt = passwordParts[2];
+            String user_hashed = passwordParts[3];
+            String computedPasswordHash = Algorithm.hash(Algorithm.hash(password, MessageDigest.getInstance("SHA-256")) + user_salt, MessageDigest.getInstance("SHA-256"));
+            if (computedPasswordHash.equals(user_hashed)) {
+                return new Pair<>(true, "");
+            }
         }
         return new Pair<>(false, null);
     }
