@@ -1,6 +1,7 @@
 package org.qo.services.loginService
 
 import com.google.gson.Gson
+import com.google.gson.JsonObject
 import org.qo.orm.AffiliatedAccountORM
 import org.qo.orm.UserORM
 import org.qo.services.gameStatusService.asJsonObject
@@ -28,8 +29,10 @@ class AffiliatedAccountServices(private val affiliatedAccountORM: AffiliatedAcco
 	}
 
 	suspend fun addAffiliatedAccount(token: String,body:String): Boolean {
-		val accountName = gson.toJson(body).asJsonObject().get("name")?.asString ?: return false
-		val password = gson.toJson(body).asJsonObject().get("password")?.asString ?: return false
+		val jsonObj = gson.fromJson(body, JsonObject::class.java)
+		val accountName = jsonObj.get("name")?.asString ?: return false
+		val password = jsonObj.get("password")?.asString ?: return false
+
 		val (username, code) = login.validate(token)
 		if (username == null) {
 			return false
