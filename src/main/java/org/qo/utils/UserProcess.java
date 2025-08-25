@@ -181,10 +181,10 @@ public class UserProcess {
         } else if (service.validateAffiliatedAccount(name).getFirst()) {
             responseJson.addProperty("affiliated", true);
             responseJson.addProperty("host", service.validateAffiliatedAccount(name).getSecond().getHost());
+        } else {
+            responseJson.addProperty("code", 1);
+            responseJson.addProperty("qq", -1);
         }
-
-        responseJson.addProperty("code", 1);
-        responseJson.addProperty("qq", -1);
         return responseJson.toString();
     }
 
