@@ -122,3 +122,7 @@ tasks.register("buildAndCopy") {
         }
     }
 }
+tasks.withType<Jar> {
+	duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}
+
