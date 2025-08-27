@@ -1,0 +1,30 @@
+package org.qo.datas
+
+class Enumerations {
+	enum class Card_CityCollection_Enum(id: Int) {
+		MAINCITY_1(1),
+		MAINCITY_2(2),
+		NORZPASHAM(3),
+		FIN_TRAINLINE(4),
+		ITEM_CAG(5),
+		OLYMPUS(6),
+		ZINCITY(7),
+		TORII(8),
+	}
+	enum class Card_PixelFantasia_Enum(id: Int) {
+		KOISHI_NORZ(9),
+		PATCHOULI_LIB(10),
+		PROMETHUS(11),
+	}
+	enum class Medal_Enum(id: Int) {
+		HOTZONE_CHAMPION(1),
+		HOTZONE_RUNNERUP(2),
+		HOTZONE_3RDPLACE(3),
+		SERVICE_MEDAL_2025(4),
+
+	}
+	enum class Card_Collections() {
+		CITY_COLLECTION,
+		PIXEL_FANTASIA
+	}
+}
