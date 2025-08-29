@@ -7,14 +7,12 @@ import org.qo.datas.ConnectionPool
 import org.qo.datas.Mapping
 import org.qo.orm.CardOrm
 import org.qo.orm.CardProfileOrm
-import org.qo.orm.UserCardsOrm
 import org.qo.orm.UserORM
 import org.springframework.stereotype.Service
 
 @Service
 class PlayerCardCustomizationImpl(
 	private val cardOrm: CardOrm,
-	private val userCardsOrm: UserCardsOrm,
 	private val cardProfileOrm: CardProfileOrm,
 	private val login: Login,
 	private val authorityNeededServicesImpl: AuthorityNeededServicesImpl

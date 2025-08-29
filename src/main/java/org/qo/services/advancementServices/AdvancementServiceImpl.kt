@@ -2,10 +2,15 @@ package org.qo.services.advancementServices
 
 import org.qo.datas.ConnectionPool
 import org.qo.datas.Enumerations
+import org.qo.orm.CardProfileOrm
+import org.qo.orm.UserORM
 import org.springframework.stereotype.Component
+import kotlin.reflect.KFunction
 
 @Component
-class AdvancementServiceImpl {
+class AdvancementServiceImpl(private val cardProfileOrm: CardProfileOrm) {
+
+	val userORM = UserORM()
 
 	data class Advancement(
 		val id: Long,
@@ -19,6 +24,19 @@ class AdvancementServiceImpl {
 		FAILED,
 		INVALID_PLAYER
 	}
+
+	val advancementOperations: Map<Enumerations.AdvancementsEnum, (String) -> Unit> = mapOf(
+		Enumerations.AdvancementsEnum.ADVANCEMENT_PATCHOULI to { uuid: String ->
+			cardProfileOrm.addCardToOwned(uuid, Enumerations.Card_PixelFantasia_Enum.PATCHOULI_LIB.id.toLong())
+		},
+		Enumerations.AdvancementsEnum.ADVANCEMENT_PROMETHUS to { uuid: String ->
+			cardProfileOrm.addCardToOwned(uuid, Enumerations.Card_PixelFantasia_Enum.PROMETHUS.id.toLong())
+		},
+		Enumerations.AdvancementsEnum.ADVANCEMENT_KOISHI to { uuid: String ->
+			cardProfileOrm.addCardToOwned(uuid, Enumerations.Card_PixelFantasia_Enum.KOISHI_NORZ.id.toLong())
+		}
+	)
+
 
 	fun getCompleteAdvancements(username: String): List<Advancement> {
 		val sql =
@@ -56,7 +74,7 @@ class AdvancementServiceImpl {
 		}
 	}
 
-	fun addAdvancementCompletion(
+	fun addAdvancementCompletionSQL(
 		adv: Enumerations.AdvancementsEnum,
 		player: String
 	): AddAdvancementResult {
@@ -103,6 +121,17 @@ class AdvancementServiceImpl {
 				return AddAdvancementResult.FAILED
 			}
 		}
+	}
+
+	fun addAdvancementCompletion(
+		adv: Enumerations.AdvancementsEnum,
+		player: String
+	): AddAdvancementResult {
+		val result = addAdvancementCompletionSQL(adv, player)
+		if (result == AdvancementServiceImpl.AddAdvancementResult.SUCCESS) {
+			advancementOperations[adv]?.invoke(userORM.getProfileWithUser(player))
+		}
+		return result
 	}
 
 	fun getAllAdvancements(): List<Advancement> {

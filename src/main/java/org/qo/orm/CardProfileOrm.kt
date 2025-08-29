@@ -96,6 +96,18 @@ class CardProfileOrm : CrudDao<Mapping.CardProfile> {
 		}
 	}
 
+	fun addCardToOwned(uuid: String, cardIdToAdd: Long): Boolean {
+		val profile = read(uuid) ?: return false
+
+		val ownedSet = profile.owned
+			?.split(",")
+			?.mapNotNull { it.toLongOrNull() }
+			?.toMutableSet() ?: mutableSetOf()
+
+		if (!ownedSet.add(cardIdToAdd)) return false
+		profile.owned = ownedSet.joinToString(",")
+		return update(profile)
+	}
 
 	private fun parse(rs: ResultSet): Mapping.CardProfile {
 		return Mapping.CardProfile(
