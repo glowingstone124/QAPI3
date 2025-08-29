@@ -9,6 +9,7 @@ import org.qo.datas.Mapping
 import org.qo.utils.ReturnInterface
 import org.qo.services.loginService.IPWhitelistServices.WhitelistReasons
 import org.qo.orm.UserORM
+import org.qo.utils.SerializeUtils.convertToJsonArray
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PostMapping
@@ -164,18 +165,6 @@ data class Return(
 		val gson = Gson()
 		return gson.toJson(this)
 	}
-}
-
-fun <T> List<T>.convertToJsonArray(): JsonArray {
-	val gson = Gson()
-	val jsonArray = JsonArray()
-
-	this.forEach { element ->
-		val jsonElement = gson.toJsonTree(element)
-		jsonArray.add(jsonElement)
-	}
-
-	return jsonArray
 }
 
 fun Boolean.toHumanReadableJson(): String {

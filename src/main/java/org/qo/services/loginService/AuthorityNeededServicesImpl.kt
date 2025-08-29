@@ -9,6 +9,7 @@ import org.qo.utils.ReturnInterface
 import org.qo.orm.SQL
 import org.qo.redis.DatabaseType
 import org.qo.redis.Redis
+import org.qo.utils.SerializeUtils.convertToJsonArray
 import org.springframework.stereotype.Service
 import java.security.MessageDigest
 import java.time.LocalDate
