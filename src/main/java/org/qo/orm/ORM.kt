@@ -142,6 +142,24 @@ class UserORM() : CrudDao<Users>  {
         }
     }
 
+	fun updateLevelByUsername(username: String, newLevel: Int): Boolean = runBlocking {
+		withContext(Dispatchers.IO) {
+			try {
+				val sql = "UPDATE users SET exp_level = ? WHERE username = ?"
+				return@withContext ConnectionPool.getConnection().use { connection ->
+					connection.prepareStatement(sql).use { stmt ->
+						stmt.setInt(1, newLevel)
+						stmt.setString(2, username)
+						stmt.executeUpdate() > 0
+					}
+				}
+			} catch (e: Exception) {
+				e.printStackTrace()
+				return@withContext false
+			}
+		}
+	}
+
     override fun update(user: Users): Boolean = runBlocking {
         withContext(Dispatchers.IO) {
             val fields = mutableListOf<String>()

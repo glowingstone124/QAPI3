@@ -5,6 +5,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import jakarta.annotation.PostConstruct;
 import jakarta.servlet.http.HttpServletRequest;
+import org.qo.datas.Nodes;
 import org.qo.services.loginService.IPWhitelistServices;
 import org.qo.services.loginService.Login;
 import org.qo.services.mmdb.Query;
@@ -55,8 +56,10 @@ public class ApiApplication implements ErrorController {
     public Login login;
     private UserProcess userProcess;
     public IPWhitelistServices ipWhitelistServices;
+    private final Nodes nodes;
+
     @Autowired
-    public ApiApplication(UAUtil uaUtil, ReturnInterface ri, Status status, Login login, IPWhitelistServices ipWhitelistServices, ProxyRelatedImpl proxyRelatedImpl, UserProcess userProcess) {
+    public ApiApplication(UAUtil uaUtil, ReturnInterface ri, Status status, Login login, IPWhitelistServices ipWhitelistServices, ProxyRelatedImpl proxyRelatedImpl, UserProcess userProcess, Nodes nodes) {
         this.ri = ri;
         this.ua = uaUtil;
         this.status = status;
@@ -64,6 +67,7 @@ public class ApiApplication implements ErrorController {
         this.ipWhitelistServices = ipWhitelistServices;
         this.userProcess = userProcess;
         this.proxyRelatedImpl = proxyRelatedImpl;
+        this.nodes = nodes;
     }
 
     @PostConstruct
@@ -140,16 +144,16 @@ public class ApiApplication implements ErrorController {
     public ResponseEntity<String> loginGreeting(@RequestParam(name = "username") String username) {
         JsonObject greetJson = new JsonObject();
         JsonArray onlines = new JsonArray();
-        greetJson.add("time",UserProcess.getTime(username));
-        status.getStatusMap().forEach((id,info) -> {
+        greetJson.add("time", UserProcess.getTime(username));
+        status.getStatusMap().forEach((id, info) -> {
             JsonArray singular_users = new JsonArray();
             info.get("players").getAsJsonArray().forEach((elem) -> singular_users.add(elem.getAsJsonObject().get("name")));
             JsonObject server_pair = new JsonObject();
-            server_pair.addProperty("id",id);
-            server_pair.add("players",singular_users);
+            server_pair.addProperty("id", id);
+            server_pair.add("players", singular_users);
             onlines.add(server_pair);
         });
-        greetJson.add("online",onlines);
+        greetJson.add("online", onlines);
 
         return ri.GeneralHttpHeader(greetJson.toString());
     }
@@ -230,6 +234,7 @@ public class ApiApplication implements ErrorController {
         if (ua.isCLIToolRequest(request)) return new ResponseEntity<>("failed", headers, HttpStatus.BAD_REQUEST);
         return regMinecraftUser(name, uid, request, password);
     }
+
     @RequestMapping("/qo/upload/confirmation")
     public static ResponseEntity<String> verifyReg(@RequestParam String token, HttpServletRequest request, @RequestParam Long uid, @RequestParam int task) {
         HttpHeaders headers = new HttpHeaders();
@@ -253,6 +258,7 @@ public class ApiApplication implements ErrorController {
     public ResponseEntity<String> requestUpdatePassword(@RequestParam long uid, @RequestParam String password) throws ExecutionException, InterruptedException {
         return updatePassword(uid, password);
     }
+
     @RequestMapping("/qo/download/avatar")
     public ResponseEntity<String> avartarTrans(@RequestParam() String name) throws Exception {
         if (name == null || name.isEmpty()) {
@@ -284,14 +290,16 @@ public class ApiApplication implements ErrorController {
         headers.setContentType(MediaType.APPLICATION_JSON);
         return new ResponseEntity<>((String.valueOf(Query.INSTANCE.isCN(ip))), headers, HttpStatus.OK);
     }
+
     @GetMapping("/qo/download/ip/whitelisted")
     public ResponseEntity<String> queryIpWhitelist(@RequestParam String ip) {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
         return new ResponseEntity<>(ipWhitelistServices.whitelistedWrapper(ip), headers, HttpStatus.OK);
     }
+
     @GetMapping("/qo/game/login")
-    public ResponseEntity<String> login(@RequestParam String username, @RequestParam String password, @RequestParam(required = false) String ip,@RequestParam(required = false) boolean web, HttpServletRequest request) throws NoSuchAlgorithmException {
+    public ResponseEntity<String> login(@RequestParam String username, @RequestParam String password, @RequestParam(required = false) String ip, @RequestParam(required = false) boolean web, HttpServletRequest request) throws NoSuchAlgorithmException {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
         if (ua.isCLIToolRequest(request)) return new ResponseEntity<>("failed", headers, HttpStatus.BAD_REQUEST);
@@ -303,10 +311,18 @@ public class ApiApplication implements ErrorController {
     }
 
     @PostMapping("/qo/upload/loginattempt")
-    public void handleLoginAttemptLogging(@RequestBody String data, @RequestParam(name = "auth", required = true)String auth) throws Exception {
+    public void handleLoginAttemptLogging(@RequestBody String data, @RequestParam(name = "auth", required = true) String auth) throws Exception {
         Funcs fc = new Funcs();
         if (fc.verify(auth, Funcs.Perms.FULL)) {
             login.insertLoginLog(data);
         }
+    }
+
+    @PostMapping("/qo/upload/explevel")
+    public void handleExpLevelUpdate(String token, int lvl, String username) {
+        if (nodes.getServerFromToken(token) != 1) {
+            return;
+        }
+        userORM.updateLevelByUsername(username, lvl);
     }
 }
