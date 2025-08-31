@@ -173,6 +173,7 @@ public class UserProcess {
             responseJson.addProperty("playtime", playtime);
             responseJson.addProperty("temp", temp);
             responseJson.addProperty("profile_id", result.getProfile_id());
+            responseJson.addProperty("exp_level", result.getExp_level());
             responseJson.addProperty("affiliated", false);
             redis.insert("user:" + name, responseJson.toString(), regDb).ignoreException();
 
@@ -223,7 +224,7 @@ public class UserProcess {
             }
             if (Objects.equals(userORM.read(uid), null) && name != null && uid != null) {
                 try {
-                    userORM.create(new Users(name, uid, true, 3, 0, false, 0, false, 3, computePassword(password, true), UUID.randomUUID().toString()));
+                    userORM.create(new Users(name, uid, true, 3, 0, false, 0, false, 3, computePassword(password, true), UUID.randomUUID().toString(),0));
                     String token = Algorithm.generateRandomString(16);
                     Msg.Companion.putSys("用户 " + uid + "注册了一个账号：" + name + "，若非本人操作请忽略，确认账号请在消息发出后2小时内输入/approve-register " + token);
                     verify_list.add(new registry_verify_class(name, token, uid, System.currentTimeMillis()));
