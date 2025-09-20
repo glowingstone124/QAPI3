@@ -323,6 +323,7 @@ public class ApiApplication implements ErrorController {
         if (nodes.getServerFromToken(token) != 1) {
             return;
         }
+
         userORM.updateLevelByUsername(username, lvl);
     }
 }
