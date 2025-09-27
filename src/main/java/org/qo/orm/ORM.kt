@@ -201,7 +201,8 @@ class UserORM() : CrudDao<Users>  {
                 values.add(it)
             }
 	        user.exp_level?.let {
-                fields.add("exp_level = ?")
+		        fields.add("exp_level = ?")
+		        values.add(it)
 	        }
             if (fields.isEmpty()) return@withContext false
             val sql = "UPDATE users SET ${fields.joinToString(", ")} WHERE uid = ?"

@@ -61,7 +61,7 @@ class AffiliatedAccountServices(private val affiliatedAccountORM: AffiliatedAcco
 			invite = (hostInfo.invite ?: 0) - 1,
 			password = hostInfo.password,
 			profile_id = hostInfo.profile_id,
-			exp_level = hostInfo.exp_level
+			exp_level = hostInfo.exp_level,
 		)
 		userORM.update(updatedUser)
 
