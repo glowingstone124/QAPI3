@@ -48,11 +48,10 @@ class AffiliatedAccountServices(private val affiliatedAccountORM: AffiliatedAcco
 			host = username,
 			password = UserProcess.computePassword(password, true)
 		)
-		userORM.update(
-			hostInfo.copy(
-				invite = invite - 1
-			)
-		)
+		if (hostInfo.invite != null && hostInfo.invite > 0) {
+			hostInfo.invite = hostInfo.invite - 1
+			userORM.update(hostInfo)
+		}
 		return affiliatedAccountORM.create(account) > 0
 	}
 }
