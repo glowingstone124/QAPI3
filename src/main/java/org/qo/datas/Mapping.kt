@@ -19,17 +19,17 @@ object GsonProvider {
 class Mapping {
 
 	data class Users(
-		val username: String,
-		val uid: Long,
+		val username: String = "",
+		val uid: Long = 0L,
 		val frozen: Boolean? = false,
 		val remain: Int? = 3,
 		val economy: Int? = 0,
 		val signed: Boolean? = false,
 		val playtime: Int? = 0,
-		val temp: Boolean?,
-		val invite: Int?,
-		var password: String,
-		val profile_id: String,
+		val temp: Boolean? = false,
+		val invite: Int? = 0,
+		var password: String = "",
+		val profile_id: String = "",
 		val exp_level: Int? = 0,
 	) {
 		override fun equals(other: Any?): Boolean {
