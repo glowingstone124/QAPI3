@@ -27,7 +27,7 @@ class Mapping {
 		val signed: Boolean? = false,
 		val playtime: Int? = 0,
 		val temp: Boolean? = false,
-		var invite: Int? = 0,
+		val invite: Int? = 0,
 		var password: String = "",
 		val profile_id: String = "",
 		val exp_level: Int? = 0,
