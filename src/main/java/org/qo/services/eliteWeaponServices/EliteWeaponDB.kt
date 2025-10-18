@@ -7,7 +7,7 @@ import org.springframework.stereotype.Service
 @Service
 class EliteWeaponDB {
 	val GET_ALL_ELITE_WEAPON_SQL = "SELECT * FROM elite_items WHERE owner = ?"
-	val ADD_NEW_ELITE_WEAPON_SQL = "INSERT INTO elite_items(uuid, owner, type, damage, kills, description) VALUES (?,?,?,?,?,?)"
+	val ADD_NEW_ELITE_WEAPON_SQL = "INSERT INTO elite_items(uuid, owner, type, damage, kills, description, name) VALUES (?,?,?,?,?,?,?)"
 
 	fun addNewEliteWeapon(item: EliteWeaponImpl.EliteWeapon) {
 		ConnectionPool.getConnection().prepareStatement(ADD_NEW_ELITE_WEAPON_SQL).use {
@@ -17,6 +17,7 @@ class EliteWeaponDB {
 			it.setLong(4, 0L)
 			it.setLong(5, 0L)
 			it.setString(5, item.description)
+			it.setString(6, item.name)
 			it.executeUpdate()
 		}
 	}
@@ -37,7 +38,8 @@ class EliteWeaponDB {
 							rs.getString("type"),
 							rs.getLong("damage"),
 							rs.getLong("kills"),
-							rs.getString("description")
+							rs.getString("description"),
+							rs.getString("name")
 						)
 					)
 				}
@@ -93,7 +95,8 @@ class EliteWeaponDB {
 							rs.getString("type"),
 							rs.getLong("damage"),
 							rs.getLong("kills"),
-							rs.getString("description")
+							rs.getString("description"),
+							rs.getString("name")
 						)
 					}
 				}

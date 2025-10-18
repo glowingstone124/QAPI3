@@ -4,6 +4,7 @@ import com.google.gson.JsonObject
 import org.qo.utils.ReturnInterface
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.GetMapping
+import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
@@ -20,8 +21,8 @@ class EliteWeaponController(
 	}
 
 	@GetMapping("/create")
-	fun create(@RequestParam owner: String, @RequestParam type: String, @RequestParam description: String): ResponseEntity<String> {
-		impl.handleEliteWeaponRequest(owner, type, description)?.let {
+	fun create(@RequestParam owner: String, @RequestParam type: String, @RequestParam description: String,@RequestParam name: String): ResponseEntity<String> {
+		impl.handleEliteWeaponRequest(owner, type, description, name)?.let {
 			return ri.GeneralHttpHeader(JsonObject().apply {
 				addProperty("result", true)
 				addProperty("uuid", it)
@@ -32,7 +33,7 @@ class EliteWeaponController(
 		}.toString())
 	}
 
-	@GetMapping("/add")
+	@PostMapping("/add")
 	fun add(@RequestParam type: String,@RequestParam requester: String, @RequestParam uuid: String, @RequestParam amount: Int): ResponseEntity<String> {
 		if (type == "dmg") {
 			impl.addEliteWeaponDMG(requester, uuid, amount)

@@ -19,9 +19,10 @@ class EliteWeaponImpl(private val db: EliteWeaponDB) {
 		val damage: Long,
 		val kills: Long,
 		val description: String,
+		val name: String,
 	)
 
-	fun handleEliteWeaponRequest(owner:String, type:String, description: String) : String?{
+	fun handleEliteWeaponRequest(owner:String, type:String, description: String, name: String) : String?{
 		if (db.hasEliteWeapon(owner,type)) {
 			return null
 		}
@@ -33,7 +34,8 @@ class EliteWeaponImpl(private val db: EliteWeaponDB) {
 				type,
 				0,
 				0,
-				description
+				description,
+				name,
 			)
 		)
 		return uuid
