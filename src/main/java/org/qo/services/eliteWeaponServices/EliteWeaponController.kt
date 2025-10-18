@@ -32,5 +32,21 @@ class EliteWeaponController(
 		}.toString())
 	}
 
+	@GetMapping("/add")
+	fun add(@RequestParam type: String,@RequestParam requester: String, @RequestParam uuid: String, @RequestParam amount: Int): ResponseEntity<String> {
+		if (type == "dmg") {
+			impl.addEliteWeaponDMG(requester, uuid, amount)
+		} else if (type == "kill") {
+			impl.addEliteWeaponKill(requester, uuid, amount)
+		} else {
+			return ri.GeneralHttpHeader("Could not process request: type error")
+		}
+		return ri.GeneralHttpHeader("ok")
+	}
+
+	@GetMapping("/query")
+	fun query(@RequestParam uuid: String): ResponseEntity<String> {
+		return ri.GeneralHttpHeader(impl.queryEliteUuid(uuid))
+	}
 
 }

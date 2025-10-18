@@ -79,4 +79,26 @@ class EliteWeaponDB {
 			}
 		}
 	}
+
+	fun getSpecfiedEliteWeaponByUuid(uuid: String): EliteWeaponImpl.EliteWeapon? {
+		val sql = "SELECT * FROM elite_items WHERE uuid = ? LIMIT 1"
+		ConnectionPool.getConnection().use { conn ->
+			conn.prepareStatement(sql).use { stmt ->
+				stmt.setString(1, uuid)
+				stmt.executeQuery().use { rs ->
+					while (rs.next()) {
+						return EliteWeaponImpl.EliteWeapon(
+							rs.getString("uuid"),
+							rs.getString("owner"),
+							rs.getString("type"),
+							rs.getLong("damage"),
+							rs.getLong("kills"),
+							rs.getString("description")
+						)
+					}
+				}
+			}
+		}
+		return null
+	}
 }
