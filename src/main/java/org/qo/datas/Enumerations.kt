@@ -22,11 +22,11 @@ class Enumerations {
 		HOTZONE_RUNNERUP(2),
 		HOTZONE_3RDPLACE(3),
 		SERVICE_MEDAL_2025(4),
-
 	}
 	enum class Card_Collections() {
 		CITY_COLLECTION,
-		PIXEL_FANTASIA
+		PIXEL_FANTASIA,
+		SHINRA_BANSHO
 	}
 
 	enum class AdvancementsEnum(val id: Long) {
