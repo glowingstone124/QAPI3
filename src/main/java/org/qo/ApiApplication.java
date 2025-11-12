@@ -228,11 +228,11 @@ public class ApiApplication implements ErrorController {
      * @throws Exception If an error occurs during the processing of the user data.
      */
     @RequestMapping("/qo/upload/registry")
-    public ResponseEntity<String> InsertData(@RequestParam(name = "name") String name, @RequestParam(name = "uid") Long uid, @RequestParam(name = "password") String password, HttpServletRequest request) throws Exception {
+    public ResponseEntity<String> InsertData(@RequestParam(name = "name") String name, @RequestParam(name = "uid") Long uid, @RequestParam(name = "password") String password,@RequestParam int score, HttpServletRequest request) throws Exception {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
         if (ua.isCLIToolRequest(request)) return new ResponseEntity<>("failed", headers, HttpStatus.BAD_REQUEST);
-        return regMinecraftUser(name, uid, request, password);
+        return regMinecraftUser(name, uid, request, password, score);
     }
 
     @RequestMapping("/qo/upload/confirmation")

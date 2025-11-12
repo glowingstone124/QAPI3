@@ -45,7 +45,7 @@ class UserORM() : CrudDao<Users>  {
 
     companion object {
         private const val INSERT_USER_SQL =
-            "INSERT INTO users (username, uid, frozen, remain, economy, signed, playtime, password, temp, invite, profile_id, exp_level) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            "INSERT INTO users (username, uid, frozen, remain, economy, signed, playtime, password, temp, invite, profile_id, exp_level, score) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         private const val SELECT_USER_BY_ID_SQL = "SELECT * FROM users WHERE uid = ?"
         private const val SELECT_USER_BY_USERNAME_SQL = "SELECT * FROM users WHERE username = ?"
         private const val SELECT_USER_BY_UUID_SQL = "SELECT * FROM users WHERE profile_id = ?"
@@ -204,6 +204,10 @@ class UserORM() : CrudDao<Users>  {
 		        fields.add("exp_level = ?")
 		        values.add(it)
 	        }
+	        user.score?.let {
+				fields.add("score = ?")
+		        values.add(it)
+	        }
             if (fields.isEmpty()) return@withContext false
             val sql = "UPDATE users SET ${fields.joinToString(", ")} WHERE uid = ?"
             values.add(user.uid)
@@ -245,6 +249,7 @@ class UserORM() : CrudDao<Users>  {
         stmt.setInt(10, user.invite ?: 0)
         stmt.setString(11, user.profile_id)
 	    stmt.setInt(12, user.exp_level ?: 0)
+	    stmt.setInt(13, user.score ?: 0)
     }
 
     private suspend fun mapResultSetToUser(rs: ResultSet): Users = withContext(Dispatchers.IO) {
@@ -260,7 +265,8 @@ class UserORM() : CrudDao<Users>  {
             temp = rs.getBoolean("temp"),
             invite = rs.getInt("invite"),
             profile_id = rs.getString("profile_id"),
-			exp_level = rs.getInt("exp_level")
+			exp_level = rs.getInt("exp_level"),
+			score = rs.getInt("score")
         )
     }
 

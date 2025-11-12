@@ -174,6 +174,7 @@ public class UserProcess {
             responseJson.addProperty("temp", temp);
             responseJson.addProperty("profile_id", result.getProfile_id());
             responseJson.addProperty("exp_level", result.getExp_level());
+            responseJson.addProperty("score", result.getScore());
             responseJson.addProperty("affiliated", false);
             redis.insert("user:" + name, responseJson.toString(), regDb).ignoreException();
 
@@ -214,7 +215,7 @@ public class UserProcess {
         return responseJson.toString();
     }
 
-    public static ResponseEntity<String> regMinecraftUser(String name, Long uid, HttpServletRequest request, String password) throws ExecutionException, InterruptedException {
+    public static ResponseEntity<String> regMinecraftUser(String name, Long uid, HttpServletRequest request, String password, int score) throws ExecutionException, InterruptedException {
         CompletableFuture<ResponseEntity<String>> future = ca.run(() -> {
             if (userORM.read(name) != null) {
                 return ri.failed("username already exist");
@@ -224,7 +225,7 @@ public class UserProcess {
             }
             if (Objects.equals(userORM.read(uid), null) && name != null && uid != null) {
                 try {
-                    userORM.create(new Users(name, uid, true, 3, 0, false, 0, false, 3, computePassword(password, true), UUID.randomUUID().toString(),0));
+                    userORM.create(new Users(name, uid, true, 3, 0, false, 0, false, 3, computePassword(password, true), UUID.randomUUID().toString(),0, score));
                     String token = Algorithm.generateRandomString(16);
                     Msg.Companion.putSys("用户 " + uid + "注册了一个账号：" + name + "，若非本人操作请忽略，确认账号请在消息发出后2小时内输入/approve-register " + token);
                     verify_list.add(new registry_verify_class(name, token, uid, System.currentTimeMillis()));
@@ -238,6 +239,7 @@ public class UserProcess {
                     playerJson.addProperty("frozen", false);
                     playerJson.addProperty("pro", 0);
                     playerJson.addProperty("playtime", 0);
+                    playerJson.addProperty("score", score);
                     redis.insert("user:" + name, playerJson.toString(), DatabaseType.QO_REG_DATABASE.getValue()).ignoreException();
                 }, Dispatchers.getIO());
                 Logger.log(name + " registered from " + IPUtil.getIpAddr(request), INFO);
