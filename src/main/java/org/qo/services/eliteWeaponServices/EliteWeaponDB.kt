@@ -81,7 +81,8 @@ class EliteWeaponDB {
 			conn.prepareStatement(sql).use { stmt ->
 				stmt.setInt(1, dmg)
 				stmt.setString(2, uuid)
-				stmt.executeUpdate()
+				val rows = stmt.executeUpdate()
+				println("updated $rows line")
 			}
 		}
 	}
@@ -91,7 +92,8 @@ class EliteWeaponDB {
 			conn.prepareStatement(sql).use { stmt ->
 				stmt.setInt(1, kills)
 				stmt.setString(2, uuid)
-				stmt.executeUpdate()
+				val rows = stmt.executeUpdate()
+				println("updated $rows line")
 			}
 		}
 	}
