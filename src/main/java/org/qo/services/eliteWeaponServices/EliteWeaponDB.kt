@@ -76,7 +76,7 @@ class EliteWeaponDB {
 
 
 	fun addWeaponDamage(uuid: String, dmg: Int) {
-		val sql = "UPDATE elite_items SET damage = damage + ? WHERE uuid = ? LIMIT 1"
+		val sql = "UPDATE elite_items SET damage = damage + ? WHERE uuid = ?"
 		ConnectionPool.getConnection().use { conn ->
 			conn.prepareStatement(sql).use { stmt ->
 				stmt.setInt(1, dmg)
@@ -87,7 +87,7 @@ class EliteWeaponDB {
 		}
 	}
 	fun addWeaponKills(uuid: String, kills: Int) {
-		val sql = "UPDATE elite_items SET kills = kills + ? WHERE uuid = ? LIMIT 1"
+		val sql = "UPDATE elite_items SET kills = kills + ? WHERE uuid = ?"
 		ConnectionPool.getConnection().use { conn ->
 			conn.prepareStatement(sql).use { stmt ->
 				stmt.setInt(1, kills)
