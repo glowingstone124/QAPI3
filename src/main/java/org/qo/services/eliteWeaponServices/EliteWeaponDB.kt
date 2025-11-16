@@ -48,7 +48,7 @@ class EliteWeaponDB {
 		connection.close()
 		return list
 	}
-	fun hasEliteWeapon(owner: String, type: String): Boolean {
+	fun hasThisEliteWeaponType(owner: String, type: String): Boolean {
 		val sql = "SELECT 1 FROM elite_items WHERE owner = ? AND type = ? LIMIT 1"
 		ConnectionPool.getConnection().use { conn ->
 			conn.prepareStatement(sql).use { stmt ->
@@ -60,6 +60,20 @@ class EliteWeaponDB {
 			}
 		}
 	}
+
+	fun hasEliteWeapon(owner: String, uuid:String): Boolean {
+		val sql = "SELECT 1 FROM elite_items WHERE owner = ? AND uuid = ? LIMIT 1"
+		ConnectionPool.getConnection().use { conn ->
+			conn.prepareStatement(sql).use { stmt ->
+				stmt.setString(1, owner)
+				stmt.setString(2, uuid)
+				stmt.executeQuery().use { rs ->
+					return rs.next()
+				}
+			}
+		}
+	}
+
 
 	fun addWeaponDamage(uuid: String, dmg: Int) {
 		val sql = "UPDATE elite_items SET damage = damage + ? WHERE uuid = ? LIMIT 1"
