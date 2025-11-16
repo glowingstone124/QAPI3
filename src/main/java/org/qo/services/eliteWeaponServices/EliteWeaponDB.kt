@@ -80,7 +80,7 @@ class EliteWeaponDB {
 		ConnectionPool.getConnection().use { conn ->
 			conn.prepareStatement(sql).use { stmt ->
 				stmt.setInt(1, dmg)
-				stmt.setString(2, uuid)
+				stmt.setString(2, uuid.trim())
 				val rows = stmt.executeUpdate()
 				println("updated $rows line")
 			}
@@ -91,7 +91,7 @@ class EliteWeaponDB {
 		ConnectionPool.getConnection().use { conn ->
 			conn.prepareStatement(sql).use { stmt ->
 				stmt.setInt(1, kills)
-				stmt.setString(2, uuid)
+				stmt.setString(2, uuid.trim())
 				val rows = stmt.executeUpdate()
 				println("updated $rows line")
 			}
