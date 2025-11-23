@@ -76,12 +76,11 @@ class EliteWeaponDB {
 
 
 	fun addWeaponDamage(uuid: String, dmg: Int, requester: String) {
-		val sql = "UPDATE elite_items SET damage = damage + ? WHERE uuid = ? AND owner = ?"
+		val sql = "UPDATE users SET damage = damage + ? WHERE username = ?"
 		ConnectionPool.getConnection().use { conn ->
 			conn.prepareStatement(sql).use { stmt ->
 				stmt.setInt(1, dmg)
-				stmt.setString(2, uuid.trim())
-				stmt.setString(3, requester.trim())
+				stmt.setString(2, requester.trim())
 				val rows = stmt.executeUpdate()
 				println("updated $rows line")
 			}

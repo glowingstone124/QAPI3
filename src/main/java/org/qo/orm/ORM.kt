@@ -208,6 +208,10 @@ class UserORM() : CrudDao<Users>  {
 				fields.add("score = ?")
 		        values.add(it)
 	        }
+	        user.damage?.let {
+				fields.add("damage = ?")
+		        values.add(it)
+	        }
             if (fields.isEmpty()) return@withContext false
             val sql = "UPDATE users SET ${fields.joinToString(", ")} WHERE uid = ?"
             values.add(user.uid)
@@ -266,7 +270,8 @@ class UserORM() : CrudDao<Users>  {
             invite = rs.getInt("invite"),
             profile_id = rs.getString("profile_id"),
 			exp_level = rs.getInt("exp_level"),
-			score = rs.getInt("score")
+			score = rs.getInt("score"),
+			damage = rs.getLong("damage"),
         )
     }
 
