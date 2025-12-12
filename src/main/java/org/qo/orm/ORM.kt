@@ -29,17 +29,26 @@ class UserORM() : CrudDao<Users>  {
             lastUpdated = System.currentTimeMillis()
         }
     }
-    fun count(): Long = runBlocking {
+    fun count(): Long{
         val cachedValue = UserCache.getCachedValue()
         if (cachedValue != null) {
-            return@runBlocking cachedValue
+            return cachedValue
         }
-        val result = SQL.getConnection().createStatement(COUNT_USERS_SQL).execute().awaitSingle()
-        val count = result.map { row, _ ->
-            row.get("total", Long::class.java) ?: 0L
-        }.awaitSingle()
-        UserCache.updateCache(count)
-        return@runBlocking count
+	    val cnt: Long = ConnectionPool.getConnection().use { connection ->
+		    connection.createStatement().use { statement ->
+			    statement.executeQuery(COUNT_USERS_SQL).use { resultSet ->
+
+				    if (resultSet.next()) {
+					    resultSet.getLong("total")
+				    } else {
+					    0L
+				    }
+			    }
+		    }
+	    }
+
+	    UserCache.updateCache(cnt)
+	    return cnt
     }
 
 

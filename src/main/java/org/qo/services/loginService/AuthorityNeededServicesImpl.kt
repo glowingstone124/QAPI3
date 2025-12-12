@@ -3,6 +3,7 @@ package org.qo.services.loginService
 import com.google.gson.Gson
 import com.google.gson.JsonObject
 import kotlinx.coroutines.reactive.awaitSingle
+import org.qo.datas.ConnectionPool
 import org.qo.datas.Mapping
 import org.qo.services.messageServices.Msg
 import org.qo.utils.ReturnInterface
@@ -71,15 +72,21 @@ class AuthorityNeededServicesImpl(private val login: Login, private val ri: Retu
 		if (precheckResult != null) {
 			return precheckResult
 		}
-		val connection = SQL.getConnection()
-		val ipCountResult = connection.createStatement("SELECT * FROM loginip WHERE username = ?")
-			.bind(0, accountName!!)
-			.execute()
-			.awaitSingle().map { row, _ ->
-				return@map row.get("ip", String::class.java) ?: "Unknown IP"
-			}.collectList().awaitSingle().convertToJsonArray()
+		val connection = ConnectionPool.getConnection()
 
-		return ipCountResult.toString()
+		return connection.use { connection ->
+			val ips = mutableListOf<String>()
+			connection.prepareStatement("SELECT * FROM loginip WHERE username = ?").use { preparedStatement ->
+				preparedStatement.setString(1, accountName)
+				preparedStatement.executeQuery().use { resultSet ->
+					if (resultSet.next()) {
+						val ip = resultSet.getString("ip") ?: "Unknown IP"
+						ips.add(ip)
+					}
+				}
+			}
+			ips.convertToJsonArray()
+		}.toString()
 	}
 
 	/**

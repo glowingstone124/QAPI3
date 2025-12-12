@@ -1,98 +1,115 @@
 package org.qo.orm
 
-import io.r2dbc.spi.Connection
-import kotlinx.coroutines.reactive.awaitSingle
-import kotlinx.coroutines.reactive.awaitFirstOrNull
-import io.r2dbc.spi.Row
-import io.r2dbc.spi.RowMetadata
-import kotlinx.coroutines.flow.toList
-import kotlinx.coroutines.reactive.asFlow
-import kotlinx.coroutines.reactive.awaitFirst
-import kotlinx.coroutines.reactive.collect
-import java.sql.DriverManager
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import org.qo.datas.ConnectionPool
+import java.sql.ResultSet
+import java.sql.Statement
 
 class LeaveMessageORM {
 	companion object {
 		private const val INSERT_MESSAGE_SQL =
-			"INSERT INTO leavemessages (`from`, `to`, message) VALUES  (:from, :to, :message)"
+			"INSERT INTO leavemessages (`from`, `to`, message) VALUES (?, ?, ?)"
 		private const val SEARCH_MESSAGE_SQL =
-			"SELECT `from`, `to`, message FROM leavemessages WHERE `from` = :from AND `to` = :to"
+			"SELECT `from`, `to`, message FROM leavemessages WHERE `from` = ? AND `to` = ?"
 		private const val EXPLICIT_SENDER_QUERY_SQL =
-			"SELECT `from`, `to`, message FROM leavemessages WHERE `from` = :from"
+			"SELECT `from`, `to`, message FROM leavemessages WHERE `from` = ?"
 		private const val EXPLICIT_RECEIVER_QUERY_SQL =
-			"SELECT `from`, `to`, `message` FROM leavemessages WHERE `to` = :to"
+			"SELECT `from`, `to`, `message` FROM leavemessages WHERE `to` = ?"
 		private const val DELETE_SPECIFIED_MESSAGE_SQL =
-			"DELETE FROM leavemessages WHERE `from` = :from, `to` = :to, message = :message"
+			"DELETE FROM leavemessages WHERE `from` = ? AND `to` = ? AND message = ?"
 	}
+
+	private fun mapRow(rs: ResultSet): LeaveMessage {
+		return LeaveMessage(
+			from = rs.getString("from") ?: "",
+			to = rs.getString("to") ?: "",
+			message = rs.getString("message") ?: ""
+		)
+	}
+
+	private suspend fun <T> executeQuery(sql: String, bindings: List<Any>, mapper: (ResultSet) -> T): List<T> =
+		withContext(Dispatchers.IO) {
+			val results = mutableListOf<T>()
+			ConnectionPool.getConnection().use { connection ->
+				connection.prepareStatement(sql).use { statement ->
+
+					bindings.forEachIndexed { index, value ->
+						statement.setObject(index + 1, value)
+					}
+
+					statement.executeQuery().use { rs ->
+						while (rs.next()) {
+							results.add(mapper(rs))
+						}
+					}
+				}
+			}
+			results
+		}
 
 
 	suspend fun getDefinedSenderMessages(sender: String): List<LeaveMessage> {
-		val connection = SQL.getConnection()
-
-		return connection.createStatement(EXPLICIT_SENDER_QUERY_SQL).bind("from", sender).execute().awaitSingle()
-			.map { row: Row, _: RowMetadata ->
-				LeaveMessage(
-					from = row.get("from", String::class.java) ?: "",
-					to = row.get("to", String::class.java) ?: "",
-					message = row.get("message", String::class.java) ?: ""
-				)
-			}.asFlow().toList()
-	}
-
-	suspend fun deleteSpecifiedSenderMessages(from: String, to: String, message: String){
-		val connection = SQL.getConnection()
-		connection.createStatement(DELETE_SPECIFIED_MESSAGE_SQL).bind("from", from).bind("to", to).bind("message", message).execute().awaitSingle()
+		return executeQuery(
+			sql = EXPLICIT_SENDER_QUERY_SQL,
+			bindings = listOf(sender),
+			mapper = ::mapRow
+		)
 	}
 
 	suspend fun getDefinedReceiverMessages(receiver: String): List<LeaveMessage> {
-		val connection = SQL.getConnection()
-		return connection.createStatement(EXPLICIT_RECEIVER_QUERY_SQL).bind("to", receiver).execute().awaitSingle()
-			.map { row: Row, _: RowMetadata ->
-				LeaveMessage(
-					from = row.get("from", String::class.java) ?: "",
-					to = row.get("to", String::class.java) ?: "",
-					message = row.get("message", String::class.java) ?: ""
-				)
-			}.asFlow().toList()
-	}
-
-	suspend fun insertMessage(from: String, to: String, message: String): Long {
-		val connection: Connection = SQL.getConnection()
-
-		return connection.createStatement(INSERT_MESSAGE_SQL)
-			.bind("from", from)
-			.bind("to", to)
-			.bind("message", message)
-			.execute()
-			.awaitSingle()
-			.rowsUpdated
-			.awaitSingle()
+		return executeQuery(
+			sql = EXPLICIT_RECEIVER_QUERY_SQL,
+			bindings = listOf(receiver),
+			mapper = ::mapRow
+		)
 	}
 
 	suspend fun searchMessages(sender: String, receiver: String): List<LeaveMessage> {
-		val connection: Connection = SQL.getConnection()
-
-		return connection.createStatement(SEARCH_MESSAGE_SQL)
-			.bind("from", sender)
-			.bind("to", receiver)
-			.execute()
-			.awaitSingle()
-			.map { row: Row, _: RowMetadata ->
-				LeaveMessage(
-					from = row.get("from", String::class.java) ?: "",
-					to = row.get("to", String::class.java) ?: "",
-					message = row.get("message", String::class.java) ?: ""
-				)
-			}
-			.asFlow().toList()
+		return executeQuery(
+			sql = SEARCH_MESSAGE_SQL,
+			bindings = listOf(sender, receiver),
+			mapper = ::mapRow
+		)
 	}
 
+	suspend fun insertMessage(from: String, to: String, message: String): Long = withContext(Dispatchers.IO) {
+		ConnectionPool.getConnection().use { connection ->
+			connection.prepareStatement(INSERT_MESSAGE_SQL, Statement.RETURN_GENERATED_KEYS).use { statement ->
+				statement.setString(1, from)
+				statement.setString(2, to)
+				statement.setString(3, message)
 
+				statement.executeUpdate()
+				statement.generatedKeys.use { rs ->
+					return@withContext if (rs.next()) {
+						rs.getLong(1)
+					} else {
+						0L
+					}
+				}
+			}
+		}
+	}
 
+	suspend fun deleteSpecifiedSenderMessages(from: String, to: String, message: String) = withContext(Dispatchers.IO) {
+		ConnectionPool.getConnection().use { connection ->
+			connection.prepareStatement(DELETE_SPECIFIED_MESSAGE_SQL).use { statement ->
+				statement.setString(1, from)
+				statement.setString(2, to)
+				statement.setString(3, message)
+
+				statement.executeUpdate()
+			}
+		}
+	}
 }
-
 data class LeaveMessage(
+
 	val from: String,
+
 	val to: String,
+
 	val message: String,
-)
+
+	)

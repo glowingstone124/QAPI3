@@ -8,6 +8,8 @@ import kotlinx.coroutines.reactive.asFlow
 import kotlinx.coroutines.reactive.awaitFirst
 import kotlinx.coroutines.reactive.awaitSingle
 import kotlinx.coroutines.runBlocking
+import org.qo.datas.ConnectionPool
+import org.qo.datas.GsonProvider.gson
 import org.qo.orm.LoginToken
 import org.qo.orm.LoginTokenORM
 import org.qo.orm.SQL
@@ -53,41 +55,54 @@ class Login {
 		return Pair(result.user,0)
 	}
 
-	fun insertLoginLog(data: String) = runBlocking {
-		val connection = SQL.getConnection()
-		val jsonObj = Gson().fromJson(data, LoginLog::class.java)
-		connection.createStatement("INSERT INTO login_logs(username, time, success) VALUES (?, ?, ?)")
-			.bind(0, jsonObj.user)
-			.bind(1, jsonObj.date)
-			.bind(2, jsonObj.success)
-		.execute().awaitSingle()
+	fun insertLoginLog(data: String) {
+		val conn = ConnectionPool.getConnection()
+		val log = gson.fromJson(data, LoginLog::class.java)
+		val sql = "INSERT INTO login_logs(username, time, success) VALUES (?, ?, ?)"
+
+		conn.use {
+			it.prepareStatement(sql).use { stmt ->
+				stmt.setString(1, log.user)
+				stmt.setLong(2, log.date)
+				stmt.setBoolean(3, log.success)
+				stmt.executeUpdate()
+			}
+		}
 	}
 
-	fun queryLoginHistory(username: String): List<LoginLog> = runBlocking {
-		val connection = SQL.getConnection()
 
-		connection.createStatement(
-			"""
-        SELECT username, time, success FROM login_logs 
-        WHERE username = ? 
-        ORDER BY time DESC 
-        LIMIT 3
+	fun queryLoginHistory(username: String): List<LoginLog> {
+		val conn = ConnectionPool.getConnection()
+		val sql = """
+            SELECT username, time, success 
+            FROM login_logs 
+            WHERE username = ? 
+            ORDER BY time DESC 
+            LIMIT 3
         """
-		)
-			.bind(0, username)
-			.execute()
-			.flatMap { result ->
-				result.map { row, _ ->
-					LoginLog(
-						user = row.get("username", String::class.java) ?: "",
-						date = row.get("time", Long::class.java) ?: 0L,
-						success = row.get("success", Boolean::class.java) ?: false
-					)
+
+		val result = ArrayList<LoginLog>()
+
+		conn.use {
+			it.prepareStatement(sql).use { stmt ->
+				stmt.setString(1, username)
+				stmt.executeQuery().use { rs ->
+					while (rs.next()) {
+						result.add(
+							LoginLog(
+								user = rs.getString("username"),
+								date = rs.getLong("time"),
+								success = rs.getBoolean("success")
+							)
+						)
+					}
 				}
 			}
-			.collectList()
-			.awaitFirst()
+		}
+
+		return result
 	}
+
 
 
 	data class LoginLog(

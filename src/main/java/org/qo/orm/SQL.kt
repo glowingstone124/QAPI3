@@ -57,9 +57,7 @@ object SQL {
 
     data class SQLInfo(val username: String, val password: String, val url: String)
 
-    suspend fun getConnection() = connectionFactory.create().awaitSingle()
 }
-
 @Configuration
 class DBConfig {
 
