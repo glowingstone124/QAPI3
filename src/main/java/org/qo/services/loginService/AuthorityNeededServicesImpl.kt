@@ -79,7 +79,7 @@ class AuthorityNeededServicesImpl(private val login: Login, private val ri: Retu
 			connection.prepareStatement("SELECT * FROM loginip WHERE username = ?").use { preparedStatement ->
 				preparedStatement.setString(1, accountName)
 				preparedStatement.executeQuery().use { resultSet ->
-					if (resultSet.next()) {
+					while (resultSet.next()) {
 						val ip = resultSet.getString("ip") ?: "Unknown IP"
 						ips.add(ip)
 					}
