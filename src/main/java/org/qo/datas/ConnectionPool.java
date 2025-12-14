@@ -27,7 +27,7 @@ public class ConnectionPool {
             pro.setProperty("url", config.get("url"));
             pro.setProperty("driverClassName", "com.mysql.cj.jdbc.Driver");
             pro.setProperty("initialSize", "5");
-            pro.setProperty("maxActive", "30");
+            pro.setProperty("maxActive", "100");
 
             ds = DruidDataSourceFactory.createDataSource(pro);
         } catch (IOException e) {
@@ -37,7 +37,7 @@ public class ConnectionPool {
         }
     }
 
-    public static synchronized Connection getConnection() throws SQLException {
+    public static Connection getConnection() throws SQLException {
         if (ds == null) {
             throw new IllegalArgumentException("SQL服务没有初始化");
         }

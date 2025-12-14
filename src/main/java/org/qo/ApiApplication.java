@@ -5,6 +5,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import jakarta.annotation.PostConstruct;
 import jakarta.servlet.http.HttpServletRequest;
+import org.qo.datas.Database;
 import org.qo.datas.Nodes;
 import org.qo.services.loginService.IPWhitelistServices;
 import org.qo.services.loginService.Login;
@@ -39,7 +40,6 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.Date;
 
-import static org.qo.datas.Database.SQLAvliable;
 import static org.qo.utils.UserProcess.*;
 
 @RestController
@@ -94,7 +94,7 @@ public class ApiApplication implements ErrorController {
         returnObj.addProperty("code", 0);
         returnObj.addProperty("build", Funcs.version);
         returnObj.addProperty("online", status.countOnline() + " server(s)");
-        returnObj.addProperty("sql", SQLAvliable());
+        returnObj.addProperty("sql", Database.SQLAvailable());
         returnObj.addProperty("redis", Configuration.INSTANCE.getEnableRedis());
         returnObj.addProperty("proxies", proxyRelatedImpl.getProxies(ProxyStatus.ALIVE).size());
         return ri.GeneralHttpHeader(returnObj.toString());
