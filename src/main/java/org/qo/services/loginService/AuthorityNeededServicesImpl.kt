@@ -5,6 +5,7 @@ import com.google.gson.JsonObject
 import kotlinx.coroutines.reactive.awaitSingle
 import org.qo.datas.ConnectionPool
 import org.qo.datas.Mapping
+import org.qo.datas.Nodes
 import org.qo.services.messageServices.Msg
 import org.qo.utils.ReturnInterface
 import org.qo.orm.SQL
@@ -16,7 +17,12 @@ import java.security.MessageDigest
 import java.time.LocalDate
 
 @Service
-class AuthorityNeededServicesImpl(private val login: Login, private val ri: ReturnInterface, private val ft: FortuneTools) {
+class AuthorityNeededServicesImpl(
+	private val login: Login,
+	private val ri: ReturnInterface,
+	private val ft: FortuneTools,
+	private val nodes: Nodes,
+) {
 	val gson = Gson()
 	val redis = Redis()
 	data class WebChatWrapper(
@@ -36,6 +42,18 @@ class AuthorityNeededServicesImpl(private val login: Login, private val ri: Retu
 		}
 		Msg.putWebchat(resultJson.getOrNull()?.message ?: "",username!!)
 		return Pair(0, "ok")
+	}
+
+	suspend fun frozenQOAccount(authorization: String, uid:Long): Boolean {
+
+		if (nodes.getServerFromToken(authorization) != 0) {
+			return false
+		}
+
+		return userORM.update(Mapping.Users(
+			uid = uid,
+			frozen = true,
+		))
 	}
 
 	suspend fun getAccountInfo(token: String): String {

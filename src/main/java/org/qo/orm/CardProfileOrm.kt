@@ -71,7 +71,7 @@ class CardProfileOrm : CrudDao<Mapping.CardProfile> {
 			if (updates.isEmpty()) return false
 
 			val sql = "UPDATE card_profile SET ${updates.joinToString(", ")} WHERE uuid = ?"
-			params.add(item.uuid) // uuid 最后加
+			params.add(item.uuid)
 
 			connection.prepareStatement(sql).use { stmt ->
 				params.forEachIndexed { index, param ->

@@ -32,6 +32,15 @@ class AuthorityNeededServicesController(
 	private val affiliatedAccountServices: AffiliatedAccountServices
 ) {
 
+	@PostMapping("/account/frozen")
+	suspend fun frozenQOAccount(@RequestHeader authorization: String, @RequestParam uid: Long): ResponseEntity<String> {
+		if(authorityNeededServicesImpl.frozenQOAccount(authorization, uid)) {
+			return ri.GeneralHttpHeader("ok")
+		} else {
+			return ri.GeneralHttpHeader("Failed")
+		}
+	}
+
 	@PostMapping("/message/upload")
 	suspend fun insertWebMessage(@RequestBody msg: String, @RequestHeader token: String): ResponseEntity<String> {
 		val (code, result) = authorityNeededServicesImpl.insertWebMessage(msg, token)
