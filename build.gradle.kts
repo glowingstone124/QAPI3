@@ -64,11 +64,18 @@ dependencies {
 tasks.withType<Test> {
     useJUnitPlatform()
 }
+val generatedResDir = layout.buildDirectory.dir("generated-resources/main")
+sourceSets {
+    main {
+        resources {
+            srcDir(generatedResDir)
+        }
+    }
+}
 
 val generateProperties by tasks.registering {
-    val outputDir = layout.buildDirectory.dir("generated-properties").get().asFile
+    val outputDir = generatedResDir.get().asFile
     val propsFile = File(outputDir, "version.properties")
-    val resourceDir = layout.buildDirectory.dir("resources/main").get().asFile
 
     outputs.file(propsFile)
 
@@ -81,16 +88,12 @@ val generateProperties by tasks.registering {
         propsFile.outputStream().use {
             props.store(it, null)
         }
-        println("Successfully generated properties file")
-
-        resourceDir.mkdirs()
-        propsFile.copyTo(File(resourceDir, "version.properties"), overwrite = true)
-        println("Copied version.properties to resources")
+        println("Generated version.properties at ${propsFile.absolutePath}")
     }
 }
 
 
-tasks.named("build") {
+tasks.named<ProcessResources>("processResources") {
     dependsOn(generateProperties)
 }
 
