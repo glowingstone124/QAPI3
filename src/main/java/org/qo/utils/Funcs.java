@@ -48,7 +48,7 @@ public class Funcs {
                 .withZone(ZoneOffset.UTC);
         version = formatter.format(instant);
         System.out.println("构建时间: " + formatter.format(instant));
-        if (!Database.SQLAvliable()) {
+        if (!Database.SQLAvailable()) {
             System.out.println("SQL Misconfigured!");
         }
     }
