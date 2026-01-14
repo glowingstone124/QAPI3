@@ -18,8 +18,8 @@ class ErrorController {
         returnObj.addProperty("timestamp", System.currentTimeMillis())
         returnObj.addProperty("error", response.status)
         returnObj.addProperty("code", -1)
-        return ResponseEntity<String>(returnObj.toString(), HttpHeaders().apply {
+        return ResponseEntity(returnObj.toString(), HttpHeaders().apply {
 	        contentType = MediaType.APPLICATION_JSON
-        }, HttpStatus.OK).body
+        }, HttpStatus.OK).body!!
     }
 }
