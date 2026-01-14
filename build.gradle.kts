@@ -90,7 +90,7 @@ val generateProperties by tasks.registering {
 }
 
 
-tasks.named("processResources") {
+tasks.named("build") {
     dependsOn(generateProperties)
 }
 
