@@ -12,6 +12,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.SecureRandom;
 import java.time.Instant;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.Properties;
@@ -45,7 +46,7 @@ public class Funcs {
         System.out.println("版本号: " + prop.getProperty("build.version"));
         Instant instant = Instant.ofEpochMilli(Long.parseLong(prop.getProperty("build.timestamp")));
         DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss")
-                .withZone(ZoneOffset.UTC);
+                .withZone(ZoneId.of("Asia/Shanghai"));
         version = formatter.format(instant);
         System.out.println("构建时间: " + formatter.format(instant));
         if (!Database.SQLAvailable()) {
