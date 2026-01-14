@@ -43,7 +43,7 @@ public class Funcs {
                 Based On Springboot
                 """);
         System.out.println("版本号: " + prop.getProperty("build.version"));
-        Instant instant = Instant.ofEpochSecond(Long.parseLong(prop.getProperty("build.timestamp")));
+        Instant instant = Instant.ofEpochMilli(Long.parseLong(prop.getProperty("build.timestamp")));
         DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss")
                 .withZone(ZoneOffset.UTC);
         version = formatter.format(instant);
