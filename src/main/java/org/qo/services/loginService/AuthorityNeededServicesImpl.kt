@@ -4,13 +4,11 @@ import com.google.gson.Gson
 import com.google.gson.JsonObject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.reactive.awaitSingle
 import org.qo.datas.ConnectionPool
 import org.qo.datas.Mapping
 import org.qo.datas.Nodes
 import org.qo.services.messageServices.Msg
 import org.qo.utils.ReturnInterface
-import org.qo.orm.SQL
 import org.qo.redis.DatabaseType
 import org.qo.redis.Redis
 import org.qo.utils.SerializeUtils.convertToJsonArray
@@ -35,7 +33,7 @@ class AuthorityNeededServicesImpl(
 	suspend fun insertWebMessage(msg: String, token: String): Pair<Int, String> {
 		val (username, errCode) = login.validate(token)
 		doPrecheck(username, errCode)?.let {
-			return Pair(1, getErrorMessage(1));
+			return Pair(1, getErrorMessage(1))
 		}
 		val resultJson = runCatching {
 			gson.fromJson(msg, WebChatWrapper::class.java)
@@ -156,13 +154,13 @@ class AuthorityNeededServicesImpl(
 	fun getPlayerLogin(username: String): Pair<Boolean, String> {
 		redis.exists("login_history_$username", DatabaseType.QO_TEMP_DATABASE.value).ignoreException()?.let {
 			if (!it) {
-				return Pair(false,"");
+				return Pair(false,"")
 			} else {
 				val result = redis.get("login_history_$username",DatabaseType.QO_TEMP_DATABASE.value).ignoreException().orEmpty()
-				return Pair(true, result);
+				return Pair(true, result)
 			}
 		}
-		return Pair(false,"");
+		return Pair(false,"")
 	}
 }
 

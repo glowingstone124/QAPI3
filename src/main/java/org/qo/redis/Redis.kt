@@ -1,10 +1,6 @@
 package org.qo.redis
 
-import org.qo.utils.Logger
 import org.qo.redis.Configuration.pool
-import redis.clients.jedis.Jedis
-import redis.clients.jedis.exceptions.JedisConnectionException
-import redis.clients.jedis.exceptions.JedisDataException
 
 class Redis {
 	@JvmOverloads
