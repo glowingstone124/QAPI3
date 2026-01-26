@@ -7,9 +7,11 @@ import com.google.gson.JsonParser
 import org.qo.datas.GsonProvider.gson
 import org.qo.datas.Mapping
 import org.qo.utils.ReturnInterface
+import org.qo.utils.AuthTokens
 import org.qo.services.loginService.IPWhitelistServices.WhitelistReasons
 import org.qo.orm.UserORM
 import org.qo.utils.SerializeUtils.convertToJsonArray
+import org.springframework.http.HttpHeaders
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PostMapping
@@ -31,6 +33,13 @@ class AuthorityNeededServicesController(
 	private val playerCardCustomizationImpl: PlayerCardCustomizationImpl,
 	private val affiliatedAccountServices: AffiliatedAccountServices
 ) {
+	private fun resolveLoginToken(tokenHeader: String?, authorizationHeader: String?): String? {
+		return AuthTokens.resolve(tokenHeader, authorizationHeader)
+	}
+
+	private fun missingTokenResponse(): ResponseEntity<String> {
+		return ri.GeneralHttpHeader(Return(1, "Missing token.").serialized())
+	}
 
 	@PostMapping("/account/frozen")
 	suspend fun frozenQOAccount(@RequestHeader authorization: String, @RequestParam uid: Long): ResponseEntity<String> {
@@ -42,8 +51,13 @@ class AuthorityNeededServicesController(
 	}
 
 	@PostMapping("/message/upload")
-	suspend fun insertWebMessage(@RequestBody msg: String, @RequestHeader token: String): ResponseEntity<String> {
-		val (code, result) = authorityNeededServicesImpl.insertWebMessage(msg, token)
+	suspend fun insertWebMessage(
+		@RequestBody msg: String,
+		@RequestHeader("token", required = false) token: String?,
+		@RequestHeader(HttpHeaders.AUTHORIZATION, required = false) authorization: String?
+	): ResponseEntity<String> {
+		val resolvedToken = resolveLoginToken(token, authorization) ?: return missingTokenResponse()
+		val (code, result) = authorityNeededServicesImpl.insertWebMessage(msg, resolvedToken)
 		return ri.GeneralHttpHeader(JsonObject().apply {
 			addProperty("code", code)
 			addProperty("result", result)
@@ -51,14 +65,23 @@ class AuthorityNeededServicesController(
 	}
 
 	@GetMapping("/account")
-	suspend fun getAccountInfo(@RequestHeader token: String): ResponseEntity<String> {
-		return ri.GeneralHttpHeader(authorityNeededServicesImpl.getAccountInfo(token))
+	suspend fun getAccountInfo(
+		@RequestHeader("token", required = false) token: String?,
+		@RequestHeader(HttpHeaders.AUTHORIZATION, required = false) authorization: String?
+	): ResponseEntity<String> {
+		val resolvedToken = resolveLoginToken(token, authorization) ?: return missingTokenResponse()
+		return ri.GeneralHttpHeader(authorityNeededServicesImpl.getAccountInfo(resolvedToken))
 	}
 
 	@PostMapping("/account/card/custom")
-	suspend fun uploadCardDiff(@RequestBody jsonBody: String, @RequestHeader token: String): ResponseEntity<String> {
+	suspend fun uploadCardDiff(
+		@RequestBody jsonBody: String,
+		@RequestHeader("token", required = false) token: String?,
+		@RequestHeader(HttpHeaders.AUTHORIZATION, required = false) authorization: String?
+	): ResponseEntity<String> {
+		val resolvedToken = resolveLoginToken(token, authorization) ?: return missingTokenResponse()
 		val card = gson.fromJson(jsonBody, Mapping.CardProfile::class.java)
-		val result = playerCardCustomizationImpl.updatePlayerAccountCardInfo(token, card)
+		val result = playerCardCustomizationImpl.updatePlayerAccountCardInfo(resolvedToken, card)
 		return ri.GeneralHttpHeader(JsonObject().apply {
 			addProperty("result", result.first)
 			addProperty("message", result.second)
@@ -79,17 +102,26 @@ class AuthorityNeededServicesController(
 	}
 
 	@GetMapping("/ip/query")
-	suspend fun getIpInfo(@RequestHeader token: String): ResponseEntity<String> {
-		return ri.GeneralHttpHeader(authorityNeededServicesImpl.getIpWhitelists(token))
+	suspend fun getIpInfo(
+		@RequestHeader("token", required = false) token: String?,
+		@RequestHeader(HttpHeaders.AUTHORIZATION, required = false) authorization: String?
+	): ResponseEntity<String> {
+		val resolvedToken = resolveLoginToken(token, authorization) ?: return missingTokenResponse()
+		return ri.GeneralHttpHeader(authorityNeededServicesImpl.getIpWhitelists(resolvedToken))
 	}
 
 	@GetMapping("/ip/add")
-	suspend fun insertIntoIpWhitelist(@RequestHeader token: String, @RequestParam ip: String): ResponseEntity<String> {
-		val (username, errorCode) = login.validate(token)
+	suspend fun insertIntoIpWhitelist(
+		@RequestHeader("token", required = false) token: String?,
+		@RequestHeader(HttpHeaders.AUTHORIZATION, required = false) authorization: String?,
+		@RequestParam ip: String
+	): ResponseEntity<String> {
+		val resolvedToken = resolveLoginToken(token, authorization) ?: return missingTokenResponse()
+		val (username, errorCode) = login.validate(resolvedToken)
 		if (authorityNeededServicesImpl.doPrecheck(username, errorCode) != null || username == null) {
 			return ri.GeneralHttpHeader(Return(1, authorityNeededServicesImpl.getErrorMessage(1)).serialized())
 		}
-		return when (ipWhitelistServices.joinWhitelist(ip, token)) {
+		return when (ipWhitelistServices.joinWhitelist(ip, resolvedToken)) {
 			WhitelistReasons.SUCCESS -> ri.GeneralHttpHeader(Return(0, "ok").serialized())
 			WhitelistReasons.TOKEN_INVALID -> ri.GeneralHttpHeader(
 				Return(
@@ -103,25 +135,49 @@ class AuthorityNeededServicesController(
 	}
 
 	@GetMapping("/fortune")
-	suspend fun getFortuneForUser(@RequestHeader token: String): ResponseEntity<String> {
-		return ri.GeneralHttpHeader(authorityNeededServicesImpl.calculateFortune(token))
+	suspend fun getFortuneForUser(
+		@RequestHeader("token", required = false) token: String?,
+		@RequestHeader(HttpHeaders.AUTHORIZATION, required = false) authorization: String?
+	): ResponseEntity<String> {
+		val resolvedToken = resolveLoginToken(token, authorization) ?: return missingTokenResponse()
+		return ri.GeneralHttpHeader(authorityNeededServicesImpl.calculateFortune(resolvedToken))
 	}
 
 	@GetMapping("/templogin")
-	suspend fun getPlayerRecentLogin(@RequestParam name: String): ResponseEntity<String> {
+	suspend fun getPlayerRecentLogin(
+		@RequestParam name: String,
+		@RequestHeader("token", required = false) token: String?,
+		@RequestHeader(HttpHeaders.AUTHORIZATION, required = false) authorization: String?
+	): ResponseEntity<String> {
 		val returnObj = JsonObject()
+		val resolvedToken = resolveLoginToken(token, authorization)
+		if (resolvedToken == null) {
+			returnObj.addProperty("ok", false)
+			returnObj.addProperty("error", "Missing token.")
+			return ri.GeneralHttpHeader(returnObj.toString())
+		}
+		val (username, errorCode) = login.validate(resolvedToken)
+		if (username == null || username != name) {
+			returnObj.addProperty("ok", false)
+			returnObj.addProperty("error", authorityNeededServicesImpl.getErrorMessage(errorCode))
+			return ri.GeneralHttpHeader(returnObj.toString())
+		}
 		val result = authorityNeededServicesImpl.getPlayerLogin(name)
 		returnObj.addProperty("ok", result.first)
 		if (result.first) {
 			returnObj.addProperty("ip", result.second)
 		}
-		return ReturnInterface().GeneralHttpHeader(returnObj.toString())
+		return ri.GeneralHttpHeader(returnObj.toString())
 	}
 
 	@GetMapping("/cards/obtained")
-	suspend fun getPlayerCardList(@RequestHeader token: String): ResponseEntity<String> {
+	suspend fun getPlayerCardList(
+		@RequestHeader("token", required = false) token: String?,
+		@RequestHeader(HttpHeaders.AUTHORIZATION, required = false) authorization: String?
+	): ResponseEntity<String> {
 		val returnObj = JsonObject()
-		val (username, errorCode) = login.validate(token)
+		val resolvedToken = resolveLoginToken(token, authorization) ?: return missingTokenResponse()
+		val (username, errorCode) = login.validate(resolvedToken)
 		if (authorityNeededServicesImpl.doPrecheck(username, errorCode) != null) {
 			return ri.GeneralHttpHeader(returnObj.apply {
 				addProperty("error", "invalid username")
@@ -156,13 +212,22 @@ class AuthorityNeededServicesController(
 	}
 
 	@GetMapping("/affiliated/query")
-	suspend fun getAffiliatedAccount(@RequestHeader token: String): ResponseEntity<String> {
-		return ri.GeneralHttpHeader(affiliatedAccountServices.getAffiliatedAccount(token).convertToJsonArray().toString())
+	suspend fun getAffiliatedAccount(
+		@RequestHeader("token", required = false) token: String?,
+		@RequestHeader(HttpHeaders.AUTHORIZATION, required = false) authorization: String?
+	): ResponseEntity<String> {
+		val resolvedToken = resolveLoginToken(token, authorization) ?: return missingTokenResponse()
+		return ri.GeneralHttpHeader(affiliatedAccountServices.getAffiliatedAccount(resolvedToken).convertToJsonArray().toString())
 	}
 
 	@PostMapping("/affiliated/add")
-	suspend fun addAffiliatedAccount(@RequestHeader token: String, @RequestBody body: String): ResponseEntity<String> {
-		return ri.GeneralHttpHeader(affiliatedAccountServices.addAffiliatedAccount(token, body).toHumanReadableJson())
+	suspend fun addAffiliatedAccount(
+		@RequestHeader("token", required = false) token: String?,
+		@RequestHeader(HttpHeaders.AUTHORIZATION, required = false) authorization: String?,
+		@RequestBody body: String
+	): ResponseEntity<String> {
+		val resolvedToken = resolveLoginToken(token, authorization) ?: return missingTokenResponse()
+		return ri.GeneralHttpHeader(affiliatedAccountServices.addAffiliatedAccount(resolvedToken, body).toHumanReadableJson())
 	}
 }
 

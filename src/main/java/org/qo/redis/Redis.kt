@@ -54,6 +54,20 @@ class Redis {
 			} ?: throw IllegalStateException("Redis pool is not initialized.")
 		}
 	}
+	fun incrWithExpire(key: String, database: Int, expiresSeconds: Long): RedisResult<Long> {
+		return RedisResult {
+			if (!Configuration.EnableRedis) return@RedisResult null
+			pool?.resource?.use { jedis ->
+				jedis.select(database)
+				val value = jedis.incr(key)
+				if (value == 1L) {
+					jedis.expire(key, expiresSeconds)
+				}
+				value
+			} ?: throw IllegalStateException("Redis pool is not initialized.")
+		}
+	}
+
 	class RedisResult<T>(private val executor: () -> T?) {
 		private var errorHandler: ((Exception) -> Unit)? = null
 

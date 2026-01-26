@@ -86,7 +86,8 @@ enum class DatabaseType(val value: Int) {
     QOAPP_REG_DATABASE(1),
     QO_ONLINE_DATABASE(2),
     QO_ASSISTANT_DATABASE(3),
-    QO_TEMP_DATABASE(4);
+    QO_TEMP_DATABASE(4),
+    QO_RATE_LIMIT_DATABASE(5);
     companion object {
         fun fromInt(value: Int): DatabaseType? {
             return DatabaseType.entries.find { it.value == value }

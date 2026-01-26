@@ -3,6 +3,8 @@ package org.qo.services.loginService
 import com.google.gson.Gson
 import com.google.gson.JsonArray
 import com.google.gson.JsonObject
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import org.qo.datas.ConnectionPool
 import org.qo.datas.Mapping
 import org.qo.orm.CardOrm
@@ -56,17 +58,19 @@ class PlayerCardCustomizationImpl(
 	}
 
 	suspend fun getAllAvatars() : List<Mapping.Avatar> {
-		val list = mutableListOf<Mapping.Avatar>()
-		ConnectionPool.getConnection().use { connection ->
-			connection.prepareStatement("SELECT * FROM avatars").use { preparedStatement ->
-				preparedStatement.executeQuery().use { resultSet ->
-					while (resultSet.next()) {
-						list.add(Mapping.Avatar(resultSet.getString("id"), resultSet.getString("url")))
+		return withContext(Dispatchers.IO) {
+			val list = mutableListOf<Mapping.Avatar>()
+			ConnectionPool.getConnection().use { connection ->
+				connection.prepareStatement("SELECT * FROM avatars").use { preparedStatement ->
+					preparedStatement.executeQuery().use { resultSet ->
+						while (resultSet.next()) {
+							list.add(Mapping.Avatar(resultSet.getString("id"), resultSet.getString("url")))
+						}
 					}
 				}
 			}
+			list
 		}
-		return list
 	}
 
 	suspend fun updatePlayerAccountCardInfo(token: String, cardInfo: Mapping.CardProfile): Pair<Boolean, String> {

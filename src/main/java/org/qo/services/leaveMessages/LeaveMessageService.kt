@@ -1,8 +1,7 @@
 package org.qo.services.leaveMessages
 
-import kotlinx.coroutines.DelicateCoroutinesApi
-import kotlinx.coroutines.GlobalScope
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import org.qo.orm.LeaveMessage
 import org.qo.orm.LeaveMessageORM
 import org.springframework.stereotype.Service
@@ -18,10 +17,9 @@ class LeaveMessageService {
 		leaveMessageORM.insertMessage(from, to, message)
 		return LeaveMessageStatus.SUCCESS
 	}
-	@OptIn(DelicateCoroutinesApi::class)
 	suspend fun getTargetReceivers(receiver: String): List<LeaveMessage>{
 		val result = leaveMessageORM.getDefinedReceiverMessages(receiver)
-		GlobalScope.launch {
+		withContext(Dispatchers.IO) {
 			result.forEach {
 				leaveMessageORM.deleteSpecifiedSenderMessages(it.from, it.to, it.message)
 			}

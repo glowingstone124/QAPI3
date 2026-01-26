@@ -2,6 +2,8 @@ package org.qo.services.loginService
 
 import com.google.gson.Gson
 import com.google.gson.JsonObject
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.reactive.awaitSingle
 import org.qo.datas.ConnectionPool
 import org.qo.datas.Mapping
@@ -62,15 +64,15 @@ class AuthorityNeededServicesImpl(
 		if (precheckResult != null) {
 			return precheckResult
 		}
-		val userInfo = userORM.read(accountName!!)
+		val userInfo = userORM.readAsync(accountName!!)
 		val returnObject = JsonObject().apply {
 			addProperty("username", accountName)
 			addProperty("uid", userInfo!!.uid)
 			addProperty("playtime", userInfo.playtime)
-			addProperty("profile_id", userORM.getProfileWithUser(accountName))
+			addProperty("profile_id", userORM.getProfileWithUserAsync(accountName))
 			addProperty("invite_cnt", userInfo.invite)
 		}
-		val loginHistory = login.queryLoginHistory(username = accountName).convertToJsonArray()
+		val loginHistory = login.queryLoginHistoryAsync(username = accountName).convertToJsonArray()
 		returnObject.add("logins", loginHistory)
 		return returnObject.toString()
 	}
@@ -90,21 +92,22 @@ class AuthorityNeededServicesImpl(
 		if (precheckResult != null) {
 			return precheckResult
 		}
-		val connection = ConnectionPool.getConnection()
-
-		return connection.use { connection ->
-			val ips = mutableListOf<String>()
-			connection.prepareStatement("SELECT * FROM loginip WHERE username = ?").use { preparedStatement ->
-				preparedStatement.setString(1, accountName)
-				preparedStatement.executeQuery().use { resultSet ->
-					while (resultSet.next()) {
-						val ip = resultSet.getString("ip") ?: "Unknown IP"
-						ips.add(ip)
+		return withContext(Dispatchers.IO) {
+			val connection = ConnectionPool.getConnection()
+			connection.use { conn ->
+				val ips = mutableListOf<String>()
+				conn.prepareStatement("SELECT * FROM loginip WHERE username = ?").use { preparedStatement ->
+					preparedStatement.setString(1, accountName)
+					preparedStatement.executeQuery().use { resultSet ->
+						while (resultSet.next()) {
+							val ip = resultSet.getString("ip") ?: "Unknown IP"
+							ips.add(ip)
+						}
 					}
 				}
+				ips.convertToJsonArray().toString()
 			}
-			ips.convertToJsonArray()
-		}.toString()
+		}
 	}
 
 	/**
@@ -121,7 +124,7 @@ class AuthorityNeededServicesImpl(
 			return returnObject.toString()
 		}
 
-		val userInfo = userORM.read(accountName)
+		val userInfo = userORM.readAsync(accountName)
 		if (userInfo == null) {
 			val returnObject = JsonObject().apply {
 				addProperty("error", 200)
@@ -148,7 +151,7 @@ class AuthorityNeededServicesImpl(
 		if (precheckResult != null) {
 			return Pair(null, false)
 		}
-		return Pair(userORM.read(accountName!!),true)
+		return Pair(userORM.readAsync(accountName!!),true)
 	}
 	fun getPlayerLogin(username: String): Pair<Boolean, String> {
 		redis.exists("login_history_$username", DatabaseType.QO_TEMP_DATABASE.value).ignoreException()?.let {

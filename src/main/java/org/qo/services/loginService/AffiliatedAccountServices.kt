@@ -38,7 +38,7 @@ class AffiliatedAccountServices(private val affiliatedAccountORM: AffiliatedAcco
 		if (username == null) {
 			return false
 		}
-		val hostInfo = userORM.read(username) ?: return false
+		val hostInfo = userORM.readAsync(username) ?: return false
 		val invite = hostInfo.invite ?: return false
 		if (invite < 1) {
 			return false
@@ -63,7 +63,7 @@ class AffiliatedAccountServices(private val affiliatedAccountORM: AffiliatedAcco
 			profile_id = hostInfo.profile_id,
 			exp_level = hostInfo.exp_level,
 		)
-		userORM.update(updatedUser)
+		userORM.updateAsync(updatedUser)
 
 		return affiliatedAccountORM.create(account) > 0
 	}

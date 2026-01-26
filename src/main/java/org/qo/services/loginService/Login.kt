@@ -7,7 +7,9 @@ import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.reactive.asFlow
 import kotlinx.coroutines.reactive.awaitFirst
 import kotlinx.coroutines.reactive.awaitSingle
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import org.qo.datas.ConnectionPool
 import org.qo.datas.GsonProvider.gson
 import org.qo.orm.LoginToken
@@ -46,8 +48,7 @@ class Login {
 	 * @return (username,0) if success, (null, 3) if failed.
 	*/
 	suspend fun validate(loginToken: String): Pair<String?,Int> {
-		val result = loginTokenORM.read(loginToken)
-		if (result == null) return Pair(null,1)
+		val result = loginTokenORM.read(loginToken) ?: return Pair(null, 1)
 		if (result.expires < System.currentTimeMillis()) {
 			loginTokenORM.delete(loginToken)
 			return Pair(null,3)
@@ -101,6 +102,9 @@ class Login {
 		}
 
 		return result
+	}
+	suspend fun queryLoginHistoryAsync(username: String): List<LoginLog> = withContext(Dispatchers.IO) {
+		queryLoginHistory(username)
 	}
 
 
