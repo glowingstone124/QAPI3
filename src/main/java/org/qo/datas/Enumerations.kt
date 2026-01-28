@@ -15,7 +15,9 @@ class Enumerations {
 		KOISHI_NORZ(9),
 		PATCHOULI_LIB(10),
 		PROMETHUS(11),
-		FUISLAND(12)
+		FUISLAND(12),
+		XMAS(15),
+		CHERRY(16)
 	}
 	enum class Medal_Enum(val id: Int) {
 		HOTZONE_CHAMPION(1),
@@ -33,7 +35,8 @@ class Enumerations {
 		ADVANCEMENT_KOISHI(3),
 		ADVANCEMENT_PATCHOULI(2),
 		ADVANCEMENT_PROMETHUS(4),
-		ADVANCEMENT_ORIN(5);
+		ADVANCEMENT_ORIN(5),
+		ADVANCEMENT_WHITE_JADE(6);
 
 		companion object {
 			private val map = AdvancementsEnum.entries.associateBy(AdvancementsEnum::id)

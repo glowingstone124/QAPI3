@@ -37,6 +37,9 @@ class AdvancementServiceImpl(private val cardProfileOrm: CardProfileOrm) {
 		},
 		Enumerations.AdvancementsEnum.ADVANCEMENT_ORIN to { uuid: String ->
 			cardProfileOrm.addCardToOwned(uuid, Enumerations.Card_PixelFantasia_Enum.FUISLAND.id.toLong())
+		},
+		Enumerations.AdvancementsEnum.ADVANCEMENT_WHITE_JADE to { uuid: String ->
+			cardProfileOrm.addCardToOwned(uuid, Enumerations.Card_PixelFantasia_Enum.CHERRY.id.toLong())
 		}
 	)
 
