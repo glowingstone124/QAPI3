@@ -17,7 +17,7 @@ class TransportationServiceController(
 ) {
 	val gson = Gson()
 	@GetMapping("/station/id")
-	fun getStationById(@RequestParam id: Int): ResponseEntity<String> {
+	fun getStationById(@RequestParam id: String): ResponseEntity<String> {
 		val result = service.getStationById(id) ?: return notFound()
 		return ReturnInterface().GeneralHttpHeader(gson.toJson(result))
 
@@ -56,8 +56,8 @@ class TransportationServiceController(
 	@GetMapping("/calculate")
 	fun calculateRoute(@RequestBody data: String): ResponseEntity<String> {
 		val obj = gson.toJsonTree(data).asJsonObject
-		val startStationid = obj.get("start").asInt
-		val endStationid = obj.get("end").asInt
+		val startStationid = obj.get("start").asString
+		val endStationid = obj.get("end").asString
 		val rawDArr = obj.getAsJsonArray("banned_dims").asJsonArray.convertToArrayList<String>()
 		val rawLArr = obj.getAsJsonArray("banned_types").asJsonArray.convertToArrayList<String>()
 		val result = service.calculateRoute(

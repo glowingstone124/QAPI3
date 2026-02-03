@@ -10,7 +10,7 @@ import java.util.PriorityQueue
 
 data class Station(
 	@SerializedName("name") val NAME: String,
-	@SerializedName("id") val ID: Int,
+	@SerializedName("id") val ID: String,
 	@SerializedName("screen_location")val SCREEN_LOCATION: Array<Location>
 ) {
 	override fun equals(other: Any?): Boolean {
@@ -35,7 +35,7 @@ data class Station(
 }
 
 data class Line(
-	val stationIds: Array<Int>,
+	val stationIds: Array<String>,
 	val stationTimes: Array<Int>,
 	val lineType: LineType,
 	val name: String,
@@ -89,7 +89,7 @@ enum class LineType(private val lineType: Int, name:String) {
 
 data class LineRecord(
 	val id: Int,
-	val stationIds: Array<Int>,
+	val stationIds: Array<String>,
 	val stationTimes: Array<Int>,
 	val lineType: LineType,
 	val name: String,
@@ -107,7 +107,7 @@ data class RouteConstraints(
 )
 
 data class TransferPoint(
-	val stationId: Int,
+	val stationId: String,
 	val fromLineId: Int,
 	val toLineId: Int,
 )
@@ -117,12 +117,12 @@ data class RouteSegment(
 	val lineName: String,
 	val lineType: LineType,
 	val color: String,
-	val stationIds: List<Int>,
+	val stationIds: List<String>,
 	val time: Int,
 )
 
 data class RouteResult(
-	val stationIds: List<Int>,
+	val stationIds: List<String>,
 	val stations: List<Station>,
 	val lineIds: List<Int>,
 	val segments: List<RouteSegment>,
@@ -137,7 +137,7 @@ class TransportationServiceImpl {
 
 	private val CREATE_STATIONS_TABLE_SQL = """
 		CREATE TABLE IF NOT EXISTS transportation_stations (
-			id INT PRIMARY KEY,
+			id VARCHAR(64) PRIMARY KEY,
 			name VARCHAR(255) NOT NULL,
 			screen_location LONGTEXT NOT NULL
 		)
@@ -170,7 +170,7 @@ class TransportationServiceImpl {
 		""".trimIndent()
 		ConnectionPool.getConnection().use { conn ->
 			conn.prepareStatement(sql).use { stmt ->
-				stmt.setInt(1, station.ID)
+				stmt.setString(1, station.ID)
 				stmt.setString(2, station.NAME)
 				stmt.setString(3, gson.toJson(station.SCREEN_LOCATION))
 				return stmt.executeUpdate() > 0
@@ -188,17 +188,17 @@ class TransportationServiceImpl {
 			conn.prepareStatement(sql).use { stmt ->
 				stmt.setString(1, station.NAME)
 				stmt.setString(2, gson.toJson(station.SCREEN_LOCATION))
-				stmt.setInt(3, station.ID)
+				stmt.setString(3, station.ID)
 				return stmt.executeUpdate() > 0
 			}
 		}
 	}
 
-	fun removeStation(id: Int): Boolean {
+	fun removeStation(id: String): Boolean {
 		val sql = "DELETE FROM transportation_stations WHERE id = ?"
 		ConnectionPool.getConnection().use { conn ->
 			conn.prepareStatement(sql).use { stmt ->
-				stmt.setInt(1, id)
+				stmt.setString(1, id)
 				return stmt.executeUpdate() > 0
 			}
 		}
@@ -214,7 +214,7 @@ class TransportationServiceImpl {
 						stations.add(
 							Station(
 								NAME = rs.getString("name"),
-								ID = rs.getInt("id"),
+								ID = rs.getString("id"),
 								SCREEN_LOCATION = parseLocations(rs.getString("screen_location"))
 							)
 						)
@@ -225,16 +225,16 @@ class TransportationServiceImpl {
 		return stations
 	}
 
-	fun getStationById(id: Int): Station? {
+	fun getStationById(id: String): Station? {
 		val sql = "SELECT * FROM transportation_stations WHERE id = ? LIMIT 1"
 		ConnectionPool.getConnection().use { conn ->
 			conn.prepareStatement(sql).use { stmt ->
-				stmt.setInt(1, id)
+				stmt.setString(1, id)
 				stmt.executeQuery().use { rs ->
 					if (rs.next()) {
 						return Station(
 							NAME = rs.getString("name"),
-							ID = rs.getInt("id"),
+							ID = rs.getString("id"),
 							SCREEN_LOCATION = parseLocations(rs.getString("screen_location"))
 						)
 					}
@@ -259,7 +259,7 @@ class TransportationServiceImpl {
 						stations.add(
 							Station(
 								NAME = rs.getString("name"),
-								ID = rs.getInt("id"),
+								ID = rs.getString("id"),
 								SCREEN_LOCATION = parseLocations(rs.getString("screen_location"))
 							)
 						)
@@ -336,7 +336,7 @@ class TransportationServiceImpl {
 						lines.add(
 							LineRecord(
 								id = rs.getInt("id"),
-								stationIds = parseIntArray(rs.getString("station_ids")),
+								stationIds = parseStringArray(rs.getString("station_ids")),
 								stationTimes = parseIntArray(rs.getString("station_times")),
 								lineType = lineType,
 								name = rs.getString("name"),
@@ -360,7 +360,7 @@ class TransportationServiceImpl {
 						val lineType = parseLineType(rs.getString("line_type")) ?: return null
 						return LineRecord(
 							id = rs.getInt("id"),
-							stationIds = parseIntArray(rs.getString("station_ids")),
+							stationIds = parseStringArray(rs.getString("station_ids")),
 							stationTimes = parseIntArray(rs.getString("station_times")),
 							lineType = lineType,
 							name = rs.getString("name"),
@@ -389,7 +389,7 @@ class TransportationServiceImpl {
 						lines.add(
 							LineRecord(
 								id = rs.getInt("id"),
-								stationIds = parseIntArray(rs.getString("station_ids")),
+								stationIds = parseStringArray(rs.getString("station_ids")),
 								stationTimes = parseIntArray(rs.getString("station_times")),
 								lineType = lineType,
 								name = rs.getString("name"),
@@ -420,8 +420,8 @@ class TransportationServiceImpl {
 	}
 
 	fun calculateRoute(
-		startStationId: Int,
-		endStationId: Int,
+		startStationId: String,
+		endStationId: String,
 		constraints: RouteConstraints = RouteConstraints()
 	): RouteResult? {
 		val stationMap = listStations().associateBy { it.ID }
@@ -431,7 +431,7 @@ class TransportationServiceImpl {
 			return null
 		}
 
-		val adjacency = mutableMapOf<Int, MutableList<Edge>>()
+		val adjacency = mutableMapOf<String, MutableList<Edge>>()
 		for (line in listLines()) {
 			if (constraints.bannedLineTypes.contains(line.lineType)) continue
 			if (line.stationIds.size < 2 || line.stationTimes.size != line.stationIds.size - 1) continue
@@ -457,8 +457,8 @@ class TransportationServiceImpl {
 			}
 		}
 
-		val dist = mutableMapOf<Int, Int>()
-		val prev = mutableMapOf<Int, PrevEdge>()
+		val dist = mutableMapOf<String, Int>()
+		val prev = mutableMapOf<String, PrevEdge>()
 		val pq = PriorityQueue<Node>(compareBy { it.dist })
 		dist[startStationId] = 0
 		pq.add(Node(startStationId, 0))
@@ -484,7 +484,7 @@ class TransportationServiceImpl {
 			return null
 		}
 
-		val stationPath = mutableListOf<Int>()
+		val stationPath = mutableListOf<String>()
 		val edgePath = mutableListOf<Edge>()
 		var currentId = endStationId
 		stationPath.add(currentId)
@@ -505,7 +505,7 @@ class TransportationServiceImpl {
 			var currentLineType = edgePath[0].lineType
 			var currentColor = edgePath[0].color
 			var segmentTime = 0
-			var segmentStations = mutableListOf<Int>()
+			var segmentStations = mutableListOf<String>()
 			segmentStations.add(stationPath[0])
 			for (i in edgePath.indices) {
 				val edge = edgePath[i]
@@ -564,19 +564,19 @@ class TransportationServiceImpl {
 		)
 	}
 
-	private fun fetchStationsByIds(ids: List<Int>): Map<Int, Station> {
+	private fun fetchStationsByIds(ids: List<String>): Map<String, Station> {
 		if (ids.isEmpty()) return emptyMap()
 		val placeholders = ids.joinToString(",") { "?" }
 		val sql = "SELECT * FROM transportation_stations WHERE id IN ($placeholders)"
-		val result = mutableMapOf<Int, Station>()
+		val result = mutableMapOf<String, Station>()
 		ConnectionPool.getConnection().use { conn ->
 			conn.prepareStatement(sql).use { stmt ->
-				ids.forEachIndexed { index, id -> stmt.setInt(index + 1, id) }
+				ids.forEachIndexed { index, id -> stmt.setString(index + 1, id) }
 				stmt.executeQuery().use { rs ->
 					while (rs.next()) {
 						val station = Station(
 							NAME = rs.getString("name"),
-							ID = rs.getInt("id"),
+							ID = rs.getString("id"),
 							SCREEN_LOCATION = parseLocations(rs.getString("screen_location"))
 						)
 						result[station.ID] = station
@@ -597,6 +597,11 @@ class TransportationServiceImpl {
 		return gson.fromJson(value, Array<Int>::class.java)
 	}
 
+	private fun parseStringArray(value: String?): Array<String> {
+		if (value.isNullOrBlank()) return emptyArray()
+		return gson.fromJson(value, Array<String>::class.java)
+	}
+
 	private fun parseLineType(value: String?): LineType? {
 		if (value.isNullOrBlank()) return null
 		return runCatching { LineType.valueOf(value) }.getOrNull()
@@ -615,7 +620,7 @@ class TransportationServiceImpl {
 	}
 
 	private data class Edge(
-		val to: Int,
+		val to: String,
 		val time: Int,
 		val lineId: Int,
 		val lineName: String,
@@ -624,12 +629,12 @@ class TransportationServiceImpl {
 	)
 
 	private data class PrevEdge(
-		val from: Int,
+		val from: String,
 		val edge: Edge,
 	)
 
 	private data class Node(
-		val id: Int,
+		val id: String,
 		val dist: Int,
 	)
 }
