@@ -134,6 +134,7 @@ data class RouteResult(
 @Service
 class TransportationServiceImpl {
 	private val gson = Gson()
+	private val TRANSFER_TIME_SECONDS = 15
 
 	private val CREATE_STATIONS_TABLE_SQL = """
 		CREATE TABLE IF NOT EXISTS transportation_stations (
@@ -499,6 +500,7 @@ class TransportationServiceImpl {
 
 		val segments = mutableListOf<RouteSegment>()
 		val transfers = mutableListOf<TransferPoint>()
+		var transferTimeTotal = 0
 		if (edgePath.isNotEmpty()) {
 			var currentLineId = edgePath[0].lineId
 			var currentLineName = edgePath[0].lineName
@@ -510,6 +512,8 @@ class TransportationServiceImpl {
 			for (i in edgePath.indices) {
 				val edge = edgePath[i]
 				if (edge.lineId != currentLineId) {
+					segmentTime += TRANSFER_TIME_SECONDS
+					transferTimeTotal += TRANSFER_TIME_SECONDS
 					segments.add(
 						RouteSegment(
 							lineId = currentLineId,
@@ -551,7 +555,7 @@ class TransportationServiceImpl {
 			)
 		}
 
-		val totalTime = edgePath.sumOf { it.time }
+		val totalTime = edgePath.sumOf { it.time } + transferTimeTotal
 		val lineIds = segments.map { it.lineId }
 		return RouteResult(
 			stationIds = stationPath,
