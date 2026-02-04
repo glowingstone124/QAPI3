@@ -608,7 +608,12 @@ class TransportationServiceImpl {
 
 	private fun parseLineType(value: String?): LineType? {
 		if (value.isNullOrBlank()) return null
-		return runCatching { LineType.valueOf(value) }.getOrNull()
+		val trimmed = value.trim()
+		if (trimmed.all { it.isDigit() }) {
+			val code = trimmed.toIntOrNull() ?: return null
+			return LineType.entries.firstOrNull { it.ordinal == code }
+		}
+		return runCatching { LineType.valueOf(trimmed) }.getOrNull()
 	}
 
 	private fun validateLineOrThrow(line: Line) {
