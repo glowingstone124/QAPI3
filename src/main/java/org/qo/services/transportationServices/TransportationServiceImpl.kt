@@ -11,7 +11,8 @@ import java.util.PriorityQueue
 data class Station(
 	@SerializedName("name") val NAME: String,
 	@SerializedName("id") val ID: String,
-	@SerializedName("screen_location")val SCREEN_LOCATION: Array<Location>
+	@SerializedName("screen_location")val SCREEN_LOCATION: Array<Location>,
+	@SerializedName("name_en")val NAME_EN: String
 ) {
 	override fun equals(other: Any?): Boolean {
 		if (this === other) return true
@@ -216,7 +217,8 @@ class TransportationServiceImpl {
 							Station(
 								NAME = rs.getString("name"),
 								ID = rs.getString("id"),
-								SCREEN_LOCATION = parseLocations(rs.getString("screen_location"))
+								SCREEN_LOCATION = parseLocations(rs.getString("screen_location")),
+								NAME_EN = rs.getString("name_en"),
 							)
 						)
 					}
@@ -236,7 +238,8 @@ class TransportationServiceImpl {
 						return Station(
 							NAME = rs.getString("name"),
 							ID = rs.getString("id"),
-							SCREEN_LOCATION = parseLocations(rs.getString("screen_location"))
+							SCREEN_LOCATION = parseLocations(rs.getString("screen_location")),
+							NAME_EN = rs.getString("name_en"),
 						)
 					}
 				}
@@ -261,7 +264,8 @@ class TransportationServiceImpl {
 							Station(
 								NAME = rs.getString("name"),
 								ID = rs.getString("id"),
-								SCREEN_LOCATION = parseLocations(rs.getString("screen_location"))
+								SCREEN_LOCATION = parseLocations(rs.getString("screen_location")),
+								NAME_EN = rs.getString("name_en"),
 							)
 						)
 					}
@@ -581,7 +585,8 @@ class TransportationServiceImpl {
 						val station = Station(
 							NAME = rs.getString("name"),
 							ID = rs.getString("id"),
-							SCREEN_LOCATION = parseLocations(rs.getString("screen_location"))
+							SCREEN_LOCATION = parseLocations(rs.getString("screen_location")),
+							NAME_EN = rs.getString("name_en"),
 						)
 						result[station.ID] = station
 					}
