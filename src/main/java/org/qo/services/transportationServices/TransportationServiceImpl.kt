@@ -95,6 +95,7 @@ data class LineRecord(
 	val lineType: LineType,
 	val name: String,
 	val color: String,
+	val name_en: String,
 )
 
 data class LineStations(
@@ -345,7 +346,8 @@ class TransportationServiceImpl {
 								stationTimes = parseIntArray(rs.getString("station_times")),
 								lineType = lineType,
 								name = rs.getString("name"),
-								color = rs.getString("color")
+								color = rs.getString("color"),
+								name_en = rs.getString("name_en"),
 							)
 						)
 					}
@@ -369,7 +371,8 @@ class TransportationServiceImpl {
 							stationTimes = parseIntArray(rs.getString("station_times")),
 							lineType = lineType,
 							name = rs.getString("name"),
-							color = rs.getString("color")
+							color = rs.getString("color"),
+							name_en = rs.getString("name_en"),
 						)
 					}
 				}
@@ -398,7 +401,8 @@ class TransportationServiceImpl {
 								stationTimes = parseIntArray(rs.getString("station_times")),
 								lineType = lineType,
 								name = rs.getString("name"),
-								color = rs.getString("color")
+								color = rs.getString("color"),
+								name_en = rs.getString("name_en"),
 							)
 						)
 					}
