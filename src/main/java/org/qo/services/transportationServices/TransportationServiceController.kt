@@ -7,6 +7,7 @@ import org.qo.utils.SerializeUtils.convertToArrayList
 import org.springframework.http.ResponseEntity
 import org.springframework.util.RouteMatcher
 import org.springframework.web.bind.annotation.GetMapping
+import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
@@ -55,24 +56,23 @@ class TransportationServiceController(
 	*   banned_types: ["WALK","AIRPLANE"]
 	* }
 	* */
-	@GetMapping("/calculate")
-	fun calculateRoute(@RequestBody data: String): ResponseEntity<String> {
-		val obj = gson.toJsonTree(data).asJsonObject
-		val startStationid = obj.get("start").asString
-		val endStationid = obj.get("end").asString
-		val rawDArr = obj.getAsJsonArray("banned_dims").asJsonArray.convertToArrayList<String>()
-		val rawLArr = obj.getAsJsonArray("banned_types").asJsonArray.convertToArrayList<String>()
+	data class CalcReq(
+		val start: String,
+		val end: String,
+		val banned_dims: List<String> = emptyList(),
+		val banned_types: List<String> = emptyList()
+	)
+	@PostMapping("/calculate", consumes = ["application/json"])
+	fun calculateRoute(@RequestBody req: CalcReq): ResponseEntity<String> {
 		val result = service.calculateRoute(
-			startStationid,
-			endStationid,
+			req.start,
+			req.end,
 			RouteConstraints(
-				convertToDimSet(rawDArr),
-				convertToLineTypeSet(rawLArr)
+				convertToDimSet(ArrayList(req.banned_dims)),
+				convertToLineTypeSet(ArrayList(req.banned_types))
 			)
-		)
-		if (result == null) {
-			return notFound()
-		}
+		) ?: return notFound()
+
 		return ReturnInterface().GeneralHttpHeader(gson.toJson(result))
 	}
 
