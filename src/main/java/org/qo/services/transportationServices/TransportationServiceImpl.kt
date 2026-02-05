@@ -118,6 +118,7 @@ data class TransferPoint(
 data class RouteSegment(
 	val lineId: Int,
 	val lineName: String,
+	@SerializedName("name_en") val lineNameEn: String,
 	val lineType: LineType,
 	val color: String,
 	val stationIds: List<String>,
@@ -455,14 +456,15 @@ class TransportationServiceImpl {
 				val fromStation = stationMap[from]
 				val toStation = stationMap[to]
 				if (!stationAllowed(fromStation, constraints) || !stationAllowed(toStation, constraints)) continue
-				val edge = Edge(
-					to = to,
-					time = time,
-					lineId = line.id,
-					lineName = line.name,
-					lineType = line.lineType,
-					color = line.color
-				)
+					val edge = Edge(
+						to = to,
+						time = time,
+						lineId = line.id,
+						lineName = line.name,
+						lineNameEn = line.name_en,
+						lineType = line.lineType,
+						color = line.color
+					)
 				adjacency.getOrPut(from) { mutableListOf() }.add(edge)
 			}
 		}
@@ -519,6 +521,7 @@ class TransportationServiceImpl {
 		if (edgePath.isNotEmpty()) {
 			var currentLineId = edgePath[0].lineId
 			var currentLineName = edgePath[0].lineName
+			var currentLineNameEn = edgePath[0].lineNameEn
 			var currentLineType = edgePath[0].lineType
 			var currentColor = edgePath[0].color
 			var segmentTime = 0
@@ -533,6 +536,7 @@ class TransportationServiceImpl {
 						RouteSegment(
 							lineId = currentLineId,
 							lineName = currentLineName,
+							lineNameEn = currentLineNameEn,
 							lineType = currentLineType,
 							color = currentColor,
 							stationIds = segmentStations.toList(),
@@ -549,6 +553,7 @@ class TransportationServiceImpl {
 					)
 					currentLineId = edge.lineId
 					currentLineName = edge.lineName
+					currentLineNameEn = edge.lineNameEn
 					currentLineType = edge.lineType
 					currentColor = edge.color
 					segmentTime = 0
@@ -562,6 +567,7 @@ class TransportationServiceImpl {
 				RouteSegment(
 					lineId = currentLineId,
 					lineName = currentLineName,
+					lineNameEn = currentLineNameEn,
 					lineType = currentLineType,
 					color = currentColor,
 					stationIds = segmentStations.toList(),
@@ -649,6 +655,7 @@ class TransportationServiceImpl {
 		val time: Int,
 		val lineId: Int,
 		val lineName: String,
+		val lineNameEn: String,
 		val lineType: LineType,
 		val color: String,
 	)
