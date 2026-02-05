@@ -40,6 +40,7 @@ data class Line(
 	val stationTimes: Array<Int>,
 	val lineType: LineType,
 	val name: String,
+	val nameEn: String,
 	val color: String,
 ) {
 	override fun equals(other: Any?): Boolean {
@@ -150,6 +151,7 @@ class TransportationServiceImpl {
 		CREATE TABLE IF NOT EXISTS transportation_lines (
 			id INT AUTO_INCREMENT PRIMARY KEY,
 			name VARCHAR(255) NOT NULL,
+			name_en VARCHAR(255) NOT NULL,
 			color VARCHAR(32) NOT NULL,
 			line_type VARCHAR(32) NOT NULL,
 			station_ids LONGTEXT NOT NULL,
@@ -279,16 +281,17 @@ class TransportationServiceImpl {
 	fun addLine(line: Line): Int? {
 		validateLineOrThrow(line)
 		val sql = """
-			INSERT INTO transportation_lines (name, color, line_type, station_ids, station_times)
-			VALUES (?, ?, ?, ?, ?)
+			INSERT INTO transportation_lines (name, name_en, color, line_type, station_ids, station_times)
+			VALUES (?, ?, ?, ?, ?, ?)
 		""".trimIndent()
 		ConnectionPool.getConnection().use { conn ->
 			conn.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS).use { stmt ->
 				stmt.setString(1, line.name)
-				stmt.setString(2, line.color)
-				stmt.setString(3, line.lineType.name)
-				stmt.setString(4, gson.toJson(line.stationIds))
-				stmt.setString(5, gson.toJson(line.stationTimes))
+				stmt.setString(2, line.nameEn)
+				stmt.setString(3, line.color)
+				stmt.setString(4, line.lineType.name)
+				stmt.setString(5, gson.toJson(line.stationIds))
+				stmt.setString(6, gson.toJson(line.stationTimes))
 				val affected = stmt.executeUpdate()
 				if (affected == 0) return null
 				stmt.generatedKeys.use { rs ->
@@ -305,17 +308,18 @@ class TransportationServiceImpl {
 		validateLineOrThrow(line)
 		val sql = """
 			UPDATE transportation_lines
-			SET name = ?, color = ?, line_type = ?, station_ids = ?, station_times = ?
+			SET name = ?, name_en = ?, color = ?, line_type = ?, station_ids = ?, station_times = ?
 			WHERE id = ?
 		""".trimIndent()
 		ConnectionPool.getConnection().use { conn ->
 			conn.prepareStatement(sql).use { stmt ->
 				stmt.setString(1, line.name)
-				stmt.setString(2, line.color)
-				stmt.setString(3, line.lineType.name)
-				stmt.setString(4, gson.toJson(line.stationIds))
-				stmt.setString(5, gson.toJson(line.stationTimes))
-				stmt.setInt(6, lineId)
+				stmt.setString(2, line.nameEn)
+				stmt.setString(3, line.color)
+				stmt.setString(4, line.lineType.name)
+				stmt.setString(5, gson.toJson(line.stationIds))
+				stmt.setString(6, gson.toJson(line.stationTimes))
+				stmt.setInt(7, lineId)
 				return stmt.executeUpdate() > 0
 			}
 		}
@@ -460,48 +464,51 @@ class TransportationServiceImpl {
 					color = line.color
 				)
 				adjacency.getOrPut(from) { mutableListOf() }.add(edge)
-				adjacency.getOrPut(to) { mutableListOf() }.add(
-					edge.copy(to = from)
-				)
 			}
 		}
 
-		val dist = mutableMapOf<String, Int>()
-		val prev = mutableMapOf<String, PrevEdge>()
+		val dist = mutableMapOf<State, Int>()
+		val prev = mutableMapOf<State, PrevEdge>()
 		val pq = PriorityQueue<Node>(compareBy { it.dist })
-		dist[startStationId] = 0
-		pq.add(Node(startStationId, 0))
-
+		val startState = State(startStationId, null)
+		dist[startState] = 0
+		pq.add(Node(startState, 0))
 		while (pq.isNotEmpty()) {
 			val current = pq.poll()
-			val currentDist = dist[current.id] ?: continue
+			val currentDist = dist[current.state] ?: continue
 			if (current.dist != currentDist) continue
-			if (current.id == endStationId) break
-			val edges = adjacency[current.id] ?: continue
+			val edges = adjacency[current.state.stationId] ?: continue
 			for (edge in edges) {
-				val newDist = currentDist + edge.time
-				val oldDist = dist[edge.to]
+				val transferCost = if (current.state.lineId != null && current.state.lineId != edge.lineId) {
+					TRANSFER_TIME_SECONDS
+				} else {
+					0
+				}
+				val newDist = currentDist + edge.time + transferCost
+				val nextState = State(edge.to, edge.lineId)
+				val oldDist = dist[nextState]
 				if (oldDist == null || newDist < oldDist) {
-					dist[edge.to] = newDist
-					prev[edge.to] = PrevEdge(from = current.id, edge = edge)
-					pq.add(Node(edge.to, newDist))
+					dist[nextState] = newDist
+					prev[nextState] = PrevEdge(from = current.state, edge = edge)
+					pq.add(Node(nextState, newDist))
 				}
 			}
 		}
 
-		if (startStationId != endStationId && !prev.containsKey(endStationId)) {
-			return null
-		}
+		val endState = dist.keys
+			.filter { it.stationId == endStationId }
+			.minByOrNull { dist[it] ?: Int.MAX_VALUE }
+			?: return null
 
 		val stationPath = mutableListOf<String>()
 		val edgePath = mutableListOf<Edge>()
-		var currentId = endStationId
-		stationPath.add(currentId)
-		while (currentId != startStationId) {
-			val prevEdge = prev[currentId] ?: return null
-			edgePath.add(prevEdge.edge.copy(to = currentId))
-			currentId = prevEdge.from
-			stationPath.add(currentId)
+		var currentState = endState
+		stationPath.add(currentState.stationId)
+		while (currentState.stationId != startStationId) {
+			val prevEdge = prev[currentState] ?: return null
+			edgePath.add(prevEdge.edge.copy(to = currentState.stationId))
+			currentState = prevEdge.from
+			stationPath.add(currentState.stationId)
 		}
 		stationPath.reverse()
 		edgePath.reverse()
@@ -647,12 +654,17 @@ class TransportationServiceImpl {
 	)
 
 	private data class PrevEdge(
-		val from: String,
+		val from: State,
 		val edge: Edge,
 	)
 
 	private data class Node(
-		val id: String,
+		val state: State,
 		val dist: Int,
+	)
+
+	private data class State(
+		val stationId: String,
+		val lineId: Int?,
 	)
 }
