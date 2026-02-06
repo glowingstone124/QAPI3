@@ -446,9 +446,11 @@ class TransportationServiceImpl {
 		}
 
 		val adjacency = mutableMapOf<String, MutableList<Edge>>()
+		val lineTypeById = mutableMapOf<Int, LineType>()
 		for (line in listLines()) {
 			if (constraints.bannedLineTypes.contains(line.lineType)) continue
 			if (line.stationIds.size < 2 || line.stationTimes.size != line.stationIds.size - 1) continue
+			lineTypeById[line.id] = line.lineType
 			for (i in 0 until line.stationIds.size - 1) {
 				val from = line.stationIds[i]
 				val to = line.stationIds[i + 1]
@@ -482,7 +484,8 @@ class TransportationServiceImpl {
 			val edges = adjacency[current.state.stationId] ?: continue
 			for (edge in edges) {
 				val transferCost = if (current.state.lineId != null && current.state.lineId != edge.lineId) {
-					TRANSFER_TIME_SECONDS
+					val fromType = lineTypeById[current.state.lineId]
+					if (fromType == LineType.WALK || edge.lineType == LineType.WALK) 0 else TRANSFER_TIME_SECONDS
 				} else {
 					0
 				}
@@ -530,8 +533,10 @@ class TransportationServiceImpl {
 			for (i in edgePath.indices) {
 				val edge = edgePath[i]
 				if (edge.lineId != currentLineId) {
-					segmentTime += TRANSFER_TIME_SECONDS
-					transferTimeTotal += TRANSFER_TIME_SECONDS
+					if (currentLineType != LineType.WALK && edge.lineType != LineType.WALK) {
+						segmentTime += TRANSFER_TIME_SECONDS
+						transferTimeTotal += TRANSFER_TIME_SECONDS
+					}
 					segments.add(
 						RouteSegment(
 							lineId = currentLineId,
@@ -578,6 +583,7 @@ class TransportationServiceImpl {
 
 		val totalTime = edgePath.sumOf { it.time } + transferTimeTotal
 		val lineIds = segments.map { it.lineId }
+		val totalStops = edgePath.count { it.lineType != LineType.WALK }
 		return RouteResult(
 			stationIds = stationPath,
 			stations = stationPath.mapNotNull { stationMap[it] },
@@ -585,7 +591,7 @@ class TransportationServiceImpl {
 			segments = segments,
 			transfers = transfers,
 			totalTime = totalTime,
-			totalStops = stationPath.size - 1
+			totalStops = totalStops
 		)
 	}
 
