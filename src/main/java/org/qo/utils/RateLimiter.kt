@@ -21,19 +21,19 @@ class RateLimiter {
 	)
 
 	private val rules = listOf(
-		Rule("/qo/game/login", 10, 60),
+		Rule("/qo/game/login", 100, 60),
 		Rule("/qo/upload/registry", 10, 30),
 		Rule("/qo/upload/password", 10, 30),
 		Rule("/qo/authorization/templogin", 20, 30),
 		Rule("/qo/asking/ask", 5, 30),
-		Rule("/qo/download/registry", 60, 30),
-		Rule("/qo/download/name", 60, 30),
-		Rule("/qo/download/status", 300, 10),
+		Rule("/qo/download/registry", 800, 30),
+		Rule("/qo/download/name", 800, 30),
+		Rule("/qo/download/status", 9000, 10),
 		Rule("/qo/download/getgametime", 60, 30),
 		Rule("/qo/download/logingreeting", 60, 60),
-		Rule("/qo/msglist/download", 120, 20),
-		Rule("/qo/authorization/", 60, 60),
-		Rule("/qo/", 400, 60)
+		Rule("/qo/msglist/download", 600, 20),
+		Rule("/qo/authorization/", 400, 60),
+		Rule("/qo/", 10000, 60)
 	)
 
 	fun allow(path: String, clientKey: String): Boolean {

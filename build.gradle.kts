@@ -50,6 +50,7 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-reactor:1.9.0")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.junit.jupiter:junit-jupiter:5.9.1")
+    testImplementation("org.springframework.boot:spring-boot-starter-test")
     implementation("io.asyncer:r2dbc-mysql:1.2.0")
     testImplementation("org.jetbrains.kotlin:kotlin-test:${kotlin.coreLibrariesVersion}")
 
@@ -128,4 +129,3 @@ tasks.register("buildAndCopy") {
 tasks.withType<Jar> {
 	duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 }
-
