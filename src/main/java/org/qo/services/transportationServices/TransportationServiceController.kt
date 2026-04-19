@@ -1,6 +1,7 @@
 package org.qo.services.transportationServices
 
 import com.google.gson.Gson
+import com.google.gson.JsonArray
 import com.google.gson.JsonObject
 import org.qo.utils.ReturnInterface
 import org.springframework.http.ResponseEntity
@@ -22,7 +23,7 @@ class TransportationServiceController(
 	@GetMapping("/station/id")
 	fun getStationById(@RequestParam id: String): ResponseEntity<String> {
 		val result = service.getStationById(id) ?: return notFound()
-		return ReturnInterface().GeneralHttpHeader(gson.toJson(result))
+		return ReturnInterface().GeneralHttpHeader(toStationJson(result))
 	}
 
 	@GetMapping("/station/all")
@@ -49,6 +50,11 @@ class TransportationServiceController(
 		return ReturnInterface().GeneralHttpHeader(
 			gson.toJson(service.queryStationsByLineName(name))
 		)
+	}
+
+	@GetMapping("/dimension/all")
+	fun getAllDimensions(): ResponseEntity<String> {
+		return ReturnInterface().GeneralHttpHeader(gson.toJson(Dimension.entries.map { it.name }))
 	}
 
 	/*
@@ -130,5 +136,16 @@ class TransportationServiceController(
 			.replace("-", "_")
 			.replace(" ", "_")
 			.uppercase(Locale.ROOT)
+	}
+
+	private fun toStationJson(station: Station): String {
+		return gson.toJsonTree(station).asJsonObject.apply {
+			add("dimensions", JsonArray().apply {
+				station.SCREEN_LOCATION
+					.map { it.world.name }
+					.distinct()
+					.forEach(::add)
+			})
+		}.toString()
 	}
 }

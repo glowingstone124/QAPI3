@@ -5,9 +5,9 @@ import com.google.gson.JsonParser;
 import org.jetbrains.annotations.NotNull;
 import org.qo.utils.Logger;
 
-import javax.mail.*;
-import javax.mail.internet.InternetAddress;
-import javax.mail.internet.MimeMessage;
+import jakarta.mail.*;
+import jakarta.mail.internet.InternetAddress;
+import jakarta.mail.internet.MimeMessage;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -42,7 +42,7 @@ public class Mail {
         props.put("mail.smtp.port", "587");
 
         Session session = Session.getInstance(props,
-                new javax.mail.Authenticator() {
+                new jakarta.mail.Authenticator() {
                     protected PasswordAuthentication getPasswordAuthentication() {
                         return new PasswordAuthentication(host, password);
                     }
@@ -66,7 +66,7 @@ public class Mail {
         props.put("mail.smtp.port", "587");
 
         Session session = Session.getInstance(props,
-                new javax.mail.Authenticator() {
+                new jakarta.mail.Authenticator() {
                     protected PasswordAuthentication getPasswordAuthentication() {
                         return new PasswordAuthentication(host, password);
                     }
