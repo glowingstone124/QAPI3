@@ -1,5 +1,6 @@
 package org.qo.services.llmServices
 
+import com.google.gson.JsonArray
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import io.ktor.client.HttpClient
@@ -27,14 +28,17 @@ import org.qo.redis.DatabaseType
 import org.qo.redis.Redis
 import org.qo.services.loginService.AuthorityNeededServicesImpl
 import org.springframework.stereotype.Service
+import java.net.URLDecoder
 import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.charset.StandardCharsets
 import java.util.UUID
 
 @Service
 class LLMServices(
 	private val authorityNeededServicesImpl: AuthorityNeededServicesImpl,
 	private val nodes: Nodes,
+	private val ragService: RAGService,
 ) {
 	private val redis = Redis()
 	private val jsonParser = JsonParser()
@@ -109,7 +113,7 @@ class LLMServices(
 
 	suspend fun completeChat(body: String, token: String): LLMNonStreamResult {
 		val user = authenticate(token) ?: return LLMNonStreamResult(401, errorJson("invalid_token", "权限验证失败"))
-		val request = normalizeRequest(body, false)
+		val request = normalizeRequest(body, false, LLMRequester(user.uid, user.username, "login"))
 		val requestId = insertAccessRecord(user.uid, user.username, request.model, false)
 		if (!reserveRequest(token)) {
 			updateAccessRecord(requestId, "rejected", errorMessage = "duplicate request")
@@ -138,7 +142,7 @@ class LLMServices(
 
 	suspend fun streamChat(body: String, token: String): LLMStreamResult {
 		val user = authenticate(token) ?: return LLMStreamResult(401, flowOfText(errorJson("invalid_token", "权限验证失败")))
-		val request = normalizeRequest(body, true)
+		val request = normalizeRequest(body, true, LLMRequester(user.uid, user.username, "login"))
 		val requestId = insertAccessRecord(user.uid, user.username, request.model, true)
 		if (!reserveRequest(token)) {
 			updateAccessRecord(requestId, "rejected", errorMessage = "duplicate request")
@@ -152,12 +156,13 @@ class LLMServices(
 		return LLMStreamResult(200, streamFromUpstream(request.body, requestId))
 	}
 
-	suspend fun completeBotChat(body: String, token: String, qqUid: Long): LLMNonStreamResult {
+	suspend fun completeBotChat(body: String, token: String, qqUid: Long, qqName: String?): LLMNonStreamResult {
 		if (!authenticateServerToken(token)) {
 			return LLMNonStreamResult(401, errorJson("invalid_token", "Bot token 验证失败"))
 		}
-		val request = normalizeRequest(body, false)
-		val requestId = insertAccessRecord(qqUid, "qq:$qqUid", request.model, false)
+		val username = qqName?.takeIf { it.isNotBlank() }?.let { decodeHeader(it) } ?: "qq:$qqUid"
+		val request = normalizeRequest(body, false, LLMRequester(qqUid, username, "qq"))
+		val requestId = insertAccessRecord(qqUid, username, request.model, false)
 		if (!reserveRequest("bot:$qqUid")) {
 			updateAccessRecord(requestId, "rejected", errorMessage = "duplicate request")
 			return LLMNonStreamResult(429, errorJson("rate_limited", "请求过于频繁"))
@@ -184,6 +189,9 @@ class LLMServices(
 	}
 
 	private fun authenticateServerToken(token: String): Boolean = nodes.getServerFromToken(token) >= 0
+	private fun decodeHeader(value: String): String = runCatching {
+		URLDecoder.decode(value, StandardCharsets.UTF_8)
+	}.getOrDefault(value)
 
 	private fun streamFromUpstream(body: String, requestId: Long): Flow<String> = flow {
 		try {
@@ -219,7 +227,7 @@ class LLMServices(
 		}
 	}
 
-	private fun normalizeRequest(body: String, stream: Boolean): NormalizedRequest {
+	private fun normalizeRequest(body: String, stream: Boolean, requester: LLMRequester? = null): NormalizedRequest {
 		val obj = jsonParser.parse(body).asJsonObject
 		if (!obj.has("model") || obj.get("model").asString.isBlank()) {
 			obj.addProperty("model", upstreamModel)
@@ -228,7 +236,53 @@ class LLMServices(
 		if (!obj.has("messages") || !obj.get("messages").isJsonArray) {
 			throw IllegalArgumentException("OpenAI chat completions request must contain messages array")
 		}
+		obj.add("messages", enrichMessages(obj.getAsJsonArray("messages"), requester))
 		return NormalizedRequest(obj.get("model").asString, obj.toString())
+	}
+
+	private fun enrichMessages(messages: JsonArray, requester: LLMRequester?): JsonArray {
+		val enriched = JsonArray()
+		val userQuestion = latestUserQuestion(messages)
+		val contextParts = mutableListOf<String>()
+		contextParts.add(
+			"""
+			你是 QO 社区群聊助手“恋恋”。
+			回答规范：
+			- 默认使用中文，回答简洁，适合 QQ 群聊阅读。
+			- 不确定时明确说不确定，不要编造服务器规则、账号状态或管理员决定。
+			- 如果用户问“我”“我的账号”“我的权限”等和身份有关的问题，必须结合“当前提问用户”判断。
+			- 涉及账号、安全、封禁、权限、绕过限制的问题时保持谨慎。
+			""".trimIndent()
+		)
+		requester?.let {
+			contextParts.add(
+				"""
+				当前提问用户：
+				- 来源：${it.source}
+				- uid：${it.uid}
+				- 昵称/用户名：${it.name}
+				""".trimIndent()
+			)
+		}
+		ragService.buildContext(userQuestion)?.let {
+			contextParts.add(it)
+		}
+		enriched.add(JsonObject().apply {
+			addProperty("role", "system")
+			addProperty("content", contextParts.joinToString("\n\n"))
+		})
+		messages.forEach { enriched.add(it) }
+		return enriched
+	}
+
+	private fun latestUserQuestion(messages: JsonArray): String {
+		for (index in messages.size() - 1 downTo 0) {
+			val message = messages[index].takeIf { it.isJsonObject }?.asJsonObject ?: continue
+			if (message.get("role")?.asString == "user") {
+				return message.get("content")?.asString.orEmpty()
+			}
+		}
+		return ""
 	}
 
 	private fun reserveRequest(token: String): Boolean {
@@ -313,6 +367,7 @@ class LLMServices(
 	private fun flowOfText(text: String): Flow<String> = flow { emit(text) }
 
 	private data class NormalizedRequest(val model: String, val body: String)
+	private data class LLMRequester(val uid: Long, val name: String, val source: String)
 	private data class Usage(val promptTokens: Int?, val completionTokens: Int?, val totalTokens: Int?)
 }
 
