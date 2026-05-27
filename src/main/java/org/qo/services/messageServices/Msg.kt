@@ -20,7 +20,7 @@ class Msg {
     companion object {
         const val MAX_QUEUE_SIZE = 300
         val msgQueue = LinkedBlockingQueue<Message>(MAX_QUEUE_SIZE)
-        val tempQueue = ArrayList<Message>()
+        val tempQueue = LinkedBlockingQueue<Message>()
         val gson = Gson()
 
         val login = Login()
@@ -77,7 +77,7 @@ class Msg {
         fun <T> LinkedBlockingQueue<T>.toJsonArray(): JsonArray {
             val arr = JsonArray()
             this.forEach { item ->
-                arr.add(gson.toJson(item))
+                arr.add(gson.toJsonTree(item))
             }
             return arr
         }
@@ -89,18 +89,22 @@ class Msg {
             connection.use { conn ->
                 try {
                     val statement: PreparedStatement = conn.prepareStatement(sql)
-                    val resultSet: ResultSet = statement.executeQuery()
 
                     val messages = mutableListOf<Message>()
-                    while (resultSet.next()) {
-                        val message = resultSet.getString("message")
-                        val fromUser = resultSet.getInt("from_user")
-                        val sender = resultSet.getString("sender")
-                        val time = resultSet.getLong("time")
-                        val msg = Message(message, fromUser, sender, time)
-                        cnt++
+                    statement.use {
+                        val resultSet: ResultSet = it.executeQuery()
+                        resultSet.use { rs ->
+                            while (rs.next()) {
+                                val message = rs.getString("message")
+                                val fromUser = rs.getInt("from_user")
+                                val sender = rs.getString("sender")
+                                val time = rs.getLong("time")
+                                val msg = Message(message, fromUser, sender, time)
+                                cnt++
 
-                        messages.add(msg)
+                                messages.add(msg)
+                            }
+                        }
                     }
 
                     messages.sortBy { it.time }
@@ -121,24 +125,26 @@ class Msg {
 
         connection.use { conn ->
             conn.autoCommit = false
-            val statement: PreparedStatement = conn.prepareStatement(sql)
+            val messagesToInsert = mutableListOf<Message>()
+            tempQueue.drainTo(messagesToInsert)
             try {
-                val messagesToInsert = tempQueue.toList()
                 if (messagesToInsert.isNotEmpty()) {
-                    for (message in messagesToInsert) {
-                        statement.setString(1, message.message)
-                        statement.setInt(2, message.from)
-                        statement.setString(3, message.sender)
-                        statement.setLong(4, message.time)
-                        statement.addBatch()
+                    conn.prepareStatement(sql).use { statement ->
+                        for (message in messagesToInsert) {
+                            statement.setString(1, message.message)
+                            statement.setInt(2, message.from)
+                            statement.setString(3, message.sender)
+                            statement.setLong(4, message.time)
+                            statement.addBatch()
+                        }
+                        statement.executeBatch()
                     }
-                    statement.executeBatch()
                 }
                 conn.commit()
-                tempQueue.clear()
 
             } catch (e: SQLException) {
                 conn.rollback()
+                messagesToInsert.forEach { tempQueue.offer(it) }
                 e.printStackTrace()
             } finally {
                 conn.autoCommit = true

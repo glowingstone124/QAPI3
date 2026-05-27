@@ -50,6 +50,19 @@ class Redis {
 			} ?: throw IllegalStateException("Redis pool is not initialized.")
 		}
 	}
+	fun setIfAbsentWithExpire(key: String, value: String, database: Int, expiresSeconds: Long): RedisResult<Boolean> {
+		return RedisResult {
+			if (!Configuration.EnableRedis) return@RedisResult true
+			pool?.resource?.use { jedis ->
+				jedis.select(database)
+				val inserted = jedis.setnx(key, value) == 1L
+				if (inserted) {
+					jedis.expire(key, expiresSeconds)
+				}
+				inserted
+			} ?: throw IllegalStateException("Redis pool is not initialized.")
+		}
+	}
 	fun incrWithExpire(key: String, database: Int, expiresSeconds: Long): RedisResult<Long> {
 		return RedisResult {
 			if (!Configuration.EnableRedis) return@RedisResult null

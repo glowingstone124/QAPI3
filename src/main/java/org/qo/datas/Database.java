@@ -7,10 +7,14 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 public class Database {
     private static final AtomicBoolean cachedAvailable = new AtomicBoolean(true);
-    private static final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+    private static final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
+        Thread thread = new Thread(r, "sql-health-check");
+        thread.setDaemon(true);
+        return thread;
+    });
 
     static {
-        scheduler.scheduleAtFixedRate(Database::refreshSQLStatus, 0, 1, TimeUnit.SECONDS);
+        scheduler.scheduleAtFixedRate(Database::refreshSQLStatus, 0, 5, TimeUnit.SECONDS);
     }
     private static void refreshSQLStatus() {
         try (Connection connection = ConnectionPool.getConnection()) {

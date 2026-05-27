@@ -2,7 +2,6 @@ package org.qo.services.eliteWeaponServices
 
 import com.google.gson.Gson
 import com.google.gson.JsonObject
-import com.google.gson.JsonParser
 import org.qo.services.gameStatusService.asJsonObject
 import org.springframework.stereotype.Service
 import java.util.UUID
@@ -23,7 +22,7 @@ class EliteWeaponImpl(private val db: EliteWeaponDB) {
 	)
 
 	fun handleEliteWeaponRequest(owner:String, type:String, description: String, name: String) : String?{
-		if (db.hasEliteWeapon(owner,type)) {
+		if (db.hasThisEliteWeaponType(owner,type)) {
 			return null
 		}
 		val uuid = UUID.randomUUID().toString()
@@ -48,7 +47,7 @@ class EliteWeaponImpl(private val db: EliteWeaponDB) {
 	}
 
 	fun addEliteWeaponDMG(uuid: String, requester: String, amount: Int) : String{
-		if (db.hasEliteWeapon(uuid, requester)) {
+		if (db.hasEliteWeapon(requester, uuid)) {
 			db.addWeaponDamage(uuid, amount,requester)
 			return "ok->SQL execution"
 		} else {
@@ -56,7 +55,7 @@ class EliteWeaponImpl(private val db: EliteWeaponDB) {
 		}
 	}
 	fun addEliteWeaponKill(uuid: String, requester: String, amount: Int) : String {
-		if (db.hasEliteWeapon(uuid, requester)) {
+		if (db.hasEliteWeapon(requester, uuid)) {
 			db.addWeaponKills(uuid, amount,requester)
 			return "ok->SQL execution"
 		} else {
@@ -66,8 +65,12 @@ class EliteWeaponImpl(private val db: EliteWeaponDB) {
 
 	fun queryEliteUuid(uuid: String): String{
 		db.getSpecfiedEliteWeaponByUuid(uuid)?.let {
-			gson.toJson(it).asJsonObject().addProperty("find", true)
+			return gson.toJson(it).asJsonObject().apply {
+				addProperty("find", true)
+			}.toString()
 		}
-		return JsonObject().addProperty("find", false).toString()
+		return JsonObject().apply {
+			addProperty("find", false)
+		}.toString()
 	}
 }

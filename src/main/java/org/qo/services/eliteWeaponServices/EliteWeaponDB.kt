@@ -1,6 +1,5 @@
 package org.qo.services.eliteWeaponServices
 
-import jakarta.annotation.Resource
 import org.qo.datas.ConnectionPool
 import org.springframework.stereotype.Service
 
@@ -10,42 +9,43 @@ class EliteWeaponDB {
 	val ADD_NEW_ELITE_WEAPON_SQL = "INSERT INTO elite_items(uuid, owner, type, damage, kills, description, name) VALUES (?,?,?,?,?,?,?)"
 
 	fun addNewEliteWeapon(item: EliteWeaponImpl.EliteWeapon) {
-		ConnectionPool.getConnection().prepareStatement(ADD_NEW_ELITE_WEAPON_SQL).use {
-			it.setString(1, item.uuid)
-			it.setString(2, item.owner)
-			it.setString(3, item.type)
-			it.setLong(4, 0L)
-			it.setLong(5, 0L)
-			it.setString(6, item.description)
-			it.setString(7, item.name)
-			it.executeUpdate()
+		ConnectionPool.getConnection().use { conn ->
+			conn.prepareStatement(ADD_NEW_ELITE_WEAPON_SQL).use {
+				it.setString(1, item.uuid)
+				it.setString(2, item.owner)
+				it.setString(3, item.type)
+				it.setLong(4, 0L)
+				it.setLong(5, 0L)
+				it.setString(6, item.description)
+				it.setString(7, item.name)
+				it.executeUpdate()
+			}
 		}
 	}
 
 	fun queryAllEliteWeaponsFromUser(username: String): List<EliteWeaponImpl.EliteWeapon> {
 		val list = mutableListOf<EliteWeaponImpl.EliteWeapon>()
-		val connection = ConnectionPool.getConnection()
+		ConnectionPool.getConnection().use { connection ->
+			connection.prepareStatement(GET_ALL_ELITE_WEAPON_SQL).use { stmt ->
+				stmt.setString(1, username)
 
-		connection.prepareStatement(GET_ALL_ELITE_WEAPON_SQL).use { stmt ->
-			stmt.setString(1, username)
-
-			stmt.executeQuery().use { rs ->
-				while (rs.next()) {
-					list.add(
-						EliteWeaponImpl.EliteWeapon(
-							rs.getString("uuid"),
-							rs.getString("owner"),
-							rs.getString("type"),
-							rs.getLong("damage"),
-							rs.getLong("kills"),
-							rs.getString("description"),
-							rs.getString("name")
+				stmt.executeQuery().use { rs ->
+					while (rs.next()) {
+						list.add(
+							EliteWeaponImpl.EliteWeapon(
+								rs.getString("uuid"),
+								rs.getString("owner"),
+								rs.getString("type"),
+								rs.getLong("damage"),
+								rs.getLong("kills"),
+								rs.getString("description"),
+								rs.getString("name")
+							)
 						)
-					)
+					}
 				}
 			}
 		}
-		connection.close()
 		return list
 	}
 	fun hasThisEliteWeaponType(owner: String, type: String): Boolean {
@@ -76,11 +76,12 @@ class EliteWeaponDB {
 
 
 	fun addWeaponDamage(uuid: String, dmg: Int, requester: String) {
-		val sql = "UPDATE users SET damage = damage + ? WHERE username = ?"
+		val sql = "UPDATE elite_items SET damage = damage + ? WHERE uuid = ? AND owner = ?"
 		ConnectionPool.getConnection().use { conn ->
 			conn.prepareStatement(sql).use { stmt ->
 				stmt.setInt(1, dmg)
-				stmt.setString(2, requester.trim())
+				stmt.setString(2, uuid.trim())
+				stmt.setString(3, requester.trim())
 				val rows = stmt.executeUpdate()
 				println("updated $rows line")
 			}

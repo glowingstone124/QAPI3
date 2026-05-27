@@ -37,34 +37,36 @@ class MetroServiceImpl(private val nodes:Nodes) {
 	fun getMetroJson(): String {
 
 		val sectionMap = mutableMapOf<String, Section>()
-		val connection = ConnectionPool.getConnection()
-		val stmt = connection.createStatement()
-		val resultSet = stmt.executeQuery("SELECT * FROM sections")
+		ConnectionPool.getConnection().use { connection ->
+			connection.createStatement().use { stmt ->
+				stmt.executeQuery("SELECT * FROM sections").use { resultSet ->
+					while (resultSet.next()) {
+						val id = resultSet.getString("id")
+						val lid = resultSet.getInt("lid")
+						val station = resultSet.getBoolean("station")
+						val dummy = resultSet.getString("dummy")
+						val sigList: MutableList<JsonObject> = mutableListOf()
+						val upStr: String? = resultSet.getString("signal_up")
+						val downStr: String? = resultSet.getString("signal_down")
 
-		while (resultSet.next()) {
-			val id = resultSet.getString("id")
-			val lid = resultSet.getInt("lid")
-			val station = resultSet.getBoolean("station")
-			val dummy = resultSet.getString("dummy")
-			val sigList: MutableList<JsonObject> = mutableListOf()
-			val upStr: String? = resultSet.getString("signal_up")
-			val downStr: String? = resultSet.getString("signal_down")
+						upStr?.let {
+							sigList.add(JsonParser.parseString(upStr) as JsonObject)
+						}
+						downStr?.let {
+							sigList.add(JsonParser.parseString(downStr) as JsonObject)
+						}
 
-			upStr?.let {
-				sigList.add(JsonParser.parseString(upStr) as JsonObject)
+						val section = Section(
+							lid = lid,
+							station = station,
+							dummy = dummy,
+							signal = sigList
+						)
+
+						sectionMap[id] = section
+					}
+				}
 			}
-			downStr?.let {
-				sigList.add(JsonParser.parseString(downStr) as JsonObject)
-			}
-
-			val section = Section(
-				lid = lid,
-				station = station,
-				dummy = dummy,
-				signal = sigList
-			)
-
-			sectionMap[id] = section
 		}
 
 		return gson.toJson(sectionMap)

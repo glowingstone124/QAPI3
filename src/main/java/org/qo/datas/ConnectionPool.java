@@ -18,8 +18,10 @@ public class ConnectionPool {
     public static void init() {
         try {
             Gson gson = new Gson();
-            FileReader reader = new FileReader("data/sql/info.json");
-            Map<String, String> config = gson.fromJson(reader, Map.class);
+            Map<String, String> config;
+            try (FileReader reader = new FileReader("data/sql/info.json")) {
+                config = gson.fromJson(reader, Map.class);
+            }
 
             Properties pro = new Properties();
             pro.setProperty("username", config.get("username"));
@@ -28,6 +30,13 @@ public class ConnectionPool {
             pro.setProperty("driverClassName", "com.mysql.cj.jdbc.Driver");
             pro.setProperty("initialSize", "5");
             pro.setProperty("maxActive", "100");
+            pro.setProperty("minIdle", "5");
+            pro.setProperty("maxWait", "3000");
+            pro.setProperty("validationQuery", "SELECT 1");
+            pro.setProperty("testWhileIdle", "true");
+            pro.setProperty("testOnBorrow", "false");
+            pro.setProperty("testOnReturn", "false");
+            pro.setProperty("timeBetweenEvictionRunsMillis", "60000");
 
             ds = DruidDataSourceFactory.createDataSource(pro);
         } catch (IOException e) {
