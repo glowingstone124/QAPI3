@@ -45,6 +45,8 @@ class LLMServices(
 	private val jsonParser = JsonParser()
 	private val upstreamUrl = System.getenv("LLM_API_URL") ?: "https://api.deepseek.com/v1/chat/completions"
 	private val upstreamModel = System.getenv("LLM_DEFAULT_MODEL") ?: "deepseek-chat"
+	private val debugPrompt = readBoolean("LLM_DEBUG_PROMPT", false)
+	private val debugPromptMaxChars = readInt("LLM_DEBUG_PROMPT_MAX_CHARS", 12000).coerceAtLeast(1000)
 	private val defaultSystemPrompt by lazy { loadSystemPrompt() }
 	private val upstreamToken by lazy {
 		System.getenv("LLM_API_TOKEN")
@@ -131,6 +133,7 @@ class LLMServices(
 			val response = client.post(upstreamUrl) {
 				header(HttpHeaders.Authorization, "Bearer $upstreamToken")
 				contentType(ContentType.Application.Json)
+				debugPrompt("chat", request.body)
 				setBody(request.body)
 			}
 			val text = response.bodyAsText()
@@ -160,7 +163,7 @@ class LLMServices(
 			return LLMStreamResult(500, flowOfText(errorJson("server_error", "LLM 上游令牌未配置")))
 		}
 
-		return LLMStreamResult(200, streamFromUpstream(request.body, requestId))
+		return LLMStreamResult(200, streamFromUpstream(request.body, requestId, "stream"))
 	}
 
 	suspend fun completeBotChat(body: String, token: String, qqUid: Long, qqName: String?): LLMNonStreamResult {
@@ -184,6 +187,7 @@ class LLMServices(
 			val response = client.post(upstreamUrl) {
 				header(HttpHeaders.Authorization, "Bearer $upstreamToken")
 				contentType(ContentType.Application.Json)
+				debugPrompt("bot", request.body)
 				setBody(request.body)
 			}
 			val text = response.bodyAsText()
@@ -204,11 +208,12 @@ class LLMServices(
 		URLDecoder.decode(value, StandardCharsets.UTF_8)
 	}.getOrDefault(value)
 
-	private fun streamFromUpstream(body: String, requestId: Long): Flow<String> = flow {
+	private fun streamFromUpstream(body: String, requestId: Long, source: String): Flow<String> = flow {
 		try {
 			val response = client.post(upstreamUrl) {
 				header(HttpHeaders.Authorization, "Bearer $upstreamToken")
 				contentType(ContentType.Application.Json)
+				debugPrompt(source, body)
 				setBody(body)
 			}
 			if (!response.status.isSuccess()) {
@@ -340,6 +345,30 @@ class LLMServices(
 			- 优先根据知识库资料回答；资料没有覆盖时说明缺少依据。
 		""".trimIndent()
 	}
+
+	private fun debugPrompt(source: String, body: String) {
+		if (!debugPrompt) {
+			return
+		}
+		val clipped = if (body.length > debugPromptMaxChars) {
+			body.take(debugPromptMaxChars) + "\n...<clipped ${body.length - debugPromptMaxChars} chars>"
+		} else {
+			body
+		}
+		println("===== LLM REQUEST BODY [$source] =====")
+		println(clipped)
+		println("===== END LLM REQUEST BODY [$source] =====")
+	}
+
+	private fun readInt(name: String, defaultValue: Int): Int =
+		System.getenv(name)?.trim()?.toIntOrNull() ?: defaultValue
+
+	private fun readBoolean(name: String, defaultValue: Boolean): Boolean =
+		when (System.getenv(name)?.trim()?.lowercase()) {
+			"1", "true", "yes", "on" -> true
+			"0", "false", "no", "off" -> false
+			else -> defaultValue
+		}
 
 	private suspend fun insertAccessRecord(uid: Long, username: String, model: String, stream: Boolean): Long = withContext(Dispatchers.IO) {
 		runCatching {
