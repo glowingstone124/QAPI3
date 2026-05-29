@@ -33,6 +33,8 @@ class RAGService {
 	private val topK = readInt("RAG_TOP_K", 5).coerceIn(1, 12)
 	private val maxContextChars = readInt("RAG_MAX_CONTEXT_CHARS", 4000).coerceAtLeast(500)
 	private val chunkSize = readInt("RAG_CHUNK_SIZE", 900).coerceAtLeast(200)
+	private val embeddingMinScore = readDouble("RAG_EMBEDDING_MIN_SCORE", 0.2)
+	private val keywordMinScore = readDouble("RAG_KEYWORD_MIN_SCORE", 2.0)
 	private val embeddingEnabled = readBoolean("RAG_EMBEDDING_ENABLED", true)
 	private val embeddingUrl = System.getenv("RAG_EMBEDDING_API_URL")
 		?: System.getenv("LLM_EMBEDDING_API_URL")
@@ -60,11 +62,11 @@ class RAGService {
 		reload()
 	}
 
-	fun buildContext(question: String): String? {
+	fun buildContext(question: String, groupId: Long? = null): String? {
 		if (!enabled || question.isBlank()) {
 			return null
 		}
-		val matches = runBlocking { search(question) }
+		val matches = runBlocking { search(question, groupId) }
 		if (matches.isEmpty()) {
 			return null
 		}
@@ -79,6 +81,7 @@ class RAGService {
 			used += clipped.length
 			sb.append("\n[").append(index + 1).append("] ")
 				.append("来源：").append(match.chunk.source)
+				.append("；范围：").append(match.chunk.groupId ?: "common")
 				.append("；标题：").append(match.chunk.title)
 				.append("；检索：").append(match.strategy)
 				.append("；相关度：").append("%.3f".format(Locale.ROOT, match.score))
@@ -114,18 +117,19 @@ class RAGService {
 		println("RAG loaded ${chunks.size} chunk(s) from $knowledgeDir; embedded=$embedded")
 	}
 
-	private suspend fun search(question: String): List<RAGMatch> {
+	private suspend fun search(question: String, groupId: Long?): List<RAGMatch> {
+		val scopedChunks = chunks.filter { it.groupId == null || it.groupId == groupId }
 		val queryEmbedding = if (embeddingEnabled && embeddingToken.isNotBlank()) {
 			embeddingFor(question)
 		} else {
 			null
 		}
-		if (queryEmbedding != null && chunks.any { it.embedding != null }) {
-			val vectorMatches = chunks.asSequence()
+		if (queryEmbedding != null && scopedChunks.any { it.embedding != null }) {
+			val vectorMatches = scopedChunks.asSequence()
 				.mapNotNull { chunk ->
 					val embedding = chunk.embedding ?: return@mapNotNull null
 					val score = cosine(queryEmbedding, embedding)
-					if (score > 0.0) RAGMatch(chunk, score, "embedding") else null
+					if (score >= embeddingMinScore) RAGMatch(chunk, score, "embedding") else null
 				}
 				.sortedByDescending { it.score }
 				.take(topK)
@@ -134,18 +138,18 @@ class RAGService {
 				return vectorMatches
 			}
 		}
-		return keywordSearch(question)
+		return keywordSearch(question, scopedChunks)
 	}
 
-	private fun keywordSearch(question: String): List<RAGMatch> {
+	private fun keywordSearch(question: String, scopedChunks: List<RAGChunk>): List<RAGMatch> {
 		val queryTokens = tokenize(question)
 		if (queryTokens.isEmpty()) {
 			return emptyList()
 		}
-		return chunks.asSequence()
+		return scopedChunks.asSequence()
 			.mapNotNull { chunk ->
 				val score = keywordScore(chunk, queryTokens, question)
-				if (score > 0.0) RAGMatch(chunk, score, "keyword") else null
+				if (score >= keywordMinScore) RAGMatch(chunk, score, "keyword") else null
 			}
 			.sortedByDescending { it.score }
 			.take(topK)
@@ -186,6 +190,7 @@ class RAGService {
 			return emptyList()
 		}
 		val source = knowledgeDir.relativize(path).toString()
+		val groupId = groupIdForSource(source)
 		val title = findTitle(text) ?: path.fileName.toString()
 		val paragraphs = text
 			.replace("\r\n", "\n")
@@ -197,7 +202,7 @@ class RAGService {
 		val current = StringBuilder()
 		fun flush() {
 			if (current.isNotBlank()) {
-				result.add(RAGChunk("$source#${result.size + 1}", source, title, current.toString().trim()))
+				result.add(RAGChunk("$source#${result.size + 1}", source, title, current.toString().trim(), groupId = groupId))
 				current.clear()
 			}
 		}
@@ -209,7 +214,7 @@ class RAGService {
 				var offset = 0
 				while (offset < paragraph.length) {
 					val end = min(offset + chunkSize, paragraph.length)
-					result.add(RAGChunk("$source#${result.size + 1}", source, title, paragraph.substring(offset, end)))
+					result.add(RAGChunk("$source#${result.size + 1}", source, title, paragraph.substring(offset, end), groupId = groupId))
 					offset = end
 				}
 			} else {
@@ -283,6 +288,9 @@ class RAGService {
 	private fun readInt(name: String, defaultValue: Int): Int =
 		System.getenv(name)?.trim()?.toIntOrNull() ?: defaultValue
 
+	private fun readDouble(name: String, defaultValue: Double): Double =
+		System.getenv(name)?.trim()?.toDoubleOrNull() ?: defaultValue
+
 	private fun readBoolean(name: String, defaultValue: Boolean): Boolean =
 		when (System.getenv(name)?.trim()?.lowercase(Locale.ROOT)) {
 			"1", "true", "yes", "on" -> true
@@ -295,6 +303,7 @@ class RAGService {
 		val source: String,
 		val title: String,
 		val content: String,
+		val groupId: Long? = null,
 		val embedding: List<Double>? = null,
 	)
 
@@ -305,6 +314,15 @@ class RAGService {
 	)
 
 	private companion object {
+		private fun groupIdForSource(source: String): Long? {
+			val normalized = source.replace('\\', '/')
+			val parts = normalized.split('/')
+			if (parts.size >= 3 && parts[0] == "groups") {
+				return parts[1].toLongOrNull()
+			}
+			return null
+		}
+
 		private val cjkScripts = setOf(
 			Character.UnicodeScript.HAN,
 			Character.UnicodeScript.HIRAGANA,

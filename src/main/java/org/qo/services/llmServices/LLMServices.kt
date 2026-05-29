@@ -166,12 +166,12 @@ class LLMServices(
 		return LLMStreamResult(200, streamFromUpstream(request.body, requestId, "stream"))
 	}
 
-	suspend fun completeBotChat(body: String, token: String, qqUid: Long, qqName: String?): LLMNonStreamResult {
+	suspend fun completeBotChat(body: String, token: String, qqUid: Long, qqGroupId: Long?, qqName: String?): LLMNonStreamResult {
 		if (!authenticateServerToken(token)) {
 			return LLMNonStreamResult(401, errorJson("invalid_token", "Bot token 验证失败"))
 		}
 		val username = qqName?.takeIf { it.isNotBlank() }?.let { decodeHeader(it) } ?: "qq:$qqUid"
-		val requester = LLMRequester(qqUid, username, "qq")
+		val requester = LLMRequester(qqUid, username, "qq", qqGroupId)
 		val request = normalizeRequest(body, false, requester)
 		val requestId = insertAccessRecord(qqUid, username, request.model, false)
 		if (!reserveRequest("bot:$qqUid")) {
@@ -248,6 +248,9 @@ class LLMServices(
 		if (!obj.has("model") || obj.get("model").asString.isBlank()) {
 			obj.addProperty("model", upstreamModel)
 		}
+		requester?.let {
+			obj.addProperty("user_id", it.conversationKey())
+		}
 		obj.addProperty("stream", stream)
 		if (!obj.has("messages") || !obj.get("messages").isJsonArray) {
 			throw IllegalArgumentException("OpenAI chat completions request must contain messages array")
@@ -266,12 +269,13 @@ class LLMServices(
 				"""
 				当前提问用户：
 				- 来源：${it.source}
+				- 群：${it.groupId ?: "未指定"}
 				- uid：${it.uid}
 				- 昵称/用户名：${it.name}
 				""".trimIndent()
 			)
 		}
-		ragService.buildContext(userQuestion)?.let {
+		ragService.buildContext(userQuestion, requester?.groupId)?.let {
 			contextParts.add(it)
 		}
 		enriched.add(JsonObject().apply {
@@ -447,8 +451,8 @@ class LLMServices(
 	private fun flowOfText(text: String): Flow<String> = flow { emit(text) }
 
 	private data class NormalizedRequest(val model: String, val body: String, val userQuestion: String)
-	private data class LLMRequester(val uid: Long, val name: String, val source: String) {
-		fun conversationKey(): String = "$source:$uid"
+	private data class LLMRequester(val uid: Long, val name: String, val source: String, val groupId: Long? = null) {
+		fun conversationKey(): String = listOfNotNull(source, groupId?.toString(), uid.toString()).joinToString(":")
 	}
 	private data class Usage(val promptTokens: Int?, val completionTokens: Int?, val totalTokens: Int?)
 }
