@@ -7,12 +7,16 @@ import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import org.qo.services.gameStatusService.Status
 import org.qo.services.metroServices.MetroServiceImpl
+import org.qo.services.transportationServices.Station
+import org.qo.services.transportationServices.TransportationServiceImpl
 import org.springframework.stereotype.Service
+import java.util.Locale
 
 @Service
 class LLMToolService(
 	private val status: Status,
 	private val metroService: MetroServiceImpl,
+	private val transportationService: TransportationServiceImpl,
 	private val ragService: RAGService,
 ) {
 	private val gson: Gson = GsonBuilder().disableHtmlEscaping().create()
@@ -52,9 +56,17 @@ class LLMToolService(
 		      "parameters": {
 		        "type": "object",
 		        "properties": {
+		          "from": {
+		            "type": "string",
+		            "description": "路线起点站名或站点 ID。用户问从 A 到 B 怎么坐时填写。"
+		          },
+		          "to": {
+		            "type": "string",
+		            "description": "路线终点站名或站点 ID。用户问从 A 到 B 怎么坐时填写。"
+		          },
 		          "query": {
 		            "type": "string",
-		            "description": "站点名、区间名、线路名或关键词。"
+		            "description": "站点名、区间名、线路名或关键词。不问路线时使用。"
 		          },
 		          "line_id": {
 		            "type": "integer",
@@ -123,9 +135,18 @@ class LLMToolService(
 	}
 
 	private fun queryMetroLines(args: JsonObject): String {
+		val from = args.get("from")?.takeIf { !it.isJsonNull }?.asString?.trim().orEmpty()
+		val to = args.get("to")?.takeIf { !it.isJsonNull }?.asString?.trim().orEmpty()
+		if (from.isNotBlank() && to.isNotBlank()) {
+			return calculateTransportationRoute(from, to)
+		}
 		val query = args.get("query")?.takeIf { !it.isJsonNull }?.asString?.trim().orEmpty()
 		val lineId = args.get("line_id")?.takeIf { !it.isJsonNull }?.asInt
 		val stationOnly = args.get("station_only")?.takeIf { !it.isJsonNull }?.asBoolean ?: false
+		val transportationResult = queryTransportation(query, lineId)
+		if (transportationResult != null) {
+			return transportationResult
+		}
 		val root = jsonParser.parse(metroService.getMetroJson()).asJsonObject
 		val matches = JsonArray()
 		root.entrySet().asSequence()
@@ -157,6 +178,127 @@ class LLMToolService(
 			add("matches", matches)
 		})
 	}
+
+	private fun calculateTransportationRoute(from: String, to: String): String {
+		val fromCandidates = findStations(from)
+		val toCandidates = findStations(to)
+		if (fromCandidates.isEmpty() || toCandidates.isEmpty()) {
+			return gson.toJson(JsonObject().apply {
+				addProperty("tool", "query_metro_lines")
+				addProperty("mode", "route")
+				addProperty("found", false)
+				addProperty("message", "起点或终点没有匹配到站点。")
+				add("from_candidates", stationsToJson(fromCandidates))
+				add("to_candidates", stationsToJson(toCandidates))
+			})
+		}
+
+		val attempts = fromCandidates.take(3).flatMap { fromStation ->
+			toCandidates.take(3).map { toStation -> fromStation to toStation }
+		}
+		for ((fromStation, toStation) in attempts) {
+			val route = transportationService.calculateRoute(fromStation.ID, toStation.ID) ?: continue
+			return gson.toJson(JsonObject().apply {
+				addProperty("tool", "query_metro_lines")
+				addProperty("mode", "route")
+				addProperty("found", true)
+				add("from", stationToJson(fromStation))
+				add("to", stationToJson(toStation))
+				add("route", gson.toJsonTree(route))
+			})
+		}
+
+		return gson.toJson(JsonObject().apply {
+			addProperty("tool", "query_metro_lines")
+			addProperty("mode", "route")
+			addProperty("found", false)
+			addProperty("message", "站点存在，但没有计算到可用路线。")
+			add("from_candidates", stationsToJson(fromCandidates))
+			add("to_candidates", stationsToJson(toCandidates))
+		})
+	}
+
+	private fun queryTransportation(query: String, lineId: Int?): String? = runCatching {
+		val stations = if (query.isBlank()) {
+			transportationService.listStations().take(maxMetroResults)
+		} else {
+			findStations(query).take(maxMetroResults)
+		}
+		val lines = when {
+			lineId != null -> transportationService.getLineById(lineId)?.let { listOf(it) }.orEmpty()
+			query.isNotBlank() -> transportationService.queryLinesByName(query).take(maxMetroResults)
+			else -> transportationService.listLines().take(maxMetroResults)
+		}
+		if (stations.isEmpty() && lines.isEmpty()) {
+			return@runCatching null
+		}
+		gson.toJson(JsonObject().apply {
+			addProperty("tool", "query_metro_lines")
+			addProperty("mode", "search")
+			addProperty("query", query)
+			lineId?.let { addProperty("line_id", it) }
+			addProperty("station_returned", stations.size)
+			addProperty("line_returned", lines.size)
+			add("stations", stationsToJson(stations))
+			add("lines", gson.toJsonTree(lines))
+		})
+	}.getOrNull()
+
+	private fun findStations(query: String): List<Station> {
+		val normalized = normalizeSearch(query)
+		if (normalized.isBlank()) {
+			return emptyList()
+		}
+		transportationService.getStationById(query)?.let { return listOf(it) }
+		val directMatches = runCatching { transportationService.queryStationsByName(query) }.getOrDefault(emptyList())
+		if (directMatches.isNotEmpty()) {
+			return directMatches.sortedByDescending { stationScore(it, normalized) }
+		}
+		return runCatching {
+			transportationService.listStations()
+				.map { it to stationScore(it, normalized) }
+				.filter { (_, score) -> score > 0 }
+				.sortedByDescending { (_, score) -> score }
+				.map { (station, _) -> station }
+		}.getOrDefault(emptyList())
+	}
+
+	private fun stationScore(station: Station, normalizedQuery: String): Int {
+		val name = normalizeSearch(station.NAME)
+		val nameEn = normalizeSearch(station.NAME_EN)
+		val id = normalizeSearch(station.ID)
+		return maxOf(
+			tokenScore(name, normalizedQuery),
+			tokenScore(nameEn, normalizedQuery),
+			tokenScore(id, normalizedQuery),
+		)
+	}
+
+	private fun tokenScore(value: String, query: String): Int {
+		if (value.isBlank() || query.isBlank()) {
+			return 0
+		}
+		if (value == query) return 100
+		if (value.contains(query)) return 80
+		if (query.contains(value)) return 60
+		val overlap = query.toSet().count { it in value.toSet() }
+		return if (overlap >= minOf(2, query.length)) overlap * 10 else 0
+	}
+
+	private fun stationsToJson(stations: List<Station>): JsonArray = JsonArray().apply {
+		stations.take(maxMetroResults).forEach { add(stationToJson(it)) }
+	}
+
+	private fun stationToJson(station: Station): JsonObject = gson.toJsonTree(station).asJsonObject.apply {
+		addProperty("id", station.ID)
+		addProperty("name", station.NAME)
+		addProperty("name_en", station.NAME_EN)
+	}
+
+	private fun normalizeSearch(value: String): String =
+		value.trim()
+			.lowercase(Locale.ROOT)
+			.replace("\\s+".toRegex(), "")
 
 	private fun searchMinecraftKnowledge(args: JsonObject, groupId: Long?): String {
 		val query = args.get("query")?.takeIf { !it.isJsonNull }?.asString?.trim().orEmpty()
