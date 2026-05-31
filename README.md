@@ -109,6 +109,21 @@ GET `/qo/download/registry?name=glowingstone124` ->
     "playtime": 1712
 }
 ```
+
+### LLM Tool Calling
+
+The OpenAI-compatible non-stream chat endpoint can execute built-in tools before returning the final assistant message.
+
+- `get_server_status`: query Minecraft server status and player counts.
+- `query_metro_lines`: search metro lines, stations, sections, and signal coordinates.
+- `search_minecraft_knowledge`: search the configured RAG knowledge base for Minecraft/QO information.
+
+Related environment variables:
+
+- `LLM_TOOLS_ENABLED`: enable built-in tools, default `true`.
+- `LLM_TOOL_MAX_ROUNDS`: maximum tool-call loops per request, default `3`.
+- `LLM_TOOL_METRO_MAX_RESULTS`: maximum metro search results returned to the model, default `12`.
+
 ## For Contributors
 
 When integrating this project with GoCi, please notice there are some flags can be use.

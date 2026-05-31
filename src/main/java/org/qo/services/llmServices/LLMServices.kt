@@ -40,6 +40,7 @@ class LLMServices(
 	private val nodes: Nodes,
 	private val ragService: RAGService,
 	private val conversationService: LLMConversationService,
+	private val toolService: LLMToolService,
 ) {
 	private val redis = Redis()
 	private val jsonParser = JsonParser()
@@ -47,6 +48,7 @@ class LLMServices(
 	private val upstreamModel = System.getenv("LLM_DEFAULT_MODEL") ?: "deepseek-chat"
 	private val debugPrompt = readBoolean("LLM_DEBUG_PROMPT", false)
 	private val debugPromptMaxChars = readInt("LLM_DEBUG_PROMPT_MAX_CHARS", 12000).coerceAtLeast(1000)
+	private val maxToolRounds = readInt("LLM_TOOL_MAX_ROUNDS", 3).coerceIn(1, 8)
 	private val defaultSystemPrompt by lazy { loadSystemPrompt() }
 	private val upstreamToken by lazy {
 		System.getenv("LLM_API_TOKEN")
@@ -130,19 +132,13 @@ class LLMServices(
 		}
 
 		return try {
-			val response = client.post(upstreamUrl) {
-				header(HttpHeaders.Authorization, "Bearer $upstreamToken")
-				contentType(ContentType.Application.Json)
-				debugPrompt("chat", request.body)
-				setBody(request.body)
-			}
-			val text = response.bodyAsText()
+			val (statusCode, text) = completeWithOptionalTools(request, requester, "chat")
 			val usage = parseUsage(text)
-			updateAccessRecord(requestId, if (response.status.isSuccess()) "completed" else "failed", usage, text.take(512))
-			if (response.status.isSuccess()) {
+			updateAccessRecord(requestId, if (statusCode in 200..299) "completed" else "failed", usage, text.take(512))
+			if (statusCode in 200..299) {
 				recordConversation(requester, request.userQuestion, text)
 			}
-			LLMNonStreamResult(response.status.value, text)
+			LLMNonStreamResult(statusCode, text)
 		} catch (e: Exception) {
 			updateAccessRecord(requestId, "failed", errorMessage = e.message)
 			LLMNonStreamResult(502, errorJson("upstream_error", e.message ?: "LLM 上游请求失败"))
@@ -184,23 +180,67 @@ class LLMServices(
 		}
 
 		return try {
-			val response = client.post(upstreamUrl) {
-				header(HttpHeaders.Authorization, "Bearer $upstreamToken")
-				contentType(ContentType.Application.Json)
-				debugPrompt("bot", request.body)
-				setBody(request.body)
-			}
-			val text = response.bodyAsText()
+			val (statusCode, text) = completeWithOptionalTools(request, requester, "bot")
 			val usage = parseUsage(text)
-			updateAccessRecord(requestId, if (response.status.isSuccess()) "completed" else "failed", usage, text.take(512))
-			if (response.status.isSuccess()) {
+			updateAccessRecord(requestId, if (statusCode in 200..299) "completed" else "failed", usage, text.take(512))
+			if (statusCode in 200..299) {
 				recordConversation(requester, request.userQuestion, text)
 			}
-			LLMNonStreamResult(response.status.value, text)
+			LLMNonStreamResult(statusCode, text)
 		} catch (e: Exception) {
 			updateAccessRecord(requestId, "failed", errorMessage = e.message)
 			LLMNonStreamResult(502, errorJson("upstream_error", e.message ?: "LLM 上游请求失败"))
 		}
+	}
+
+	private suspend fun completeWithOptionalTools(
+		request: NormalizedRequest,
+		requester: LLMRequester,
+		source: String,
+	): Pair<Int, String> {
+		if (!toolService.enabled()) {
+			val response = postUpstream(source, request.body)
+			return response.status.value to response.bodyAsText()
+		}
+
+		val obj = jsonParser.parse(request.body).asJsonObject
+		obj.add("tools", toolService.definitions())
+		if (!obj.has("tool_choice")) {
+			obj.addProperty("tool_choice", "auto")
+		}
+
+		var latestStatus = 502
+		var latestBody = ""
+		repeat(maxToolRounds) { round ->
+			val body = obj.toString()
+			val response = postUpstream("$source/tool-round-${round + 1}", body)
+			latestStatus = response.status.value
+			latestBody = response.bodyAsText()
+			if (!response.status.isSuccess()) {
+				return latestStatus to latestBody
+			}
+			val toolCalls = extractToolCalls(latestBody)
+			if (toolCalls.isEmpty()) {
+				return latestStatus to latestBody
+			}
+			appendAssistantToolCallMessage(obj.getAsJsonArray("messages"), latestBody)
+			toolCalls.forEach { call ->
+				obj.getAsJsonArray("messages").add(JsonObject().apply {
+					addProperty("role", "tool")
+					addProperty("tool_call_id", call.id)
+					addProperty("name", call.name)
+					addProperty("content", toolService.execute(call.name, call.arguments, requester.groupId))
+				})
+			}
+		}
+		return latestStatus to errorJson("tool_round_limit", "工具调用轮数超过限制")
+	}
+
+	private suspend fun postUpstream(source: String, body: String) = client.post(upstreamUrl) {
+		header(HttpHeaders.Authorization, "Bearer $upstreamToken")
+		contentType(ContentType.Application.Json)
+		debugPrompt(source, body)
+		setBody(body)
 	}
 
 	private fun authenticateServerToken(token: String): Boolean = nodes.getServerFromToken(token) >= 0
@@ -316,6 +356,41 @@ class LLMServices(
 		conversationService.append(requester.conversationKey(), userQuestion, answer)
 	}
 
+	private fun extractToolCalls(responseBody: String): List<ToolCall> = runCatching {
+		val root = jsonParser.parse(responseBody).asJsonObject
+		val choices = root.getAsJsonArray("choices") ?: return emptyList()
+		if (choices.size() == 0) return emptyList()
+		val message = choices[0].asJsonObject.getAsJsonObject("message") ?: return emptyList()
+		val toolCalls = message.getAsJsonArray("tool_calls") ?: return emptyList()
+		toolCalls.mapNotNull { item ->
+			val call = item.takeIf { it.isJsonObject }?.asJsonObject ?: return@mapNotNull null
+			val function = call.getAsJsonObject("function") ?: return@mapNotNull null
+			ToolCall(
+				id = call.get("id")?.asString ?: "call_${UUID.randomUUID()}",
+				name = function.get("name")?.asString ?: return@mapNotNull null,
+				arguments = function.get("arguments")?.asString,
+			)
+		}
+	}.getOrDefault(emptyList())
+
+	private fun appendAssistantToolCallMessage(messages: JsonArray, responseBody: String) {
+		runCatching {
+			val root = jsonParser.parse(responseBody).asJsonObject
+			val choices = root.getAsJsonArray("choices") ?: return
+			if (choices.size() == 0) return
+			val message = choices[0].asJsonObject.getAsJsonObject("message") ?: return
+			messages.add(JsonObject().apply {
+				addProperty("role", "assistant")
+				if (message.has("content") && !message.get("content").isJsonNull) {
+					add("content", message.get("content"))
+				} else {
+					addProperty("content", "")
+				}
+				message.getAsJsonArray("tool_calls")?.let { add("tool_calls", it.deepCopy()) }
+			})
+		}
+	}
+
 	private fun extractAssistantContent(responseBody: String): String? = runCatching {
 		val root = jsonParser.parse(responseBody).asJsonObject
 		val choices = root.getAsJsonArray("choices") ?: return null
@@ -347,6 +422,11 @@ class LLMServices(
 			- 如果用户问“我”“我的账号”“我的权限”等和身份有关的问题，必须结合“当前提问用户”判断。
 			- 涉及账号、安全、封禁、权限、绕过限制的问题时保持谨慎。
 			- 优先根据知识库资料回答；资料没有覆盖时说明缺少依据。
+			工具使用：
+			- 用户询问服务器当前人数、在线人数、MSPT、服务器状态时，使用 get_server_status。
+			- 用户询问地铁线路、站点、区间、坐标时，使用 query_metro_lines。
+			- 用户询问 Minecraft、QO 玩法、指令、规则资料时，可以使用 search_minecraft_knowledge。
+			- 工具结果是内部资料，回答时直接整理成自然语言，不要暴露原始 JSON。
 		""".trimIndent()
 	}
 
@@ -454,6 +534,7 @@ class LLMServices(
 	private data class LLMRequester(val uid: Long, val name: String, val source: String, val groupId: Long? = null) {
 		fun conversationKey(): String = listOfNotNull(source, groupId?.toString(), uid.toString()).joinToString(":")
 	}
+	private data class ToolCall(val id: String, val name: String, val arguments: String?)
 	private data class Usage(val promptTokens: Int?, val completionTokens: Int?, val totalTokens: Int?)
 }
 
