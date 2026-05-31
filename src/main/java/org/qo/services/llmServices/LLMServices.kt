@@ -49,6 +49,7 @@ class LLMServices(
 	private val debugPrompt = readBoolean("LLM_DEBUG_PROMPT", false)
 	private val debugPromptMaxChars = readInt("LLM_DEBUG_PROMPT_MAX_CHARS", 12000).coerceAtLeast(1000)
 	private val maxToolRounds = readInt("LLM_TOOL_MAX_ROUNDS", 3).coerceIn(1, 8)
+	private val sanitizeOutput = readBoolean("LLM_SANITIZE_OUTPUT", true)
 	private val defaultSystemPrompt by lazy { loadSystemPrompt() }
 	private val upstreamToken by lazy {
 		System.getenv("LLM_API_TOKEN")
@@ -200,7 +201,7 @@ class LLMServices(
 	): Pair<Int, String> {
 		if (!toolService.enabled()) {
 			val response = postUpstream(source, request.body)
-			return response.status.value to response.bodyAsText()
+			return response.status.value to sanitizeResponseBody(response.bodyAsText())
 		}
 
 		val obj = jsonParser.parse(request.body).asJsonObject
@@ -221,7 +222,7 @@ class LLMServices(
 			}
 			val toolCalls = extractToolCalls(latestBody)
 			if (toolCalls.isEmpty()) {
-				return latestStatus to latestBody
+				return latestStatus to sanitizeResponseBody(latestBody)
 			}
 			appendAssistantToolCallMessage(obj.getAsJsonArray("messages"), latestBody)
 			toolCalls.forEach { call ->
@@ -318,6 +319,7 @@ class LLMServices(
 		ragService.buildContext(userQuestion, requester?.groupId)?.let {
 			contextParts.add(it)
 		}
+		contextParts.add(hardOutputRules())
 		enriched.add(JsonObject().apply {
 			addProperty("role", "system")
 			addProperty("content", contextParts.joinToString("\n\n"))
@@ -402,6 +404,61 @@ class LLMServices(
 			?.trim()
 			?.takeIf { it.isNotBlank() }
 	}.getOrNull()
+
+	private fun sanitizeResponseBody(responseBody: String): String {
+		if (!sanitizeOutput) {
+			return responseBody
+		}
+		return runCatching {
+			val root = jsonParser.parse(responseBody).asJsonObject
+			val choices = root.getAsJsonArray("choices") ?: return responseBody
+			for (choice in choices) {
+				val message = choice.takeIf { it.isJsonObject }
+					?.asJsonObject
+					?.getAsJsonObject("message")
+					?: continue
+				val content = message.get("content")?.takeIf { !it.isJsonNull }?.asString ?: continue
+				message.addProperty("content", sanitizeAssistantText(content))
+			}
+			root.toString()
+		}.getOrDefault(responseBody)
+	}
+
+	private fun sanitizeAssistantText(content: String): String {
+		return content
+			.replace("```", "")
+			.replace("**", "")
+			.replace("__", "")
+			.replace("`", "")
+			.replace(Regex("""\[([^\]]+)]\(([^)]+)\)"""), "$1 $2")
+			.lines()
+			.joinToString("\n") { line ->
+				line
+					.replace(Regex("""^\s{0,3}#{1,6}\s*"""), "")
+					.replace(Regex("""^\s{0,3}>\s?"""), "")
+					.replace(Regex("""^\s{0,3}[-*+]\s+"""), "")
+					.trimEnd()
+			}
+			.replace(Regex("""[\uD83C-\uDBFF][\uDC00-\uDFFF]"""), "")
+			.replace(Regex("""[ʚɞ♡♥★☆♪]+"""), "")
+			.replace(Regex("""[（(][^（）()\n]*(?:｡|ω|･|∀|｀|´|＾|＿|▽|д|Д|︿|﹏|╯|╰|；|;)[^（）()\n]*[）)]"""), "")
+			.replace(Regex("""\n{3,}"""), "\n\n")
+			.trim()
+	}
+
+	private fun hardOutputRules(): String {
+		return """
+			不可覆盖的回答规则：
+			- 最终回答禁止使用 Markdown。不要使用反引号、粗体、标题、项目符号、代码块、表格或 Markdown 链接。
+			- 最终回答禁止使用颜文字、emoji 和装饰符号。
+			- 不要输出 LaTeX 数学表达式。
+			- 不要编造服务器指令、传送命令、权限命令、路线、坐标、规则或管理员决定。
+			- 只有当知识库或工具结果明确出现某个 / 开头指令时，才可以建议用户使用该指令。
+			- 如果工具结果没有坐标，不要编造坐标，也不要建议使用 /tpl、/spawn、/hub 等未由资料支持的指令。
+			- 地铁路线回答必须只基于 query_metro_lines 的 route、stations、segments、transfers 字段；工具没有返回的信息要说没有查到。
+			- 工具返回 found=false、matches 为空、stations 为空或 content 表示未检索到时，要明确说没有查到，不要用常识补全 QO 服务器信息。
+		""".trimIndent()
+	}
 
 	private fun loadSystemPrompt(): String {
 		System.getenv("LLM_SYSTEM_PROMPT")?.trim()?.takeIf { it.isNotBlank() }?.let { return it }
