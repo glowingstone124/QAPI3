@@ -154,7 +154,10 @@ class LLMToolService(
 		if (from.isNotBlank() && to.isNotBlank()) {
 			return calculateTransportationRoute(from, to, constraints)
 		}
-		val query = args.get("query")?.takeIf { !it.isJsonNull }?.asString?.trim().orEmpty()
+		val query = args.get("query")?.takeIf { !it.isJsonNull }?.asString?.trim()
+			?: args.get("line")?.takeIf { !it.isJsonNull }?.asString?.trim()
+			?: args.get("name")?.takeIf { !it.isJsonNull }?.asString?.trim()
+			?: ""
 		val lineId = args.get("line_id")?.takeIf { !it.isJsonNull }?.asInt
 		val stationOnly = args.get("station_only")?.takeIf { !it.isJsonNull }?.asBoolean ?: false
 		val transportationResult = queryTransportation(query, lineId)

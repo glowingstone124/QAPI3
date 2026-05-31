@@ -224,7 +224,7 @@ class LLMServices(
 			if (toolCalls.isEmpty()) {
 				return latestStatus to sanitizeResponseBody(latestBody)
 			}
-			appendAssistantToolCallMessage(obj.getAsJsonArray("messages"), latestBody)
+			appendAssistantToolCallMessage(obj.getAsJsonArray("messages"), latestBody, toolCalls)
 			toolCalls.forEach { call ->
 				obj.getAsJsonArray("messages").add(JsonObject().apply {
 					addProperty("role", "tool")
@@ -450,19 +450,50 @@ class LLMServices(
 		val choices = root.getAsJsonArray("choices") ?: return emptyList()
 		if (choices.size() == 0) return emptyList()
 		val message = choices[0].asJsonObject.getAsJsonObject("message") ?: return emptyList()
-		val toolCalls = message.getAsJsonArray("tool_calls") ?: return emptyList()
-		toolCalls.mapNotNull { item ->
-			val call = item.takeIf { it.isJsonObject }?.asJsonObject ?: return@mapNotNull null
-			val function = call.getAsJsonObject("function") ?: return@mapNotNull null
-			ToolCall(
-				id = call.get("id")?.asString ?: "call_${UUID.randomUUID()}",
-				name = function.get("name")?.asString ?: return@mapNotNull null,
-				arguments = function.get("arguments")?.asString,
-			)
+		message.getAsJsonArray("tool_calls")?.let { toolCalls ->
+			return toolCalls.mapNotNull { item ->
+				val call = item.takeIf { it.isJsonObject }?.asJsonObject ?: return@mapNotNull null
+				val function = call.getAsJsonObject("function") ?: return@mapNotNull null
+				ToolCall(
+					id = call.get("id")?.asString ?: "call_${UUID.randomUUID()}",
+					name = function.get("name")?.asString ?: return@mapNotNull null,
+					arguments = function.get("arguments")?.asString,
+				)
+			}
 		}
+		val content = message.get("content")?.takeIf { !it.isJsonNull }?.asString.orEmpty()
+		extractDsmlToolCalls(content)
 	}.getOrDefault(emptyList())
 
-	private fun appendAssistantToolCallMessage(messages: JsonArray, responseBody: String) {
+	private fun extractDsmlToolCalls(content: String): List<ToolCall> {
+		if (!content.contains("tool_calls") && !content.contains("invoke name=")) {
+			return emptyList()
+		}
+		return Regex("""<[^>]*invoke\s+name="([^"]+)"[^>]*>([\s\S]*?)</[^>]*invoke>""")
+			.findAll(content)
+			.mapNotNull { invoke ->
+				val name = invoke.groupValues[1].trim()
+				if (name.isBlank()) return@mapNotNull null
+				val args = JsonObject()
+				Regex("""<[^>]*parameter\s+name="([^"]+)"[^>]*>([\s\S]*?)</[^>]*parameter>""")
+					.findAll(invoke.groupValues[2])
+					.forEach { parameter ->
+						val parameterName = parameter.groupValues[1].trim()
+						val value = parameter.groupValues[2].trim()
+						if (parameterName.isNotBlank()) {
+							args.addProperty(parameterName, value)
+						}
+					}
+				ToolCall(
+					id = "call_${UUID.randomUUID()}",
+					name = name,
+					arguments = args.toString(),
+				)
+			}
+			.toList()
+	}
+
+	private fun appendAssistantToolCallMessage(messages: JsonArray, responseBody: String, parsedToolCalls: List<ToolCall>) {
 		runCatching {
 			val root = jsonParser.parse(responseBody).asJsonObject
 			val choices = root.getAsJsonArray("choices") ?: return
@@ -475,7 +506,20 @@ class LLMServices(
 				} else {
 					addProperty("content", "")
 				}
-				message.getAsJsonArray("tool_calls")?.let { add("tool_calls", it.deepCopy()) }
+				message.getAsJsonArray("tool_calls")?.let {
+					add("tool_calls", it.deepCopy())
+				} ?: add("tool_calls", JsonArray().apply {
+					parsedToolCalls.forEach { call ->
+						add(JsonObject().apply {
+							addProperty("id", call.id)
+							addProperty("type", "function")
+							add("function", JsonObject().apply {
+								addProperty("name", call.name)
+								addProperty("arguments", call.arguments ?: "{}")
+							})
+						})
+					}
+				})
 			})
 		}
 	}
@@ -513,6 +557,9 @@ class LLMServices(
 
 	private fun sanitizeAssistantText(content: String): String {
 		return content
+			.replace(Regex("""<[^>]*tool_calls[^>]*>[\s\S]*?</[^>]*tool_calls>"""), "")
+			.replace(Regex("""<[^>]*invoke\s+name="[^"]+"[^>]*>[\s\S]*?</[^>]*invoke>"""), "")
+			.replace(Regex("""</?[^>]*DSML[^>]*>"""), "")
 			.replace("```", "")
 			.replace("**", "")
 			.replace("__", "")
@@ -544,6 +591,7 @@ class LLMServices(
 			- 如果工具结果没有坐标，不要编造坐标，也不要建议使用 /tpl、/spawn、/hub 等未由资料支持的指令。
 			- 地铁路线回答必须只基于 query_metro_lines 的 route、stations、segments、transfers 字段；工具没有返回的信息要说没有查到。
 			- 工具返回 found=false、matches 为空、stations 为空或 content 表示未检索到时，要明确说没有查到，不要用常识补全 QO 服务器信息。
+			- 绝对不要把工具调用语法输出给用户，包括 tool_calls、invoke、parameter、DSML、XML 标签或 JSON 工具参数。
 		""".trimIndent()
 	}
 
