@@ -50,6 +50,7 @@ class LLMServices(
 	private val debugPromptMaxChars = readInt("LLM_DEBUG_PROMPT_MAX_CHARS", 12000).coerceAtLeast(1000)
 	private val maxToolRounds = readInt("LLM_TOOL_MAX_ROUNDS", 3).coerceIn(1, 8)
 	private val sanitizeOutput = readBoolean("LLM_SANITIZE_OUTPUT", true)
+	private val groupContextMaxChars = readInt("LLM_GROUP_CONTEXT_MAX_CHARS", 120000).coerceIn(0, 1_000_000)
 	private val defaultSystemPrompt by lazy { loadSystemPrompt() }
 	private val upstreamToken by lazy {
 		System.getenv("LLM_API_TOKEN")
@@ -222,6 +223,9 @@ class LLMServices(
 			}
 			val toolCalls = extractToolCalls(latestBody)
 			if (toolCalls.isEmpty()) {
+				if (containsToolMarkup(latestBody)) {
+					return 502 to errorJson("invalid_tool_call", "LLM 输出了无法解析的工具调用")
+				}
 				return latestStatus to sanitizeResponseBody(latestBody)
 			}
 			appendAssistantToolCallMessage(obj.getAsJsonArray("messages"), latestBody, toolCalls)
@@ -234,14 +238,7 @@ class LLMServices(
 				})
 			}
 		}
-		obj.remove("tools")
-		obj.addProperty("tool_choice", "none")
-		obj.getAsJsonArray("messages").add(JsonObject().apply {
-			addProperty("role", "system")
-			addProperty("content", "工具调用轮次已结束。必须只根据已有 tool 结果给出最终回答，不要继续请求工具，不要补充工具结果没有的信息。")
-		})
-		val response = postUpstream("$source/tool-final", obj.toString())
-		return response.status.value to sanitizeResponseBody(response.bodyAsText())
+		return 502 to errorJson("tool_round_limit", "工具调用轮数超过限制，请调高 LLM_TOOL_MAX_ROUNDS")
 	}
 
 	private suspend fun postUpstream(source: String, body: String) = client.post(upstreamUrl) {
@@ -303,11 +300,13 @@ class LLMServices(
 		if (!obj.has("messages") || !obj.get("messages").isJsonArray) {
 			throw IllegalArgumentException("OpenAI chat completions request must contain messages array")
 		}
-		obj.add("messages", enrichMessages(obj.getAsJsonArray("messages"), requester))
+		val groupContext = obj.getAsJsonArray("group_context")
+		obj.remove("group_context")
+		obj.add("messages", enrichMessages(obj.getAsJsonArray("messages"), requester, groupContext))
 		return NormalizedRequest(obj.get("model").asString, obj.toString(), latestUserQuestion(obj.getAsJsonArray("messages")))
 	}
 
-	private fun enrichMessages(messages: JsonArray, requester: LLMRequester?): JsonArray {
+	private fun enrichMessages(messages: JsonArray, requester: LLMRequester?, groupContext: JsonArray?): JsonArray {
 		val enriched = JsonArray()
 		val userQuestion = latestUserQuestion(messages)
 		val contextParts = mutableListOf<String>()
@@ -324,6 +323,9 @@ class LLMServices(
 			)
 		}
 		ragService.buildContext(userQuestion, requester?.groupId)?.let {
+			contextParts.add(it)
+		}
+		buildGroupContext(groupContext)?.let {
 			contextParts.add(it)
 		}
 		contextParts.add(hardOutputRules())
@@ -343,6 +345,41 @@ class LLMServices(
 			}
 		}
 		return enriched
+	}
+
+	private fun buildGroupContext(groupContext: JsonArray?): String? {
+		if (groupContext == null || groupContext.size() == 0 || groupContextMaxChars <= 0) {
+			return null
+		}
+		val lines = mutableListOf<String>()
+		var used = 0
+		for (item in groupContext) {
+			val obj = item.takeIf { it.isJsonObject }?.asJsonObject ?: continue
+			val uid = obj.get("uid")?.takeIf { !it.isJsonNull }?.asString ?: "unknown"
+			val name = obj.get("name")?.takeIf { !it.isJsonNull }?.asString ?: "qq:$uid"
+			val content = obj.get("content")?.takeIf { !it.isJsonNull }?.asString?.trim().orEmpty()
+			if (content.isBlank()) {
+				continue
+			}
+			val time = obj.get("time")?.takeIf { !it.isJsonNull }?.asLong
+			val line = if (time != null) {
+				"[$time] $name($uid): $content"
+			} else {
+				"$name($uid): $content"
+			}
+			if (used + line.length > groupContextMaxChars) {
+				break
+			}
+			lines.add(line)
+			used += line.length
+		}
+		if (lines.isEmpty()) {
+			return null
+		}
+		return """
+			最近群聊记录如下，按时间从旧到新排列。它用于理解群内上下文、省略指代和多人对话；不要把这些记录逐字复述给用户。
+			${lines.joinToString("\n")}
+		""".trimIndent()
 	}
 
 	private fun latestUserQuestion(messages: JsonArray): String {
@@ -389,28 +426,39 @@ class LLMServices(
 		if (!content.contains("tool_calls") && !content.contains("invoke name=")) {
 			return emptyList()
 		}
-		return Regex("""<[^>]*invoke\s+name="([^"]+)"[^>]*>([\s\S]*?)</[^>]*invoke>""")
+		val invokeBlocks = Regex("""<[^>\n]*invoke[^>\n]*name=["']([^"']+)["'][^>]*>([\s\S]*?)(?:</[^>]*invoke>|$)""")
 			.findAll(content)
-			.mapNotNull { invoke ->
-				val name = invoke.groupValues[1].trim()
-				if (name.isBlank()) return@mapNotNull null
-				val args = JsonObject()
-				Regex("""<[^>]*parameter\s+name="([^"]+)"[^>]*>([\s\S]*?)</[^>]*parameter>""")
-					.findAll(invoke.groupValues[2])
-					.forEach { parameter ->
-						val parameterName = parameter.groupValues[1].trim()
-						val value = parameter.groupValues[2].trim()
-						if (parameterName.isNotBlank()) {
-							args.addProperty(parameterName, value)
-						}
-					}
-				ToolCall(
-					id = "call_${UUID.randomUUID()}",
-					name = name,
-					arguments = args.toString(),
-				)
-			}
 			.toList()
+		if (invokeBlocks.isNotEmpty()) {
+			return invokeBlocks.mapNotNull { invoke ->
+				dsmlInvokeToToolCall(invoke.groupValues[1], invoke.groupValues[2])
+			}
+		}
+		val invokeName = Regex("""invoke[^>\n]*name=["']([^"']+)["']""").find(content)?.groupValues?.getOrNull(1)
+			?: return emptyList()
+		return listOfNotNull(dsmlInvokeToToolCall(invokeName, content))
+	}
+
+	private fun dsmlInvokeToToolCall(name: String, body: String): ToolCall? {
+		val toolName = name.trim()
+		if (toolName.isBlank()) {
+			return null
+		}
+		val args = JsonObject()
+		Regex("""<[^>\n]*parameter[^>\n]*name=["']([^"']+)["'][^>]*>([\s\S]*?)(?:</[^>]*parameter>|$)""")
+			.findAll(body)
+			.forEach { parameter ->
+				val parameterName = parameter.groupValues[1].trim()
+				val value = parameter.groupValues[2].trim()
+				if (parameterName.isNotBlank()) {
+					args.addProperty(parameterName, value)
+				}
+			}
+		return ToolCall(
+			id = "call_${UUID.randomUUID()}",
+			name = toolName,
+			arguments = args.toString(),
+		)
 	}
 
 	private fun appendAssistantToolCallMessage(messages: JsonArray, responseBody: String, parsedToolCalls: List<ToolCall>) {
@@ -473,6 +521,13 @@ class LLMServices(
 			}
 			root.toString()
 		}.getOrDefault(responseBody)
+	}
+
+	private fun containsToolMarkup(text: String): Boolean {
+		return text.contains("tool_calls", ignoreCase = true) ||
+			text.contains("invoke name=", ignoreCase = true) ||
+			text.contains("｜｜DSML｜｜") ||
+			text.contains("<tool_call", ignoreCase = true)
 	}
 
 	private fun sanitizeAssistantText(content: String): String {

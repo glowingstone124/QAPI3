@@ -123,6 +123,7 @@ Related environment variables:
 - `LLM_TOOLS_ENABLED`: enable built-in tools, default `true`.
 - `LLM_TOOL_MAX_ROUNDS`: maximum tool-call loops per request, default `3`.
 - `LLM_TOOL_METRO_MAX_RESULTS`: maximum metro search results returned to the model, default `12`.
+- `LLM_GROUP_CONTEXT_MAX_CHARS`: maximum group chat context characters accepted from bot requests, default `120000`.
 
 ## For Contributors
 
