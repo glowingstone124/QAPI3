@@ -21,98 +21,122 @@ class LLMToolService(
 	private val metroService: MetroServiceImpl,
 	private val transportationService: TransportationServiceImpl,
 	private val ragService: RAGService,
+	private val llmMemoryService: LLMMemoryService
 ) {
 	private val gson: Gson = GsonBuilder().disableHtmlEscaping().create()
-	private val jsonParser = JsonParser()
 	private val maxMetroResults = readInt("LLM_TOOL_METRO_MAX_RESULTS", 12).coerceIn(1, 50)
 
 	fun enabled(): Boolean = readBoolean("LLM_TOOLS_ENABLED", true)
 
-	fun definitions(): JsonArray = jsonParser.parse(
-		"""
-		[
-		  {
-		    "type": "function",
-		    "function": {
-		      "name": "get_server_status",
-		      "description": "查询 QO Minecraft 服务器当前状态、在线人数、总注册人数和 MSPT。用户询问服务器人数、在线人数、服务器状态时使用。",
-		      "parameters": {
-		        "type": "object",
-		        "properties": {
-		          "server_id": {
-		            "type": "integer",
-		            "description": "服务器编号。默认 1；survival/生存为 1，creative/创造为 4。"
-		          },
-		          "server_name": {
-		            "type": "string",
-		            "description": "服务器名称，可选 survival、生存、creative、创造。"
-		          }
-		        }
-		      }
-		    }
-		  },
-		  {
-		    "type": "function",
-		    "function": {
-		      "name": "query_metro_lines",
-		      "description": "查询 QO 地铁线路、站点、区间或计算路线。用户询问地铁、线路、站点、坐标、方向、从 A 到 B 怎么走、以及继续追问上一条路线是否可以步行/避开某类交通时使用。多轮追问时应从聊天历史继承上一条路线的 from/to，并按用户新要求设置 exclude_dims 或 exclude_types。",
-		      "parameters": {
-		        "type": "object",
-		        "properties": {
-		          "from": {
-		            "type": "string",
-		            "description": "路线起点站名或站点 ID。用户问从 A 到 B 怎么坐时填写。"
-		          },
-		          "to": {
-		            "type": "string",
-		            "description": "路线终点站名或站点 ID。用户问从 A 到 B 怎么坐时填写。"
-		          },
-		          "query": {
-		            "type": "string",
-		            "description": "站点名、区间名、线路名或关键词。不问路线时使用。"
-		          },
-		          "line_id": {
-		            "type": "integer",
-		            "description": "线路编号 lid。"
-		          },
-		          "station_only": {
-		            "type": "boolean",
-		            "description": "是否只返回站点。"
-		          },
-		          "exclude_dims": {
-		            "type": "array",
-		            "description": "路线计算时排除的维度。可选 overworld、nether、the_end。用户说不要走下界/只走主世界时使用；只走主世界等价于排除 nether 和 the_end。",
-		            "items": {"type": "string"}
-		          },
-		          "exclude_types": {
-		            "type": "array",
-		            "description": "路线计算时排除的交通类型。可选 metro、rapid、blueice、citymetro、nether、pearl、airplane、boat、walk。用户问能不能步行时，不要在服务端推断，只由模型显式设置需要排除或保留的交通类型。",
-		            "items": {"type": "string"}
-		          }
-		        }
-		      }
-		    }
-		  },
-		  {
-		    "type": "function",
-		    "function": {
-		      "name": "search_minecraft_knowledge",
-		      "description": "检索 Minecraft、QO 服务器玩法、指令、规则和知识库资料。用户询问 Minecraft 知识或服务器资料时使用。",
-		      "parameters": {
-		        "type": "object",
-		        "properties": {
-		          "query": {
-		            "type": "string",
-		            "description": "需要检索的问题或关键词。"
-		          }
-		        },
-		        "required": ["query"]
-		      }
-		    }
-		  }
-		]
-		""".trimIndent()
-	).asJsonArray
+	fun definitions(): JsonArray = JsonArray().apply {
+		add(functionTool(
+			name = "get_server_status",
+			description = "查询 QO Minecraft 服务器当前状态、在线人数、总注册人数和 MSPT。用户询问服务器人数、在线人数、服务器状态时使用。",
+			properties = linkedMapOf(
+				"server_id" to property(
+					type = "integer",
+					description = "服务器编号。默认 1；survival/生存为 1，creative/创造为 4。"
+				),
+				"server_name" to property(
+					type = "string",
+					description = "服务器名称，可选 survival、生存、creative、创造。"
+				),
+			)
+		))
+		add(functionTool(
+			name = "query_metro_lines",
+			description = "查询 QO 地铁线路、站点、区间或计算路线。用户询问地铁、线路、站点、坐标、方向、从 A 到 B 怎么走、以及继续追问上一条路线是否可以步行/避开某类交通时使用。多轮追问时应从聊天历史继承上一条路线的 from/to，并按用户新要求设置 exclude_dims 或 exclude_types。",
+			properties = linkedMapOf(
+				"from" to property(
+					type = "string",
+					description = "路线起点站名或站点 ID。用户问从 A 到 B 怎么坐时填写。"
+				),
+				"to" to property(
+					type = "string",
+					description = "路线终点站名或站点 ID。用户问从 A 到 B 怎么坐时填写。"
+				),
+				"query" to property(
+					type = "string",
+					description = "站点名、区间名、线路名或关键词。不问路线时使用。"
+				),
+				"line_id" to property(
+					type = "integer",
+					description = "线路编号 lid。"
+				),
+				"station_only" to property(
+					type = "boolean",
+					description = "是否只返回站点。"
+				),
+				"exclude_dims" to arrayProperty(
+					itemType = "string",
+					description = "路线计算时排除的维度。可选 overworld、nether、the_end。用户说不要走下界/只走主世界时使用；只走主世界等价于排除 nether 和 the_end。"
+				),
+				"exclude_types" to arrayProperty(
+					itemType = "string",
+					description = "路线计算时排除的交通类型。可选 metro、rapid、blueice、citymetro、nether、pearl、airplane、boat、walk。用户问能不能步行时，不要在服务端推断，只由模型显式设置需要排除或保留的交通类型。"
+				),
+			)
+		))
+		add(functionTool(
+			name = "search_minecraft_knowledge",
+			description = "检索 Minecraft、QO 服务器玩法、指令、规则和知识库资料。用户询问 Minecraft 知识或服务器资料时使用。",
+			properties = linkedMapOf(
+				"query" to property(
+					type = "string",
+					description = "需要检索的问题或关键词。"
+				),
+			),
+			required = listOf("query")
+		))
+		add(functionTool(
+			name = "add_memory",
+			description = "持久化保存一个群内记忆。只有用户明确要求记住、保存、以后记得某条信息时才使用；不要主动保存普通聊天。",
+			properties = linkedMapOf(
+				"data" to property(
+					type = "string",
+					description = "需要保存的记忆内容。不要包含用户未明确要求保存的额外推测。"
+				)
+			),
+			required = listOf("data")
+		))
+	}
+
+	private fun functionTool(
+		name: String,
+		description: String,
+		properties: Map<String, JsonObject>,
+		required: List<String> = emptyList(),
+	): JsonObject = JsonObject().apply {
+		addProperty("type", "function")
+		add("function", JsonObject().apply {
+			addProperty("name", name)
+			addProperty("description", description)
+			add("parameters", JsonObject().apply {
+				addProperty("type", "object")
+				add("properties", JsonObject().apply {
+					properties.forEach { (propertyName, schema) ->
+						add(propertyName, schema)
+					}
+				})
+				if (required.isNotEmpty()) {
+					add("required", JsonArray().apply { required.forEach(::add) })
+				}
+			})
+		})
+	}
+
+	private fun property(type: String, description: String): JsonObject = JsonObject().apply {
+		addProperty("type", type)
+		addProperty("description", description)
+	}
+
+	private fun arrayProperty(itemType: String, description: String): JsonObject = JsonObject().apply {
+		addProperty("type", "array")
+		addProperty("description", description)
+		add("items", JsonObject().apply {
+			addProperty("type", itemType)
+		})
+	}
 
 	fun execute(name: String, rawArguments: String?, requesterGroupId: Long?): String {
 		val args = parseArguments(rawArguments)
@@ -121,9 +145,24 @@ class LLMToolService(
 				"get_server_status" -> getServerStatus(args)
 				"query_metro_lines" -> queryMetroLines(args)
 				"search_minecraft_knowledge" -> searchMinecraftKnowledge(args, requesterGroupId)
+				"add_memory" -> addMemory(args, requesterGroupId)
 				else -> errorResult("unknown_tool", "未知工具：$name")
 			}
 		}.getOrElse { errorResult("tool_error", it.message ?: "工具执行失败") }
+	}
+
+	private fun addMemory(args: JsonObject, requesterGroupId: Long?): String {
+		val groupId = requesterGroupId ?: return errorResult("missing_group", "缺少群上下文，无法保存记忆")
+		val content = args.get("data")?.takeIf { !it.isJsonNull }?.asString?.trim().orEmpty()
+		if (content.isBlank()) {
+			return errorResult("bad_arguments", "data 不能为空")
+		}
+		val saved = llmMemoryService.insertMemory(content.take(2000), groupId)
+		return gson.toJson(JsonObject().apply {
+			addProperty("tool", "add_memory")
+			addProperty("saved", saved)
+			addProperty("group_id", groupId)
+		})
 	}
 
 	private fun getServerStatus(args: JsonObject): String {
@@ -164,7 +203,7 @@ class LLMToolService(
 		if (transportationResult != null) {
 			return transportationResult
 		}
-		val root = jsonParser.parse(metroService.getMetroJson()).asJsonObject
+		val root = JsonParser.parseString(metroService.getMetroJson()).asJsonObject
 		val matches = JsonArray()
 		root.entrySet().asSequence()
 			.map { it.key to it.value.asJsonObject }
@@ -172,9 +211,9 @@ class LLMToolService(
 			.filter { (_, section) -> !stationOnly || section.get("station")?.asBoolean == true }
 			.filter { (id, section) ->
 				query.isBlank() ||
-					id.contains(query, ignoreCase = true) ||
-					(section.get("dummy")?.asString?.contains(query, ignoreCase = true) == true) ||
-					(section.get("lid")?.asString == query)
+						id.contains(query, ignoreCase = true) ||
+						(section.get("dummy")?.asString?.contains(query, ignoreCase = true) == true) ||
+						(section.get("lid")?.asString == query)
 			}
 			.take(maxMetroResults)
 			.forEach { (id, section) ->
@@ -423,7 +462,7 @@ class LLMToolService(
 		if (rawArguments.isNullOrBlank()) {
 			return JsonObject()
 		}
-		return runCatching { jsonParser.parse(rawArguments).asJsonObject }.getOrDefault(JsonObject())
+		return runCatching { JsonParser.parseString(rawArguments).asJsonObject }.getOrDefault(JsonObject())
 	}
 
 	private fun errorResult(code: String, message: String): String =
