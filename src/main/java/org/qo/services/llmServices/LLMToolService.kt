@@ -55,7 +55,7 @@ class LLMToolService(
 		    "type": "function",
 		    "function": {
 		      "name": "query_metro_lines",
-		      "description": "查询 QO 地铁线路、站点或区间信息。用户询问地铁、线路、站点、坐标、方向时使用。",
+		      "description": "查询 QO 地铁线路、站点、区间或计算路线。用户询问地铁、线路、站点、坐标、方向、从 A 到 B 怎么走、以及继续追问上一条路线是否可以步行/避开某类交通时使用。多轮追问时应从聊天历史继承上一条路线的 from/to，并按用户新要求设置 exclude_dims 或 exclude_types。",
 		      "parameters": {
 		        "type": "object",
 		        "properties": {
@@ -81,12 +81,12 @@ class LLMToolService(
 		          },
 		          "exclude_dims": {
 		            "type": "array",
-		            "description": "路线计算时排除的维度。可选 overworld、nether、the_end。用户说不要走下界/只走主世界时使用。",
+		            "description": "路线计算时排除的维度。可选 overworld、nether、the_end。用户说不要走下界/只走主世界时使用；只走主世界等价于排除 nether 和 the_end。",
 		            "items": {"type": "string"}
 		          },
 		          "exclude_types": {
 		            "type": "array",
-		            "description": "路线计算时排除的交通类型。可选 metro、rapid、blueice、citymetro、nether、pearl、airplane、boat、walk。",
+		            "description": "路线计算时排除的交通类型。可选 metro、rapid、blueice、citymetro、nether、pearl、airplane、boat、walk。用户问能不能步行时，不要在服务端推断，只由模型显式设置需要排除或保留的交通类型。",
 		            "items": {"type": "string"}
 		          }
 		        }

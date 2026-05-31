@@ -326,9 +326,6 @@ class LLMServices(
 		ragService.buildContext(userQuestion, requester?.groupId)?.let {
 			contextParts.add(it)
 		}
-		buildDeterministicToolContext(userQuestion, requester?.groupId)?.let {
-			contextParts.add(it)
-		}
 		contextParts.add(hardOutputRules())
 		enriched.add(JsonObject().apply {
 			addProperty("role", "system")
@@ -356,83 +353,6 @@ class LLMServices(
 			}
 		}
 		return ""
-	}
-
-	private fun buildDeterministicToolContext(userQuestion: String, groupId: Long?): String? {
-		if (!toolService.enabled()) {
-			return null
-		}
-		val route = extractRouteRequest(userQuestion) ?: return null
-		val args = JsonObject().apply {
-			addProperty("from", route.first)
-			addProperty("to", route.second)
-			addRouteExclusions(userQuestion)
-		}
-		val result = toolService.execute("query_metro_lines", args.toString(), groupId)
-		return """
-			服务端预执行工具结果如下。用户问题是路线问题，回答路线时必须优先使用这个结果；如果 found=false，要说明没有查到路线，不要改用猜测。
-			工具：query_metro_lines
-			参数：${args}
-			结果：$result
-		""".trimIndent()
-	}
-
-	private fun JsonObject.addRouteExclusions(question: String) {
-		val lower = question.lowercase()
-		val excludeDims = linkedSetOf<String>()
-		val excludeTypes = linkedSetOf<String>()
-		if ("不要走下界" in question || "不走下界" in question || "避开下界" in question || "不用下界" in question) {
-			excludeDims.add("nether")
-			excludeTypes.add("nether")
-		}
-		if ("不要走末地" in question || "不走末地" in question || "避开末地" in question) {
-			excludeDims.add("the_end")
-		}
-		if ("只走主世界" in question || "仅主世界" in question || "只在主世界" in question || "overworld only" in lower) {
-			excludeDims.add("nether")
-			excludeDims.add("the_end")
-		}
-		if ("不要步行" in question || "不步行" in question || "别走路" in question || "no walk" in lower) {
-			excludeTypes.add("walk")
-		}
-		if ("不要蓝冰" in question || "不用蓝冰" in question || "不走蓝冰" in question || "blueice" in lower || "blue ice" in lower) {
-			excludeTypes.add("blueice")
-		}
-		if (excludeDims.isNotEmpty()) {
-			add("exclude_dims", JsonArray().apply { excludeDims.forEach(::add) })
-		}
-		if (excludeTypes.isNotEmpty()) {
-			add("exclude_types", JsonArray().apply { excludeTypes.forEach(::add) })
-		}
-	}
-
-	private fun extractRouteRequest(text: String): Pair<String, String>? {
-		val normalized = text.trim()
-		if (normalized.isBlank()) {
-			return null
-		}
-		val patterns = listOf(
-			Regex("""从(.{1,40}?)到(.{1,40}?)(?:应该)?(?:怎么|如何|咋|怎样)(?:坐|走|去|到|换乘|乘车|搭车)?"""),
-			Regex("""从(.{1,40}?)去(.{1,40}?)(?:应该)?(?:怎么|如何|咋|怎样)(?:坐|走|去|到|换乘|乘车|搭车)?"""),
-			Regex("""(.{1,40}?)到(.{1,40}?)(?:的)?(?:地铁|路线|线路)(?:应该)?(?:怎么|如何|咋|怎样)?(?:坐|走|去|到|换乘|乘车|搭车)?"""),
-		)
-		for (pattern in patterns) {
-			val match = pattern.find(normalized) ?: continue
-			val from = cleanRouteEndpoint(match.groupValues[1])
-			val to = cleanRouteEndpoint(match.groupValues[2])
-			if (from.isNotBlank() && to.isNotBlank() && from != to) {
-				return from to to
-			}
-		}
-		return null
-	}
-
-	private fun cleanRouteEndpoint(value: String): String {
-		return value
-			.replace(Regex("""^(?:在|从|去|到|往|坐|乘坐|地铁|路线)+"""), "")
-			.replace(Regex("""(?:的)?(?:地铁|站|地铁站|路线|线路|应该)$"""), "")
-			.trim()
-			.trim('，', ',', '。', '.', '?', '？', '！', '!')
 	}
 
 	private fun reserveRequest(token: String): Boolean {
@@ -590,6 +510,7 @@ class LLMServices(
 			- 只有当知识库或工具结果明确出现某个 / 开头指令时，才可以建议用户使用该指令。
 			- 如果工具结果没有坐标，不要编造坐标，也不要建议使用 /tpl、/spawn、/hub 等未由资料支持的指令。
 			- 地铁路线回答必须只基于 query_metro_lines 的 route、stations、segments、transfers 字段；工具没有返回的信息要说没有查到。
+			- 多轮交通追问时，必须结合聊天历史理解省略指代。例如用户在一条路线后追问“步行呢”“不要下界呢”“只走主世界呢”，应使用上一条路线的起终点并通过 query_metro_lines 的结构化参数重新查询。
 			- 工具返回 found=false、matches 为空、stations 为空或 content 表示未检索到时，要明确说没有查到，不要用常识补全 QO 服务器信息。
 			- 绝对不要把工具调用语法输出给用户，包括 tool_calls、invoke、parameter、DSML、XML 标签或 JSON 工具参数。
 		""".trimIndent()
@@ -617,6 +538,7 @@ class LLMServices(
 			工具使用：
 			- 用户询问服务器当前人数、在线人数、MSPT、服务器状态时，使用 get_server_status。
 			- 用户询问地铁线路、站点、区间、坐标时，使用 query_metro_lines。
+			- 多轮交通追问时，结合聊天历史补全上一条路线的起终点，并用 query_metro_lines 重新查询。
 			- 用户询问 Minecraft、QO 玩法、指令、规则资料时，可以使用 search_minecraft_knowledge。
 			- 工具结果是内部资料，回答时直接整理成自然语言，不要暴露原始 JSON。
 		""".trimIndent()
