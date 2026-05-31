@@ -366,14 +366,44 @@ class LLMServices(
 		val args = JsonObject().apply {
 			addProperty("from", route.first)
 			addProperty("to", route.second)
+			addRouteExclusions(userQuestion)
 		}
 		val result = toolService.execute("query_metro_lines", args.toString(), groupId)
 		return """
 			服务端预执行工具结果如下。用户问题是路线问题，回答路线时必须优先使用这个结果；如果 found=false，要说明没有查到路线，不要改用猜测。
 			工具：query_metro_lines
-			参数：from=${route.first}, to=${route.second}
+			参数：${args}
 			结果：$result
 		""".trimIndent()
+	}
+
+	private fun JsonObject.addRouteExclusions(question: String) {
+		val lower = question.lowercase()
+		val excludeDims = linkedSetOf<String>()
+		val excludeTypes = linkedSetOf<String>()
+		if ("不要走下界" in question || "不走下界" in question || "避开下界" in question || "不用下界" in question) {
+			excludeDims.add("nether")
+			excludeTypes.add("nether")
+		}
+		if ("不要走末地" in question || "不走末地" in question || "避开末地" in question) {
+			excludeDims.add("the_end")
+		}
+		if ("只走主世界" in question || "仅主世界" in question || "只在主世界" in question || "overworld only" in lower) {
+			excludeDims.add("nether")
+			excludeDims.add("the_end")
+		}
+		if ("不要步行" in question || "不步行" in question || "别走路" in question || "no walk" in lower) {
+			excludeTypes.add("walk")
+		}
+		if ("不要蓝冰" in question || "不用蓝冰" in question || "不走蓝冰" in question || "blueice" in lower || "blue ice" in lower) {
+			excludeTypes.add("blueice")
+		}
+		if (excludeDims.isNotEmpty()) {
+			add("exclude_dims", JsonArray().apply { excludeDims.forEach(::add) })
+		}
+		if (excludeTypes.isNotEmpty()) {
+			add("exclude_types", JsonArray().apply { excludeTypes.forEach(::add) })
+		}
 	}
 
 	private fun extractRouteRequest(text: String): Pair<String, String>? {

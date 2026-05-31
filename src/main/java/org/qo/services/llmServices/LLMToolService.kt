@@ -7,6 +7,9 @@ import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import org.qo.services.gameStatusService.Status
 import org.qo.services.metroServices.MetroServiceImpl
+import org.qo.services.transportationServices.Dimension
+import org.qo.services.transportationServices.LineType
+import org.qo.services.transportationServices.RouteConstraints
 import org.qo.services.transportationServices.Station
 import org.qo.services.transportationServices.TransportationServiceImpl
 import org.springframework.stereotype.Service
@@ -75,6 +78,16 @@ class LLMToolService(
 		          "station_only": {
 		            "type": "boolean",
 		            "description": "是否只返回站点。"
+		          },
+		          "exclude_dims": {
+		            "type": "array",
+		            "description": "路线计算时排除的维度。可选 overworld、nether、the_end。用户说不要走下界/只走主世界时使用。",
+		            "items": {"type": "string"}
+		          },
+		          "exclude_types": {
+		            "type": "array",
+		            "description": "路线计算时排除的交通类型。可选 metro、rapid、blueice、citymetro、nether、pearl、airplane、boat、walk。",
+		            "items": {"type": "string"}
 		          }
 		        }
 		      }
@@ -137,8 +150,9 @@ class LLMToolService(
 	private fun queryMetroLines(args: JsonObject): String {
 		val from = args.get("from")?.takeIf { !it.isJsonNull }?.asString?.trim().orEmpty()
 		val to = args.get("to")?.takeIf { !it.isJsonNull }?.asString?.trim().orEmpty()
+		val constraints = parseRouteConstraints(args)
 		if (from.isNotBlank() && to.isNotBlank()) {
-			return calculateTransportationRoute(from, to)
+			return calculateTransportationRoute(from, to, constraints)
 		}
 		val query = args.get("query")?.takeIf { !it.isJsonNull }?.asString?.trim().orEmpty()
 		val lineId = args.get("line_id")?.takeIf { !it.isJsonNull }?.asInt
@@ -179,7 +193,7 @@ class LLMToolService(
 		})
 	}
 
-	private fun calculateTransportationRoute(from: String, to: String): String {
+	private fun calculateTransportationRoute(from: String, to: String, constraints: RouteConstraints): String {
 		val fromCandidates = findStations(from)
 		val toCandidates = findStations(to)
 		if (fromCandidates.isEmpty() || toCandidates.isEmpty()) {
@@ -188,6 +202,7 @@ class LLMToolService(
 				addProperty("mode", "route")
 				addProperty("found", false)
 				addProperty("message", "起点或终点没有匹配到站点。")
+				add("constraints", constraintsToJson(constraints))
 				add("from_candidates", stationsToJson(fromCandidates))
 				add("to_candidates", stationsToJson(toCandidates))
 			})
@@ -197,11 +212,12 @@ class LLMToolService(
 			toCandidates.take(3).map { toStation -> fromStation to toStation }
 		}
 		for ((fromStation, toStation) in attempts) {
-			val route = transportationService.calculateRoute(fromStation.ID, toStation.ID) ?: continue
+			val route = transportationService.calculateRoute(fromStation.ID, toStation.ID, constraints) ?: continue
 			return gson.toJson(JsonObject().apply {
 				addProperty("tool", "query_metro_lines")
 				addProperty("mode", "route")
 				addProperty("found", true)
+				add("constraints", constraintsToJson(constraints))
 				add("from", stationToJson(fromStation))
 				add("to", stationToJson(toStation))
 				add("route", gson.toJsonTree(route))
@@ -213,9 +229,95 @@ class LLMToolService(
 			addProperty("mode", "route")
 			addProperty("found", false)
 			addProperty("message", "站点存在，但没有计算到可用路线。")
+			add("constraints", constraintsToJson(constraints))
 			add("from_candidates", stationsToJson(fromCandidates))
 			add("to_candidates", stationsToJson(toCandidates))
 		})
+	}
+
+	private fun parseRouteConstraints(args: JsonObject): RouteConstraints {
+		val explicitDims = parseStringArray(args, "exclude_dims") + parseStringArray(args, "banned_dims")
+		val explicitTypes = parseStringArray(args, "exclude_types") + parseStringArray(args, "banned_types")
+		val avoid = listOf(
+			args.get("avoid")?.takeIf { !it.isJsonNull }?.asString,
+			args.get("preference")?.takeIf { !it.isJsonNull }?.asString,
+		).filterNotNull().joinToString(" ")
+
+		val bannedDims = explicitDims.mapNotNull(::parseDimension).toMutableSet()
+		val bannedTypes = explicitTypes.mapNotNull(::parseLineType).toMutableSet()
+		val normalizedAvoid = avoid.lowercase(Locale.ROOT)
+		if ("下界" in avoid || "nether" in normalizedAvoid) {
+			bannedDims.add(Dimension.NETHER)
+			bannedTypes.add(LineType.NETHER)
+		}
+		if ("末地" in avoid || "the_end" in normalizedAvoid || "end" in normalizedAvoid) {
+			bannedDims.add(Dimension.THE_END)
+		}
+		if ("步行" in avoid || "walk" in normalizedAvoid) {
+			bannedTypes.add(LineType.WALK)
+		}
+		if ("蓝冰" in avoid || "blueice" in normalizedAvoid || "blue_ice" in normalizedAvoid) {
+			bannedTypes.add(LineType.BLUEICE)
+		}
+		if ("只走主世界" in avoid || "仅主世界" in avoid || "主世界" in avoid && ("只" in avoid || "仅" in avoid || "only" in normalizedAvoid)) {
+			bannedDims.add(Dimension.NETHER)
+			bannedDims.add(Dimension.THE_END)
+		}
+		return RouteConstraints(bannedDimensions = bannedDims, bannedLineTypes = bannedTypes)
+	}
+
+	private fun parseStringArray(args: JsonObject, field: String): List<String> {
+		val value = args.get(field)?.takeIf { !it.isJsonNull } ?: return emptyList()
+		return when {
+			value.isJsonArray -> value.asJsonArray.mapNotNull { it.takeIf { item -> !item.isJsonNull }?.asString }
+			value.isJsonPrimitive -> value.asString.split(",").map { it.trim() }.filter { it.isNotBlank() }
+			else -> emptyList()
+		}
+	}
+
+	private fun parseDimension(value: String): Dimension? {
+		return when (normalizeEnumToken(value)) {
+			"OVERWORLD", "主世界" -> Dimension.OVERWORLD
+			"NETHER", "下界", "地狱" -> Dimension.NETHER
+			"THE_END", "THEEND", "END", "末地" -> Dimension.THE_END
+			else -> null
+		}
+	}
+
+	private fun parseLineType(value: String): LineType? {
+		val normalized = normalizeEnumToken(value)
+		return LineType.entries.firstOrNull {
+			it.name == normalized || it.name.replace("_", "") == normalized.replace("_", "")
+		} ?: when (normalized) {
+			"地铁" -> LineType.METRO
+			"快线", "快速" -> LineType.RAPID
+			"蓝冰", "蓝冰道" -> LineType.BLUEICE
+			"市域", "城市地铁" -> LineType.CITYMETRO
+			"下界", "地狱" -> LineType.NETHER
+			"珍珠炮", "珍珠" -> LineType.PEARL
+			"飞机", "机场" -> LineType.AIRPLANE
+			"船", "船道" -> LineType.BOAT
+			"步行", "走路" -> LineType.WALK
+			else -> null
+		}
+	}
+
+	private fun constraintsToJson(constraints: RouteConstraints): JsonObject = JsonObject().apply {
+		add("exclude_dims", JsonArray().apply {
+			constraints.bannedDimensions.map { it.name }.forEach(::add)
+		})
+		add("exclude_types", JsonArray().apply {
+			constraints.bannedLineTypes.map { it.name }.forEach(::add)
+		})
+	}
+
+	private fun normalizeEnumToken(value: String): String {
+		return value
+			.substringAfter(':')
+			.trim()
+			.replace("-", "_")
+			.replace(" ", "_")
+			.uppercase(Locale.ROOT)
 	}
 
 	private fun queryTransportation(query: String, lineId: Int?): String? = runCatching {
