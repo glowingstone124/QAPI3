@@ -234,7 +234,14 @@ class LLMServices(
 				})
 			}
 		}
-		return latestStatus to errorJson("tool_round_limit", "工具调用轮数超过限制")
+		obj.remove("tools")
+		obj.addProperty("tool_choice", "none")
+		obj.getAsJsonArray("messages").add(JsonObject().apply {
+			addProperty("role", "system")
+			addProperty("content", "工具调用轮次已结束。必须只根据已有 tool 结果给出最终回答，不要继续请求工具，不要补充工具结果没有的信息。")
+		})
+		val response = postUpstream("$source/tool-final", obj.toString())
+		return response.status.value to sanitizeResponseBody(response.bodyAsText())
 	}
 
 	private suspend fun postUpstream(source: String, body: String) = client.post(upstreamUrl) {
@@ -319,6 +326,9 @@ class LLMServices(
 		ragService.buildContext(userQuestion, requester?.groupId)?.let {
 			contextParts.add(it)
 		}
+		buildDeterministicToolContext(userQuestion, requester?.groupId)?.let {
+			contextParts.add(it)
+		}
 		contextParts.add(hardOutputRules())
 		enriched.add(JsonObject().apply {
 			addProperty("role", "system")
@@ -346,6 +356,53 @@ class LLMServices(
 			}
 		}
 		return ""
+	}
+
+	private fun buildDeterministicToolContext(userQuestion: String, groupId: Long?): String? {
+		if (!toolService.enabled()) {
+			return null
+		}
+		val route = extractRouteRequest(userQuestion) ?: return null
+		val args = JsonObject().apply {
+			addProperty("from", route.first)
+			addProperty("to", route.second)
+		}
+		val result = toolService.execute("query_metro_lines", args.toString(), groupId)
+		return """
+			服务端预执行工具结果如下。用户问题是路线问题，回答路线时必须优先使用这个结果；如果 found=false，要说明没有查到路线，不要改用猜测。
+			工具：query_metro_lines
+			参数：from=${route.first}, to=${route.second}
+			结果：$result
+		""".trimIndent()
+	}
+
+	private fun extractRouteRequest(text: String): Pair<String, String>? {
+		val normalized = text.trim()
+		if (normalized.isBlank()) {
+			return null
+		}
+		val patterns = listOf(
+			Regex("""从(.{1,40}?)到(.{1,40}?)(?:应该)?(?:怎么|如何|咋|怎样)(?:坐|走|去|到|换乘|乘车|搭车)?"""),
+			Regex("""从(.{1,40}?)去(.{1,40}?)(?:应该)?(?:怎么|如何|咋|怎样)(?:坐|走|去|到|换乘|乘车|搭车)?"""),
+			Regex("""(.{1,40}?)到(.{1,40}?)(?:的)?(?:地铁|路线|线路)(?:应该)?(?:怎么|如何|咋|怎样)?(?:坐|走|去|到|换乘|乘车|搭车)?"""),
+		)
+		for (pattern in patterns) {
+			val match = pattern.find(normalized) ?: continue
+			val from = cleanRouteEndpoint(match.groupValues[1])
+			val to = cleanRouteEndpoint(match.groupValues[2])
+			if (from.isNotBlank() && to.isNotBlank() && from != to) {
+				return from to to
+			}
+		}
+		return null
+	}
+
+	private fun cleanRouteEndpoint(value: String): String {
+		return value
+			.replace(Regex("""^(?:在|从|去|到|往|坐|乘坐|地铁|路线)+"""), "")
+			.replace(Regex("""(?:的)?(?:地铁|站|地铁站|路线|线路|应该)$"""), "")
+			.trim()
+			.trim('，', ',', '。', '.', '?', '？', '！', '!')
 	}
 
 	private fun reserveRequest(token: String): Boolean {
