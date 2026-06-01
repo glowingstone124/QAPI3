@@ -117,6 +117,13 @@ class RAGService {
 		println("RAG loaded ${chunks.size} chunk(s) from $knowledgeDir; embedded=$embedded")
 	}
 
+	fun groupMemoryPath(groupId: Long): Path =
+		knowledgeDir
+			.resolve("groups")
+			.resolve(groupId.toString())
+			.resolve("memory.txt")
+			.normalize()
+
 	private suspend fun search(question: String, groupId: Long?): List<RAGMatch> {
 		val scopedChunks = chunks.filter { it.groupId == null || it.groupId == groupId }
 		val queryEmbedding = if (embeddingEnabled && embeddingToken.isNotBlank()) {
