@@ -119,7 +119,6 @@ class RAGService {
 
 	fun groupMemoryPath(groupId: Long): Path =
 		knowledgeDir
-			.resolve("groups")
 			.resolve(groupId.toString())
 			.resolve("memory.txt")
 			.normalize()
