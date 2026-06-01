@@ -323,6 +323,9 @@ class RAGService {
 		private fun groupIdForSource(source: String): Long? {
 			val normalized = source.replace('\\', '/')
 			val parts = normalized.split('/')
+			if (parts.size >= 2) {
+				parts[0].toLongOrNull()?.let { return it }
+			}
 			if (parts.size >= 3 && parts[0] == "groups") {
 				return parts[1].toLongOrNull()
 			}
