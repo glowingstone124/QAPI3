@@ -45,5 +45,5 @@ interface RankingStore {
 
 enum class RankingKind(val columnName: String) {
 	PLACE("place"),
-	DESTROY("destory")
+	DESTROY("destroy")
 }
