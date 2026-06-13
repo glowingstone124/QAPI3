@@ -101,7 +101,7 @@ public class ApiApplication implements ErrorController {
     }
 
     @PostMapping("/qo/alive/upload")
-    public void getAlive(@RequestBody String data, @RequestHeader("Authorization") String header) {
+    public void getAlive(@RequestBody String data, @RequestHeader(value = "Authorization", required = false) String header) {
         JsonObject Heartbeat = JsonParser.parseString(data).getAsJsonObject();
         PackTime = Heartbeat.get("timestamp").getAsLong();
         long currentTime = new Date().getTime();
@@ -178,7 +178,7 @@ public class ApiApplication implements ErrorController {
     }
 
     @PostMapping("/qo/online")
-    public void handleOnlineRequest(@RequestParam String name, @RequestParam String ip) {
+    public void handleOnlineRequest(@RequestParam String name, @RequestParam(required = false, defaultValue = "") String ip) {
         handlePlayerOnline(name, ip);
     }
 
@@ -319,7 +319,7 @@ public class ApiApplication implements ErrorController {
     }
 
     @PostMapping("/qo/upload/explevel")
-    public void handleExpLevelUpdate(String token, int lvl, String username) {
+    public void handleExpLevelUpdate(@RequestParam String token, @RequestParam int lvl, @RequestParam String username) {
         if (nodes.getServerFromToken(token) != 1) {
             return;
         }
