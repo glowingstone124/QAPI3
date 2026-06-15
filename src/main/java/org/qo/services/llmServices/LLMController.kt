@@ -67,12 +67,14 @@ class LLMController(private val llmServices: LLMServices) {
 		@RequestHeader("token", required = false) token: String?,
 		@RequestHeader(HttpHeaders.AUTHORIZATION, required = false) authorization: String?,
 		@RequestHeader("X-Minecraft-Name") minecraftName: String,
+		@RequestHeader("X-Minecraft-Coordinate") minecraftDim: String,
+		@RequestHeader("X-Minecraft-HP") minecraftHP: String,
 		@RequestBody body: String
 	): ResponseEntity<String> {
 		val requestToken = AuthTokens.resolve(token, authorization)
 			?: return jsonResponse("""{"error":{"message":"缺少或无效的令牌","type":"invalid_token","code":"invalid_token"}}""", HttpStatus.UNAUTHORIZED)
 
-		val result = runCatching { llmServices.completeMinecraftChat(body, requestToken, minecraftName) }.getOrElse {
+		val result = runCatching { llmServices.completeMinecraftChat(body, requestToken, minecraftName, minecraftDim, minecraftHP) }.getOrElse {
 			LLMNonStreamResult(400, """{"error":{"message":"${it.message ?: "请求格式错误"}","type":"bad_request","code":"bad_request"}}""")
 		}
 		return jsonResponse(result.body, HttpStatus.valueOf(result.status))

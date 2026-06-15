@@ -199,7 +199,7 @@ class LLMServices(
 		}
 	}
 
-	suspend fun completeMinecraftChat(body: String, token: String, minecraftName: String): LLMNonStreamResult {
+	suspend fun completeMinecraftChat(body: String, token: String, minecraftName: String, minecraftCoordinate: String, minecraftHP: String): LLMNonStreamResult {
 		val serverId = authenticatedServerId(token)
 			?: return LLMNonStreamResult(401, errorJson("invalid_token", "Minecraft token 验证失败"))
 		val playerName = minecraftName.trim()
@@ -218,7 +218,11 @@ class LLMServices(
 			"$playerName/qq:${user.uid}",
 			"minecraft",
 			groupId,
-			conversationSource = groupId?.let { "qq" } ?: "minecraft"
+			conversationSource = groupId?.let { "qq" } ?: "minecraft",
+			minecraftRelated = MinecraftRelated(
+				minecraftCoordinate,
+				minecraftHP,
+			)
 		)
 		val request = normalizeRequest(body, false, requester)
 		val requestId = insertAccessRecord(user.uid, playerName, request.model, false)
@@ -340,7 +344,7 @@ class LLMServices(
 	}
 
 	private fun normalizeRequest(body: String, stream: Boolean, requester: LLMRequester? = null): NormalizedRequest {
-		val obj = jsonParser.parse(body).asJsonObject
+		val obj = JsonParser.parseString(body).asJsonObject
 		if (!obj.has("model") || obj.get("model").asString.isBlank()) {
 			obj.addProperty("model", upstreamModel)
 		}
@@ -376,6 +380,9 @@ class LLMServices(
 				- 如果来源是 minecraft，uid 是该玩家绑定的 QQ 号，昵称/用户名形如 Minecraft用户名/qq:QQ号。
 				""".trimIndent()
 			)
+			buildMinecraftRelatedContext(it.minecraftRelated)?.let { minecraftContext ->
+				contextParts.add(minecraftContext)
+			}
 		}
 		ragService.buildContext(userQuestion, requester?.groupId)?.let {
 			contextParts.add(it)
@@ -400,6 +407,17 @@ class LLMServices(
 			}
 		}
 		return enriched
+	}
+
+	private fun buildMinecraftRelatedContext(minecraftRelated: MinecraftRelated?): String? {
+		if (minecraftRelated == null) {
+			return null
+		}
+		return """
+			当前 Minecraft 玩家状态：
+			- 坐标/维度：${minecraftRelated.coord.ifBlank { "未提供" }}
+			- 生命值：${minecraftRelated.hp.ifBlank { "未提供" }}
+		""".trimIndent()
 	}
 
 	private fun buildGroupContext(groupContext: JsonArray?): String? {
@@ -803,7 +821,10 @@ class LLMServices(
 
 	private fun quote(value: String): String = JsonObject().apply { addProperty("value", value) }.get("value").toString()
 	private fun flowOfText(text: String): Flow<String> = flow { emit(text) }
-
+	private data class MinecraftRelated(
+		val coord: String,
+		val hp: String,
+	)
 	private data class NormalizedRequest(val model: String, val body: String, val userQuestion: String)
 	private data class LLMRequester(
 		val uid: Long,
@@ -811,6 +832,7 @@ class LLMServices(
 		val source: String,
 		val groupId: Long? = null,
 		val conversationSource: String = source,
+		val minecraftRelated: MinecraftRelated? = null,
 	) {
 		fun conversationKey(): String = listOfNotNull(conversationSource, groupId?.toString(), uid.toString()).joinToString(":")
 	}
