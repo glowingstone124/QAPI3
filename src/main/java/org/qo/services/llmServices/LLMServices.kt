@@ -24,9 +24,12 @@ import kotlinx.coroutines.withContext
 import org.qo.datas.ConnectionPool
 import org.qo.datas.Mapping
 import org.qo.datas.Nodes
+import org.qo.orm.UserORM
 import org.qo.redis.DatabaseType
 import org.qo.redis.Redis
 import org.qo.services.loginService.AuthorityNeededServicesImpl
+import org.qo.services.messageServices.Message
+import org.qo.services.messageServices.Msg
 import org.springframework.stereotype.Service
 import java.net.URLDecoder
 import java.nio.file.Files
@@ -63,6 +66,7 @@ class LLMServices(
 			connectTimeoutMillis = 10 * 1000
 		}
 	}
+	private val userORM = UserORM()
 
 	@PostConstruct
 	fun init() {
@@ -195,6 +199,52 @@ class LLMServices(
 		}
 	}
 
+	suspend fun completeMinecraftChat(body: String, token: String, minecraftName: String): LLMNonStreamResult {
+		val serverId = authenticatedServerId(token)
+			?: return LLMNonStreamResult(401, errorJson("invalid_token", "Minecraft token 验证失败"))
+		val playerName = minecraftName.trim()
+		if (playerName.isBlank()) {
+			return LLMNonStreamResult(400, errorJson("bad_request", "缺少 Minecraft 玩家名"))
+		}
+		val user = userORM.readAsync(playerName)
+			?: return LLMNonStreamResult(404, errorJson("user_not_found", "玩家未绑定 QO/QQ 账号"))
+		if (user.frozen == true) {
+			return LLMNonStreamResult(403, errorJson("account_frozen", "账号已被冻结"))
+		}
+
+		val groupId = minecraftGroupId(serverId)
+		val requester = LLMRequester(
+			user.uid,
+			"$playerName/qq:${user.uid}",
+			"minecraft",
+			groupId,
+			conversationSource = groupId?.let { "qq" } ?: "minecraft"
+		)
+		val request = normalizeRequest(body, false, requester)
+		val requestId = insertAccessRecord(user.uid, playerName, request.model, false)
+		if (!reserveRequest("minecraft:$playerName")) {
+			updateAccessRecord(requestId, "rejected", errorMessage = "duplicate request")
+			return LLMNonStreamResult(429, errorJson("rate_limited", "请求过于频繁"))
+		}
+		if (upstreamToken.isBlank()) {
+			updateAccessRecord(requestId, "failed", errorMessage = "missing upstream token")
+			return LLMNonStreamResult(500, errorJson("server_error", "LLM 上游令牌未配置"))
+		}
+
+		return try {
+			val (statusCode, text) = completeWithOptionalTools(request, requester, "minecraft")
+			val usage = parseUsage(text)
+			updateAccessRecord(requestId, if (statusCode in 200..299) "completed" else "failed", usage, text.take(512))
+			if (statusCode in 200..299) {
+				recordConversation(requester, request.userQuestion, text)
+			}
+			LLMNonStreamResult(statusCode, text)
+		} catch (e: Exception) {
+			updateAccessRecord(requestId, "failed", errorMessage = e.message)
+			LLMNonStreamResult(502, errorJson("upstream_error", e.message ?: "LLM 上游请求失败"))
+		}
+	}
+
 	private suspend fun completeWithOptionalTools(
 		request: NormalizedRequest,
 		requester: LLMRequester,
@@ -249,6 +299,7 @@ class LLMServices(
 	}
 
 	private fun authenticateServerToken(token: String): Boolean = nodes.getServerFromToken(token) >= 0
+	private fun authenticatedServerId(token: String): Int? = nodes.getServerFromToken(token).takeIf { it >= 0 }
 	private fun decodeHeader(value: String): String = runCatching {
 		URLDecoder.decode(value, StandardCharsets.UTF_8)
 	}.getOrDefault(value)
@@ -302,7 +353,10 @@ class LLMServices(
 		}
 		val groupContext = obj.getAsJsonArray("group_context")
 		obj.remove("group_context")
-		obj.add("messages", enrichMessages(obj.getAsJsonArray("messages"), requester, groupContext))
+		val effectiveGroupContext = groupContext ?: requester
+			?.takeIf { it.source == "minecraft" }
+			?.let { buildSyncedChatContext() }
+		obj.add("messages", enrichMessages(obj.getAsJsonArray("messages"), requester, effectiveGroupContext))
 		return NormalizedRequest(obj.get("model").asString, obj.toString(), latestUserQuestion(obj.getAsJsonArray("messages")))
 	}
 
@@ -380,6 +434,46 @@ class LLMServices(
 			最近群聊记录如下，按时间从旧到新排列。它用于理解群内上下文、省略指代和多人对话；不要把这些记录逐字复述给用户。
 			${lines.joinToString("\n")}
 		""".trimIndent()
+	}
+
+	private fun buildSyncedChatContext(): JsonArray {
+		val context = JsonArray()
+		Msg.msgQueue.forEach { message ->
+			context.add(JsonObject().apply {
+				addProperty("uid", syncedMessageUid(message))
+				addProperty("name", syncedMessageName(message))
+				addProperty("content", message.message)
+				addProperty("time", message.time)
+			})
+		}
+		return context
+	}
+
+	private fun syncedMessageUid(message: Message): String =
+		if (message.from == 0) message.sender else "${message.from}:${message.sender}"
+
+	private fun syncedMessageName(message: Message): String {
+		val sender = message.sender.ifBlank { "unknown" }
+		return when (message.from) {
+			0 -> "QQ/$sender"
+			1 -> "Minecraft/$sender"
+			2 -> "System/$sender"
+			3 -> "Web/$sender"
+			4 -> "Minecraft-Creative/$sender"
+			else -> "Synced/$sender"
+		}
+	}
+
+	private fun minecraftGroupId(serverId: Int): Long? {
+		val specific = System.getenv("LLM_MINECRAFT_GROUP_ID_$serverId")
+			?.trim()
+			?.toLongOrNull()
+		if (specific != null) {
+			return specific
+		}
+		return System.getenv("LLM_MINECRAFT_GROUP_ID")
+			?.trim()
+			?.toLongOrNull()
 	}
 
 	private fun latestUserQuestion(messages: JsonArray): String {
@@ -700,8 +794,14 @@ class LLMServices(
 	private fun flowOfText(text: String): Flow<String> = flow { emit(text) }
 
 	private data class NormalizedRequest(val model: String, val body: String, val userQuestion: String)
-	private data class LLMRequester(val uid: Long, val name: String, val source: String, val groupId: Long? = null) {
-		fun conversationKey(): String = listOfNotNull(source, groupId?.toString(), uid.toString()).joinToString(":")
+	private data class LLMRequester(
+		val uid: Long,
+		val name: String,
+		val source: String,
+		val groupId: Long? = null,
+		val conversationSource: String = source,
+	) {
+		fun conversationKey(): String = listOfNotNull(conversationSource, groupId?.toString(), uid.toString()).joinToString(":")
 	}
 	private data class ToolCall(val id: String, val name: String, val arguments: String?)
 	private data class Usage(val promptTokens: Int?, val completionTokens: Int?, val totalTokens: Int?)
