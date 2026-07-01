@@ -45,6 +45,12 @@ class TransportationServiceController(
 		)
 	}
 
+	@GetMapping("/line/detail")
+	fun getLineDetailById(@RequestParam id: Int): ResponseEntity<String> {
+		val result = service.queryLineDetailById(id) ?: return notFound()
+		return ReturnInterface().GeneralHttpHeader(gson.toJson(result))
+	}
+
 	@GetMapping("/line/name")
 	fun getLineStationsByName(@RequestParam name: String): ResponseEntity<String> {
 		return ReturnInterface().GeneralHttpHeader(

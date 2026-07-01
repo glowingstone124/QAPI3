@@ -207,6 +207,27 @@ data class LineStations(
 	val stations: List<Station>,
 )
 
+data class TransferLineInfo(
+	val id: Int,
+	@SerializedName("type") val lineType: LineType,
+	val dimension: Dimension,
+	val name: String,
+	@SerializedName("name_en") val nameEn: String,
+	val color: String,
+)
+
+data class LineStationDetail(
+	val id: String,
+	val name: String,
+	@SerializedName("name_en") val nameEn: String,
+	@SerializedName("transfer_lines") val transferLines: List<TransferLineInfo>,
+)
+
+data class LineDetail(
+	val line: TransferLineInfo,
+	val stations: List<LineStationDetail>,
+)
+
 data class RouteConstraints(
 	val bannedDimensions: Set<Dimension> = emptySet(),
 	val bannedLineTypes: Set<LineType> = emptySet(),
@@ -544,6 +565,40 @@ class TransportationServiceImpl {
 		}
 	}
 
+	fun queryLineDetailById(lineId: Int): LineDetail? {
+		val line = getLineById(lineId) ?: return null
+		val stationMap = fetchStationsByIds(line.stationIds.toList())
+		val transferLinesByStation = listLines()
+			.asSequence()
+			.filter { it.id != line.id }
+			.flatMap { transferLine ->
+				transferLine.stationIds.asSequence().map { stationId -> stationId to transferLine }
+			}
+			.groupBy(
+				keySelector = { it.first },
+				valueTransform = { it.second.toTransferLineInfo() }
+			)
+			.mapValues { (_, transferLines) ->
+				transferLines
+					.distinctBy { it.id }
+					.sortedBy { it.id }
+			}
+
+		return LineDetail(
+			line = line.toTransferLineInfo(),
+			stations = line.stationIds.mapNotNull { stationId ->
+				stationMap[stationId]?.let { station ->
+					LineStationDetail(
+						id = station.ID,
+						name = station.NAME,
+						nameEn = station.NAME_EN,
+						transferLines = transferLinesByStation[station.ID].orEmpty()
+					)
+				}
+			}
+		)
+	}
+
 	fun calculateRoute(
 		startStationId: String,
 		endStationId: String,
@@ -780,6 +835,17 @@ class TransportationServiceImpl {
 	private fun validateLineOrThrow(line: Line) {
 		require(line.stationIds.size >= 2) { "stationIds must have at least 2 stations" }
 		require(line.stationTimes.size == line.stationIds.size - 1) { "stationTimes length must be stationIds.size - 1" }
+	}
+
+	private fun LineRecord.toTransferLineInfo(): TransferLineInfo {
+		return TransferLineInfo(
+			id = id,
+			lineType = lineType,
+			dimension = dimension,
+			name = name,
+			nameEn = name_en,
+			color = color
+		)
 	}
 
 

@@ -67,6 +67,51 @@ class TransportationServiceControllerTest {
 	}
 
 	@Test
+	fun getLineDetailById_returnsLineAndTransferLines() {
+		val detail = LineDetail(
+			line = TransferLineInfo(
+				id = 1,
+				lineType = LineType.METRO,
+				dimension = Dimension.OVERWORLD,
+				name = "Metro A",
+				nameEn = "Metro A",
+				color = "#ff0000"
+			),
+			stations = listOf(
+				LineStationDetail(
+					id = "S1",
+					name = "Central",
+					nameEn = "Central",
+					transferLines = listOf(
+						TransferLineInfo(
+							id = 2,
+							lineType = LineType.RAPID,
+							dimension = Dimension.NETHER,
+							name = "Rapid B",
+							nameEn = "Rapid B",
+							color = "#00ff00"
+						)
+					)
+				)
+			)
+		)
+		Mockito.`when`(service.queryLineDetailById(1)).thenReturn(detail)
+
+		webTestClient.get()
+			.uri("/qo/transportation/line/detail?id=1")
+			.exchange()
+			.expectStatus().isOk
+			.expectBody()
+			.jsonPath("$.line.name").isEqualTo("Metro A")
+			.jsonPath("$.line.color").isEqualTo("#ff0000")
+			.jsonPath("$.stations[0].name").isEqualTo("Central")
+			.jsonPath("$.stations[0].transfer_lines[0].type").isEqualTo("RAPID")
+			.jsonPath("$.stations[0].transfer_lines[0].dimension").isEqualTo("NETHER")
+			.jsonPath("$.stations[0].transfer_lines[0].name").isEqualTo("Rapid B")
+			.jsonPath("$.stations[0].transfer_lines[0].color").isEqualTo("#00ff00")
+	}
+
+	@Test
 	fun calculateRoute_returnsRouteResult() {
 		val expectedConstraints = RouteConstraints(
 			bannedDimensions = setOf(Dimension.THE_END, Dimension.OVERWORLD),

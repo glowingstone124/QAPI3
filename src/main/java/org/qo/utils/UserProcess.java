@@ -471,7 +471,7 @@ public class UserProcess {
             if (computedPasswordHash.equals(user_hashed)) {
                 String token = login.generateToken(64);
                 login.insertInto(token, username);
-                userORM.updateLastLoginByUsername(username, System.currentTimeMillis());
+                updateLastLoginAsync(username);
                 if (!web && ip != null) {
                     redis.insert("login_history_" + username, ip, DatabaseType.QO_TEMP_DATABASE.getValue(), 60).ignoreException();
                 }
@@ -490,6 +490,21 @@ public class UserProcess {
             }
         }
         return new Pair<>(false, null);
+    }
+
+    private static void updateLastLoginAsync(String username) {
+        Runnable updateTask = () -> {
+            try {
+                userORM.updateLastLoginByUsername(username, System.currentTimeMillis());
+            } catch (Exception e) {
+                Logger.log("failed to update last_login for " + username + ": " + e.getMessage(), ERROR);
+            }
+        };
+        if (ca != null) {
+            ca.push(updateTask, Dispatchers.getIO());
+        } else {
+            CompletableFuture.runAsync(updateTask);
+        }
     }
 
 

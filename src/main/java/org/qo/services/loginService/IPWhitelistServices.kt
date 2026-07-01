@@ -2,10 +2,8 @@ package org.qo.services.loginService
 
 import com.google.gson.Gson
 import com.google.gson.JsonObject
-import kotlinx.coroutines.reactive.awaitSingle
 import kotlinx.coroutines.runBlocking
 import org.qo.datas.ConnectionPool
-import org.qo.orm.SQL
 import org.springframework.stereotype.Service
 
 @Service
@@ -24,13 +22,11 @@ class IPWhitelistServices(private val login: Login, private val authorityNeededS
 	}
 	fun whitelistedIpCount(username: String): Int {
 		ConnectionPool.getConnection().use { conn ->
-			val sql = "SELECT username, ip FROM loginip WHERE username = ?"
+			val sql = "SELECT COUNT(*) AS total FROM loginip WHERE username = ?"
 			conn.prepareStatement(sql).use { stmt ->
 				stmt.setString(1, username)
 				stmt.executeQuery().use { rs ->
-					var count = 0
-					while (rs.next()) count++
-					return count
+					return if (rs.next()) rs.getInt("total") else 0
 				}
 			}
 		}

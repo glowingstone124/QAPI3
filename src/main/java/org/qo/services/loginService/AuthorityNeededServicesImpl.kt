@@ -67,7 +67,7 @@ class AuthorityNeededServicesImpl(
 			addProperty("username", accountName)
 			addProperty("uid", userInfo!!.uid)
 			addProperty("playtime", userInfo.playtime)
-			addProperty("profile_id", userORM.getProfileWithUserAsync(accountName))
+			addProperty("profile_id", userInfo.profile_id)
 			addProperty("invite_cnt", userInfo.invite)
 		}
 		val loginHistory = login.queryLoginHistoryAsync(username = accountName).convertToJsonArray()
