@@ -96,7 +96,7 @@ class UserORM() : CrudDao<Users>  {
 
     companion object {
         private const val INSERT_USER_SQL =
-            "INSERT INTO users (username, uid, frozen, remain, economy, signed, playtime, password, temp, invite, profile_id, exp_level, score) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            "INSERT INTO users (username, uid, frozen, remain, economy, signed, playtime, password, temp, invite, profile_id, exp_level, score, last_login) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         private const val SELECT_USER_BY_ID_SQL = "SELECT * FROM users WHERE uid = ?"
         private const val SELECT_USER_BY_USERNAME_SQL = "SELECT * FROM users WHERE username = ?"
         private const val SELECT_USER_BY_UUID_SQL = "SELECT * FROM users WHERE profile_id = ?"
@@ -238,6 +238,27 @@ class UserORM() : CrudDao<Users>  {
 		}
 	}
 
+	fun updateLastLoginByUsername(username: String, lastLogin: Long): Boolean = runBlocking {
+		updateLastLoginByUsernameAsync(username, lastLogin)
+	}
+	suspend fun updateLastLoginByUsernameAsync(username: String, lastLogin: Long): Boolean = withContext(Dispatchers.IO) {
+		try {
+			val sql = "UPDATE users SET last_login = ? WHERE username = ?"
+			return@withContext ConnectionPool.getConnection().use { connection ->
+				connection.prepareStatement(sql).use { stmt ->
+					stmt.setLong(1, lastLogin)
+					stmt.setString(2, username)
+					stmt.executeUpdate() > 0
+				}
+			}
+		} catch (e: Exception) {
+			e.printStackTrace()
+			return@withContext false
+		} finally {
+			invalidateUser(null, username)
+		}
+	}
+
     override fun update(user: Users): Boolean = runBlocking {
         updateAsync(user)
     }
@@ -292,6 +313,10 @@ class UserORM() : CrudDao<Users>  {
             fields.add("damage = ?")
             values.add(it)
         }
+        user.last_login?.let {
+            fields.add("last_login = ?")
+            values.add(it)
+        }
         if (fields.isEmpty()) return@withContext false
         val sql = "UPDATE users SET ${fields.joinToString(", ")} WHERE uid = ?"
         values.add(user.uid)
@@ -341,6 +366,7 @@ class UserORM() : CrudDao<Users>  {
         stmt.setString(11, user.profile_id)
 	    stmt.setInt(12, user.exp_level ?: 0)
 	    stmt.setInt(13, user.score ?: 0)
+	    stmt.setLong(14, user.last_login ?: 0L)
     }
 
     private fun mapResultSetToUser(rs: ResultSet): Users {
@@ -359,6 +385,7 @@ class UserORM() : CrudDao<Users>  {
 			exp_level = rs.getInt("exp_level"),
 			score = rs.getInt("score"),
 			damage = rs.getLong("damage"),
+			last_login = rs.getLong("last_login"),
         )
     }
 

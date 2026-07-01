@@ -33,6 +33,7 @@ class Mapping {
 		val exp_level: Int? = 0,
 		val score: Int? = 0,
 		val damage: Long? = 0,
+		val last_login: Long? = null,
 	) {
 		override fun equals(other: Any?): Boolean {
 			if (this === other) return true
