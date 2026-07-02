@@ -51,6 +51,7 @@ dependencies {
     implementation("com.alibaba:druid:1.2.22")
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-reactor")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json")
 
     implementation("io.ktor:ktor-client-core:$ktorVersion")
