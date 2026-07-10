@@ -5,7 +5,6 @@ import com.google.gson.JsonObject
 import org.qo.datas.Mapping
 import org.qo.orm.AffiliatedAccountORM
 import org.qo.orm.UserORM
-import org.qo.services.gameStatusService.asJsonObject
 import org.qo.utils.UserProcess
 import org.springframework.stereotype.Service
 
@@ -13,13 +12,16 @@ import org.springframework.stereotype.Service
 class AffiliatedAccountServices(private val affiliatedAccountORM: AffiliatedAccountORM, private val login: Login){
 	val gson = Gson()
 	data class AffiliatedAccount(val name:String, val host: String, val password: String)
+	data class AffiliatedAccountSummary(val name: String, val host: String)
 	val userORM = UserORM()
-	suspend fun getAffiliatedAccount(token: String):List<AffiliatedAccount> {
-		val (username, code) = login.validate(token)
+	suspend fun getAffiliatedAccount(token: String): List<AffiliatedAccountSummary> {
+		val (username, _) = login.validate(token)
 		if (username == null) {
 			return emptyList()
 		}
-		return affiliatedAccountORM.readByHost(username)
+		return affiliatedAccountORM.readByHost(username).map {
+			AffiliatedAccountSummary(name = it.name, host = it.host)
+		}
 	}
 
 	fun validateAffiliatedAccount(name: String): Pair<Boolean, AffiliatedAccount?> {
@@ -66,5 +68,13 @@ class AffiliatedAccountServices(private val affiliatedAccountORM: AffiliatedAcco
 		userORM.updateAsync(updatedUser)
 
 		return affiliatedAccountORM.create(account) > 0
+	}
+
+	suspend fun removeAffiliatedAccount(token: String, name: String): Boolean {
+		val (username, _) = login.validate(token)
+		if (username == null) {
+			return false
+		}
+		return affiliatedAccountORM.deleteByNameAndHost(name, username)
 	}
 }

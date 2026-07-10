@@ -632,7 +632,9 @@ class TransportationServiceImpl {
 				adjacency.getOrPut(from) { mutableListOf() }.add(edge)
 			}
 		}
-
+		adjacency.forEach { string, edges ->
+			println("$string $edges")
+		}
 		val dist = mutableMapOf<State, Int>()
 		val prev = mutableMapOf<State, PrevEdge>()
 		val pq = PriorityQueue<Node>(compareBy { it.dist })

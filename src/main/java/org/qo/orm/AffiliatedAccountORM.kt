@@ -56,21 +56,18 @@ class AffiliatedAccountORM : CrudDao<AffiliatedAccountServices.AffiliatedAccount
 	}
 
 	override fun update(item: AffiliatedAccountServices.AffiliatedAccount): Boolean {
-		ConnectionPool.getConnection().use { connection ->
-			connection.prepareStatement("UPDATE affiliated_account SET name = ?, host = ?, password = ? WHERE name = ?").use {
-				it.setString(1, item.name)
-				it.setString(2, item.host)
-				it.setString(3, item.password)
-				it.setString(4, item.name)
-				return it.executeUpdate() > 0
-			}
-		}
+		throw UnsupportedOperationException("Affiliated accounts cannot be modified")
 	}
 
 	override fun delete(input: Any): Boolean {
+		throw UnsupportedOperationException("Affiliated account deletion requires its host")
+	}
+
+	fun deleteByNameAndHost(name: String, host: String): Boolean {
 		ConnectionPool.getConnection().use { connection ->
-			connection.prepareStatement("DELETE FROM affiliated_account WHERE name = ?").use {
-				it.setString(1, input as String)
+			connection.prepareStatement("DELETE FROM affiliated_account WHERE name = ? AND host = ?").use {
+				it.setString(1, name)
+				it.setString(2, host)
 				return it.executeUpdate() > 0
 			}
 		}

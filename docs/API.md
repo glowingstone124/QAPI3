@@ -313,8 +313,22 @@ Get your IP whitelist records (requires login token).
 ### `GET /qo/authorization/ip/add`
 Add IP to whitelist (requires login token).
 
+Adding an IP that is already in the caller's whitelist is treated as a successful no-op.
+Only IPv4 and IPv6 address literals are accepted. Hostnames, surrounding whitespace, IPv4 octets with leading zeroes, and scoped IPv6 addresses are rejected. IPv6 addresses are stored in normalized form.
+
 Query params:
 - `ip` (string)
+
+Response code `4` means the IP address format is invalid. The per-user limit of five IPs is checked in the same database transaction as insertion.
+
+### `DELETE /qo/authorization/ip/remove`
+Remove IP from whitelist (requires login token).
+
+Query params:
+- `ip` (string)
+
+Response: `Return` JSON, e.g. `{"code":0,"reason":"ok"}`. `code` is `3` (`"IP not whitelisted"`) if the IP was not in the caller's whitelist.
+Code `4` means the IP address format is invalid.
 
 ---
 
@@ -425,6 +439,14 @@ Get affiliated accounts (requires login token).
 
 ### `POST /qo/authorization/affiliated/add`
 Add an affiliated account (requires login token).
+
+### `DELETE /qo/authorization/affiliated/remove`
+Delete an affiliated account owned by the logged-in host account. Affiliated accounts cannot be modified.
+
+Query params:
+- `name` (string)
+
+Response: `{"result":true}` when deleted, otherwise `{"result":false}`.
 
 ---
 

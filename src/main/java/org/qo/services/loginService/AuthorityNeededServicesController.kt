@@ -13,6 +13,7 @@ import org.qo.utils.SerializeUtils.convertToJsonArray
 import org.springframework.http.HttpHeaders
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.GetMapping
+import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestHeader
@@ -130,6 +131,34 @@ class AuthorityNeededServicesController(
 			)
 
 			WhitelistReasons.IP_WHITELIST_FULL -> ri.GeneralHttpHeader(Return(2, "Too many ips").serialized())
+			WhitelistReasons.IP_NOT_FOUND -> ri.GeneralHttpHeader(Return(3, "IP not whitelisted").serialized())
+			WhitelistReasons.INVALID_IP -> ri.GeneralHttpHeader(Return(4, "Invalid IP address").serialized())
+		}
+	}
+
+	@DeleteMapping("/ip/remove")
+	suspend fun removeFromIpWhitelist(
+		@RequestHeader("token", required = false) token: String?,
+		@RequestHeader(HttpHeaders.AUTHORIZATION, required = false) authorization: String?,
+		@RequestParam ip: String
+	): ResponseEntity<String> {
+		val resolvedToken = resolveLoginToken(token, authorization) ?: return missingTokenResponse()
+		val (username, errorCode) = login.validate(resolvedToken)
+		if (authorityNeededServicesImpl.doPrecheck(username, errorCode) != null || username == null) {
+			return ri.GeneralHttpHeader(Return(1, authorityNeededServicesImpl.getErrorMessage(1)).serialized())
+		}
+		return when (ipWhitelistServices.leaveWhitelist(ip, resolvedToken)) {
+			WhitelistReasons.SUCCESS -> ri.GeneralHttpHeader(Return(0, "ok").serialized())
+			WhitelistReasons.TOKEN_INVALID -> ri.GeneralHttpHeader(
+				Return(
+					1,
+					authorityNeededServicesImpl.getErrorMessage(1) + "(else)"
+				).serialized()
+			)
+
+			WhitelistReasons.IP_WHITELIST_FULL -> ri.GeneralHttpHeader(Return(2, "Too many ips").serialized())
+			WhitelistReasons.IP_NOT_FOUND -> ri.GeneralHttpHeader(Return(3, "IP not whitelisted").serialized())
+			WhitelistReasons.INVALID_IP -> ri.GeneralHttpHeader(Return(4, "Invalid IP address").serialized())
 		}
 	}
 
@@ -227,6 +256,18 @@ class AuthorityNeededServicesController(
 	): ResponseEntity<String> {
 		val resolvedToken = resolveLoginToken(token, authorization) ?: return missingTokenResponse()
 		return ri.GeneralHttpHeader(affiliatedAccountServices.addAffiliatedAccount(resolvedToken, body).toHumanReadableJson())
+	}
+
+	@DeleteMapping("/affiliated/remove")
+	suspend fun removeAffiliatedAccount(
+		@RequestHeader("token", required = false) token: String?,
+		@RequestHeader(HttpHeaders.AUTHORIZATION, required = false) authorization: String?,
+		@RequestParam name: String
+	): ResponseEntity<String> {
+		val resolvedToken = resolveLoginToken(token, authorization) ?: return missingTokenResponse()
+		return ri.GeneralHttpHeader(
+			affiliatedAccountServices.removeAffiliatedAccount(resolvedToken, name).toHumanReadableJson()
+		)
 	}
 }
 
