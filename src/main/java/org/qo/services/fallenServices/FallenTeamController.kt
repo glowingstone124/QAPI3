@@ -54,6 +54,10 @@ class FallenTeamController(
 				addProperty("code", "invalid_team")
 				addProperty("message", "阵营只能是 A、B 或 C。")
 			}.toString(), HttpStatus.BAD_REQUEST)
+			FallenSelectionResult.RegistrationClosed -> ri.GeneralHttpHeader(JsonObject().apply {
+				addProperty("code", "registration_closed")
+				addProperty("message", "阵营意向登记已结束，正式阵营正在分配。")
+			}.toString(), HttpStatus.GONE)
 		}
 	}
 
@@ -73,7 +77,10 @@ class FallenTeamController(
 		if (selection != null) {
 			addProperty("username", selection.username)
 			addProperty("team", selection.team.name)
+			addProperty("expectedTeam", selection.expectedTeam.name)
+			addProperty("finalized", selection.finalized)
 			addProperty("selectedAt", selection.selectedAt)
+			selection.assignedAt?.let { addProperty("assignedAt", it) }
 		}
 	}
 
