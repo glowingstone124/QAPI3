@@ -299,6 +299,28 @@ class UserORM() : CrudDao<Users>  {
         }
     }
 
+	fun invalidateByUsername(username: String) {
+		invalidateUser(null, username)
+	}
+
+	fun updateFrozenByUid(uid: Long, frozen: Boolean): Boolean = runBlocking {
+		updateFrozenByUidAsync(uid, frozen)
+	}
+
+	suspend fun updateFrozenByUidAsync(uid: Long, frozen: Boolean): Boolean = withContext(Dispatchers.IO) {
+		try {
+			ConnectionPool.getConnection().use { connection ->
+				connection.prepareStatement("UPDATE users SET frozen = ? WHERE uid = ?").use { statement ->
+					statement.setBoolean(1, frozen)
+					statement.setLong(2, uid)
+					statement.executeUpdate() > 0
+				}
+			}
+		} finally {
+			invalidateUser(uid, null)
+		}
+	}
+
 	fun updateLevelByUsername(username: String, newLevel: Int): Boolean = runBlocking {
 		updateLevelByUsernameAsync(username, newLevel)
 	}

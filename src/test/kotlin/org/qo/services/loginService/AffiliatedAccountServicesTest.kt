@@ -14,6 +14,42 @@ class AffiliatedAccountServicesTest {
 	private val service = AffiliatedAccountServices(orm, login)
 
 	@Test
+	fun addAffiliatedAccount_createsAccountAndConsumesInviteAtomically() = runBlocking {
+		val successfulOrm = Mockito.mock(AffiliatedAccountORM::class.java) { invocation ->
+			if (invocation.method.name == "createUsingInvite") true
+			else Mockito.RETURNS_DEFAULTS.answer(invocation)
+		}
+		val successfulService = AffiliatedAccountServices(successfulOrm, login)
+		Mockito.`when`(login.validate("host-token")).thenReturn(Pair("host", 0))
+
+		val result = successfulService.addAffiliatedAccount(
+			"host-token",
+			"""{"name":"child","password":"secret"}"""
+		)
+
+		assertTrue(result)
+		val invocation = Mockito.mockingDetails(successfulOrm).invocations.single {
+			it.method.name == "createUsingInvite"
+		}
+		val account = invocation.arguments.single() as AffiliatedAccountServices.AffiliatedAccount
+		assertEquals("child", account.name)
+		assertEquals("host", account.host)
+		assertTrue(account.password != "secret")
+	}
+
+	@Test
+	fun addAffiliatedAccount_returnsFalseWhenNoInviteCanBeConsumed() = runBlocking {
+		Mockito.`when`(login.validate("host-token")).thenReturn(Pair("host", 0))
+
+		val result = service.addAffiliatedAccount(
+			"host-token",
+			"""{"name":"child","password":"secret"}"""
+		)
+
+		assertFalse(result)
+	}
+
+	@Test
 	fun removeAffiliatedAccount_deletesOnlyForAuthenticatedHost() = runBlocking {
 		Mockito.`when`(login.validate("host-token")).thenReturn(Pair("host", 0))
 		Mockito.`when`(orm.deleteByNameAndHost("child", "host")).thenReturn(true)

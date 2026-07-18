@@ -50,10 +50,7 @@ class AuthorityNeededServicesImpl(
 			return false
 		}
 
-		return userORM.update(Mapping.Users(
-			uid = uid,
-			frozen = true,
-		))
+		return userORM.updateFrozenByUidAsync(uid, true)
 	}
 
 	suspend fun getAccountInfo(token: String): String {

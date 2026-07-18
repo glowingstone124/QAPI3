@@ -6,6 +6,43 @@ import org.springframework.stereotype.Service
 
 @Service
 class AffiliatedAccountORM : CrudDao<AffiliatedAccountServices.AffiliatedAccount> {
+	fun createUsingInvite(item: AffiliatedAccountServices.AffiliatedAccount): Boolean {
+		ConnectionPool.getConnection().use { connection ->
+			connection.autoCommit = false
+			try {
+				val inviteConsumed = connection.prepareStatement(
+					"UPDATE users SET invite = invite - 1 WHERE username = ? AND invite > 0"
+				).use { statement ->
+					statement.setString(1, item.host)
+					statement.executeUpdate() == 1
+				}
+				if (!inviteConsumed) {
+					connection.rollback()
+					return false
+				}
+
+				val accountCreated = connection.prepareStatement(
+					"INSERT INTO affiliated_account (name, host, password) VALUES (?, ?, ?)"
+				).use { statement ->
+					statement.setString(1, item.name)
+					statement.setString(2, item.host)
+					statement.setString(3, item.password)
+					statement.executeUpdate() == 1
+				}
+				if (!accountCreated) {
+					connection.rollback()
+					return false
+				}
+
+				connection.commit()
+				return true
+			} catch (exception: Exception) {
+				connection.rollback()
+				throw exception
+			}
+		}
+	}
+
 	override fun create(item: AffiliatedAccountServices.AffiliatedAccount): Long {
 		ConnectionPool.getConnection().use { connection ->
 			connection.prepareStatement("INSERT INTO affiliated_account (name, host, password) VALUES (?, ?, ?)").use {
