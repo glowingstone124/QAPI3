@@ -28,7 +28,7 @@ class FallenTeamControllerTest {
 	lateinit var nodes: Nodes
 
 	@Test
-	fun currentSelection_returnsLockedTeamForAuthenticatedUser() = runBlocking {
+	fun currentSelection_returnsLockedTeamForAuthenticatedUser(): Unit = runBlocking {
 		val selection = FallenTeamSelection("alex", FallenTeam.B, 1234L)
 		Mockito.`when`(fallenTeamService.selectionForToken("login-token"))
 			.thenReturn("alex" to selection)
@@ -45,7 +45,7 @@ class FallenTeamControllerTest {
 	}
 
 	@Test
-	fun selectTeam_rejectsASecondSelectionAndReturnsOriginalTeam() = runBlocking {
+	fun selectTeam_rejectsASecondSelectionAndReturnsOriginalTeam(): Unit = runBlocking {
 		val selection = FallenTeamSelection("alex", FallenTeam.A, 1234L)
 		Mockito.`when`(fallenTeamService.select("login-token", "{\"team\":\"C\"}"))
 			.thenReturn("alex" to FallenSelectionResult.AlreadySelected(selection))
@@ -70,5 +70,22 @@ class FallenTeamControllerTest {
 			.header("token", "wrong-token")
 			.exchange()
 			.expectStatus().isUnauthorized
+	}
+
+	@Test
+	fun serverSelection_assignsAJoiningPlayerThroughTheJoinSpecificServiceMethod(): Unit = runBlocking {
+		val selection = FallenTeamSelection("alex", FallenTeam.C, 1234L, FallenTeam.C, 1234L)
+		Mockito.`when`(nodes.getServerFromToken("server-token")).thenReturn(1)
+		Mockito.`when`(fallenTeamService.selectionForJoiningPlayer("alex")).thenReturn(selection)
+
+		webTestClient.get()
+			.uri("/qo/fallen/team?username=alex")
+			.header("Authorization", "Bearer server-token")
+			.exchange()
+			.expectStatus().isOk
+			.expectBody()
+			.jsonPath("$.selected").isEqualTo(true)
+			.jsonPath("$.team").isEqualTo("C")
+			.jsonPath("$.finalized").isEqualTo(true)
 	}
 }

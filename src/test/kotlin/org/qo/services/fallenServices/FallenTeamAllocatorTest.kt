@@ -33,4 +33,12 @@ class FallenTeamAllocatorTest {
 
 		registrations.forEach { assertEquals(it.expectedTeam, result[it.username]) }
 	}
+
+	@Test
+	fun leastPopulatedTeam_fillsTheSmallestTeamAndUsesStableTieBreaking() {
+		assertEquals(FallenTeam.C, FallenTeamAllocator.leastPopulatedTeam(listOf(
+			FallenTeam.A, FallenTeam.A, FallenTeam.B
+		)))
+		assertEquals(FallenTeam.A, FallenTeamAllocator.leastPopulatedTeam(emptyList()))
+	}
 }

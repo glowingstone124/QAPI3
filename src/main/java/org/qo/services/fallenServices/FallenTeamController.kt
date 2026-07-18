@@ -69,7 +69,7 @@ class FallenTeamController(
 	): ResponseEntity<String> {
 		val resolved = AuthTokens.resolve(token, authorization)
 		if (resolved == null || nodes.getServerFromToken(resolved) != 1) return unauthorized()
-		return ri.GeneralHttpHeader(selectionJson(fallenTeamService.selectionForUsername(username)).toString())
+		return ri.GeneralHttpHeader(selectionJson(fallenTeamService.selectionForJoiningPlayer(username)).toString())
 	}
 
 	private fun selectionJson(selection: FallenTeamSelection?): JsonObject = JsonObject().apply {

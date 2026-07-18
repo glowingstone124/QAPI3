@@ -77,6 +77,11 @@ internal object FallenTeamAllocator {
 		}
 		return assignments
 	}
+
+	fun leastPopulatedTeam(assignments: Collection<FallenTeam>): FallenTeam {
+		val counts = FallenTeam.entries.associateWith { team -> assignments.count { it == team } }
+		return FallenTeam.entries.minWith(compareBy<FallenTeam> { counts.getValue(it) }.thenBy { it.name })
+	}
 }
 
 @Service
@@ -108,6 +113,12 @@ class FallenTeamService(private val login: Login) {
 		ensureSchema()
 		finalizeAssignmentsIfDue()
 		read(username)
+	}
+
+	suspend fun selectionForJoiningPlayer(username: String): FallenTeamSelection? = withContext(Dispatchers.IO) {
+		ensureSchema()
+		finalizeAssignmentsIfDue()
+		read(username) ?: if (Instant.now().isBefore(assignmentInstant)) null else assignLatecomer(username)
 	}
 
 	@Scheduled(cron = "0 0 0 29 7 *", zone = "Asia/Shanghai")
@@ -160,6 +171,70 @@ class FallenTeamService(private val login: Login) {
 		}
 	}
 
+	private fun assignLatecomer(username: String): FallenTeamSelection {
+		ConnectionPool.getConnection().use { connection ->
+			connection.autoCommit = false
+			try {
+				lockAssignments(connection)
+				val existing = read(connection, username)
+				if (existing != null) {
+					connection.commit()
+					return existing
+				}
+
+				val assignedTeams = connection.prepareStatement(
+					"SELECT actual_team FROM fallen_team_selections ORDER BY username FOR UPDATE"
+				).use { statement ->
+					statement.executeQuery().use { result ->
+						buildList {
+							while (result.next()) {
+								FallenTeam.parse(result.getString("actual_team"))?.let(::add)
+							}
+						}
+					}
+				}
+				val team = FallenTeamAllocator.leastPopulatedTeam(assignedTeams)
+				val assignedAt = System.currentTimeMillis()
+				connection.prepareStatement(
+					"INSERT INTO fallen_team_selections(username, team, selected_at, actual_team, assigned_at) VALUES (?, ?, ?, ?, ?)"
+				).use { statement ->
+					statement.setString(1, username)
+					statement.setString(2, team.name)
+					statement.setLong(3, assignedAt)
+					statement.setString(4, team.name)
+					statement.setLong(5, assignedAt)
+					statement.executeUpdate()
+				}
+				connection.commit()
+				return FallenTeamSelection(username, team, assignedAt, team, assignedAt)
+			} catch (error: Throwable) {
+				connection.rollback()
+				throw error
+			} finally {
+				connection.autoCommit = true
+			}
+		}
+	}
+
+	private fun read(connection: java.sql.Connection, username: String): FallenTeamSelection? {
+		connection.prepareStatement(
+			"SELECT username, team, selected_at, actual_team, assigned_at FROM fallen_team_selections WHERE username = ? FOR UPDATE"
+		).use { statement ->
+			statement.setString(1, username)
+			statement.executeQuery().use { result ->
+				if (!result.next()) return null
+				val expectedTeam = FallenTeam.parse(result.getString("team")) ?: return null
+				return FallenTeamSelection(
+					username = result.getString("username"),
+					expectedTeam = expectedTeam,
+					selectedAt = result.getLong("selected_at"),
+					assignedTeam = FallenTeam.parse(result.getString("actual_team")),
+					assignedAt = result.getLong("assigned_at").takeUnless { result.wasNull() }
+				)
+			}
+		}
+	}
+
 	@Synchronized
 	private fun ensureSchema() {
 		if (schemaReady) return
@@ -178,6 +253,15 @@ class FallenTeamService(private val login: Login) {
 					) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 					""".trimIndent()
 				)
+				statement.executeUpdate(
+					"""
+					CREATE TABLE IF NOT EXISTS fallen_team_assignment_lock (
+						id TINYINT NOT NULL,
+						PRIMARY KEY (id)
+					) ENGINE=InnoDB
+					""".trimIndent()
+				)
+				statement.executeUpdate("INSERT IGNORE INTO fallen_team_assignment_lock(id) VALUES (1)")
 			}
 			ensureColumn(connection, "actual_team", "CHAR(1) NULL")
 			ensureColumn(connection, "assigned_at", "BIGINT NULL")
@@ -197,12 +281,19 @@ class FallenTeamService(private val login: Login) {
 		}
 	}
 
+	private fun lockAssignments(connection: java.sql.Connection) {
+		connection.prepareStatement(
+			"SELECT id FROM fallen_team_assignment_lock WHERE id = 1 FOR UPDATE"
+		).use { statement -> statement.executeQuery().use { check(it.next()) } }
+	}
+
 	@Synchronized
 	private fun finalizeAssignmentsIfDue() {
 		if (Instant.now().isBefore(assignmentInstant)) return
 		ConnectionPool.getConnection().use { connection ->
 			connection.autoCommit = false
 			try {
+				lockAssignments(connection)
 				val registrations = connection.prepareStatement(
 					"SELECT username, team, selected_at, actual_team FROM fallen_team_selections ORDER BY selected_at, username FOR UPDATE"
 				).use { statement ->
