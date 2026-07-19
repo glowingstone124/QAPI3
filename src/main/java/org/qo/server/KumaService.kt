@@ -4,7 +4,6 @@ import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.annotations.SerializedName
-import jakarta.servlet.http.HttpServletRequest
 import org.qo.utils.IPUtil
 import org.qo.utils.Logger
 import org.qo.utils.Logger.LogLevel
@@ -14,6 +13,7 @@ import org.springframework.http.HttpHeaders
 import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
 import org.springframework.http.ResponseEntity
+import org.springframework.http.server.reactive.ServerHttpRequest
 import org.springframework.stereotype.Service
 import java.io.File;
 import java.nio.file.Files;
@@ -59,7 +59,7 @@ class KumaService {
             NODES[ip] = name;
         }
     }
-    fun handleMessage(input: String, request: HttpServletRequest): ResponseEntity<String> {
+    fun handleMessage(input: String, request: ServerHttpRequest): ResponseEntity<String> {
         if (!NODES.containsKey(IPUtil.getIpAddr(request))) {
             val headers = HttpHeaders().apply {
                 contentType = MediaType.APPLICATION_JSON

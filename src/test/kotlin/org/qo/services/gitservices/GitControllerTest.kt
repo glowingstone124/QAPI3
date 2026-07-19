@@ -8,15 +8,25 @@ import org.springframework.boot.test.autoconfigure.web.reactive.AutoConfigureWeb
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.http.MediaType
 import org.springframework.test.web.reactive.server.WebTestClient
+import java.nio.charset.StandardCharsets
+import javax.crypto.Mac
+import javax.crypto.spec.SecretKeySpec
 
 @SpringBootTest(
 	classes = [TestApiApplication::class, GitController::class],
-	webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT
+	webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
+	properties = ["qapi.github.webhook-secret=test-secret"]
 )
 @AutoConfigureWebTestClient
 class GitControllerTest {
 	@Autowired
 	lateinit var webTestClient: WebTestClient
+
+	private fun signature(body: String): String {
+		val mac = Mac.getInstance("HmacSHA256")
+		mac.init(SecretKeySpec("test-secret".toByteArray(StandardCharsets.UTF_8), "HmacSHA256"))
+		return "sha256=" + mac.doFinal(body.toByteArray(StandardCharsets.UTF_8)).joinToString("") { "%02x".format(it) }
+	}
 
 	@Test
 	fun accept_handlesPushPayload() {
@@ -36,9 +46,10 @@ class GitControllerTest {
 		webTestClient.post()
 			.uri("/hooks/accept")
 			.contentType(MediaType.APPLICATION_JSON)
+			.header("X-Hub-Signature-256", signature(body))
 			.bodyValue(body)
 			.exchange()
-			.expectStatus().isOk
+			.expectStatus().isNoContent
 	}
 
 	@Test
@@ -58,8 +69,15 @@ class GitControllerTest {
 		webTestClient.post()
 			.uri("/hooks/accept")
 			.contentType(MediaType.APPLICATION_JSON)
+			.header("X-Hub-Signature-256", signature(body))
 			.bodyValue(body)
 			.exchange()
-			.expectStatus().isOk
+			.expectStatus().isNoContent
+	}
+
+	@Test
+	fun accept_rejectsUnsignedPayload() {
+		webTestClient.post().uri("/hooks/accept").contentType(MediaType.APPLICATION_JSON).bodyValue("{}")
+			.exchange().expectStatus().isUnauthorized
 	}
 }

@@ -5,7 +5,6 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import jakarta.annotation.Resource;
-import jakarta.servlet.http.HttpServletRequest;
 import kotlin.Pair;
 import kotlinx.coroutines.Dispatchers;
 import org.qo.datas.ConnectionPool;
@@ -16,8 +15,6 @@ import org.qo.services.loginService.Login;
 import org.qo.orm.UserORM;
 import org.qo.datas.Mapping.*;
 import org.qo.services.loginService.PlayerCardCustomizationImpl;
-import org.qo.services.mail.Mail;
-import org.qo.services.mail.MailPreset;
 import org.qo.redis.DatabaseType;
 import org.qo.redis.Redis;
 import org.qo.server.AvatarCache;
@@ -25,6 +22,8 @@ import org.qo.services.messageServices.Msg;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationContext;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.server.reactive.ServerHttpRequest;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
 
 import javax.swing.*;
@@ -55,6 +54,8 @@ public class UserProcess {
     public static Request request = new Request();
     private static final ReturnInterface ri = new ReturnInterface();
     private static final Login login = new Login();
+    private static final BCryptPasswordEncoder passwordEncoder = new BCryptPasswordEncoder(12);
+    private static final long VERIFICATION_TTL_MILLIS = TimeUnit.HOURS.toMillis(2);
     public static UserORM userORM = new UserORM();
     private static CoroutineAdapter ca;
     private static final Redis redis = new Redis();
@@ -215,7 +216,11 @@ public class UserProcess {
         return responseJson.toString();
     }
 
-    public static ResponseEntity<String> regMinecraftUser(String name, Long uid, HttpServletRequest request, String password, int score) throws ExecutionException, InterruptedException {
+    public static ResponseEntity<String> regMinecraftUser(String name, Long uid, ServerHttpRequest request, String password, int score) throws ExecutionException, InterruptedException {
+        if (name == null || !name.matches("^[A-Za-z0-9_]{3,16}$") || uid == null || uid <= 0
+                || password == null || password.length() < 8 || password.length() > 128) {
+            return ri.failed("invalid registration data");
+        }
         CompletableFuture<ResponseEntity<String>> future = ca.run(() -> {
             if (userORM.read(name) != null) {
                 return ri.failed("username already exist");
@@ -226,9 +231,11 @@ public class UserProcess {
             if (Objects.equals(userORM.read(uid), null) && name != null && uid != null) {
                 try {
                     userORM.create(new Users(name, uid, true, 3, 0, false, 0, false, 3, computePassword(password, true), UUID.randomUUID().toString(),0, score, 0L, 0L));
-                    String token = Algorithm.generateRandomString(16);
-                    Msg.Companion.putSys("用户 " + uid + "注册了一个账号：" + name + "，若非本人操作请忽略，确认账号请在消息发出后2小时内输入.approve-register " + token);
-                    verify_list.add(new registry_verify_class(name, token, uid, System.currentTimeMillis()));
+                    String token = login.generateToken(32);
+                    verify_list.removeIf(item -> Objects.equals(item.uid, uid));
+                    verify_list.add(new registry_verify_class(name, digestToken(token), uid, System.currentTimeMillis()));
+                    Msg.Companion.putSys("用户 " + uid + " 注册了账号 " + name
+                            + "，请本人在 QQ 中于 2 小时内发送 .approve-register " + token);
                 } catch (NoSuchAlgorithmException e) {
                     throw new RuntimeException(e);
                 }
@@ -243,8 +250,6 @@ public class UserProcess {
                     redis.insert("user:" + name, playerJson.toString(), DatabaseType.QO_REG_DATABASE.getValue()).ignoreException();
                 }, Dispatchers.getIO());
                 Logger.log(name + " registered from " + IPUtil.getIpAddr(request), INFO);
-                Mail mail = new Mail();
-                mail.send(uid + "@qq.com", "感谢您注册QO2账号", MailPreset.register);
                 return ri.success("Success!");
             } else {
                 return ri.failed("FAILED");
@@ -254,12 +259,17 @@ public class UserProcess {
     }
 
     public static ResponseEntity<String> updatePassword(Long uid, String newPassword) throws ExecutionException, InterruptedException {
+        if (uid == null || uid <= 0 || newPassword == null || newPassword.length() < 8 || newPassword.length() > 128) {
+            return ri.failed("invalid password");
+        }
         CompletableFuture<ResponseEntity<String>> future = ca.run(() -> {
             Users user = userORM.read(uid);
             if (Objects.nonNull(user)) {
-                String token = Algorithm.generateRandomString(16);
-                Msg.Companion.putSys("用户 " + uid + "更改了账号：" + user.getUsername() + "的密码，若非本人操作请忽略，确认账号请在消息发出后2小时内输入/update-password " + token);
-                pwdupd_list.add(new password_verify_class(newPassword, token, uid, System.currentTimeMillis()));
+                String token = login.generateToken(32);
+                pwdupd_list.removeIf(item -> Objects.equals(item.uid, uid));
+                pwdupd_list.add(new password_verify_class(computePassword(newPassword, true), digestToken(token), uid, System.currentTimeMillis()));
+                Msg.Companion.putSys("用户 " + uid + " 请求更改账号 " + user.getUsername()
+                        + " 的密码，请本人在 QQ 中于 2 小时内发送 .update-password " + token);
                 return ri.success("请求已提交。");
             } else {
                 return ri.failed("用户不存在！");
@@ -268,30 +278,28 @@ public class UserProcess {
         return future.get();
     }
 
-    private static void doUpdatePassword(Long uid, String newPassword) {
-        try {
-            String encryptedPassword = computePassword(newPassword, true);
-            userORM.updatePassword(uid, encryptedPassword);
-        } catch (NoSuchAlgorithmException e) {
-            throw new RuntimeException(e);
-        }
+    private static void doUpdatePassword(Long uid, String encryptedPassword) {
+        userORM.updatePassword(uid, encryptedPassword);
     }
 
     public static boolean validatePasswordUpdateRequest(String token, Long uid) {
+        pwdupd_list.removeIf(item -> System.currentTimeMillis() - item.createdAt >= VERIFICATION_TTL_MILLIS);
         for (password_verify_class classObj : pwdupd_list) {
-            if (Objects.equals(classObj.token, token) && Objects.equals(classObj.uid, uid) && System.currentTimeMillis() - classObj.expiration < 7200000) {
-                doUpdatePassword(uid, classObj.password);
+            if (tokenMatches(classObj.tokenHash, token) && Objects.equals(classObj.uid, uid)
+                    && pwdupd_list.remove(classObj)) {
+                doUpdatePassword(uid, classObj.passwordHash);
                 return true;
             }
         }
         return false;
     }
 
-    public static boolean validateMinecraftUser(String token, HttpServletRequest request, Long uid) {
+    public static boolean validateMinecraftUser(String token, Long uid) {
         Iterator<registry_verify_class> iterator = verify_list.iterator();
         while (iterator.hasNext()) {
             registry_verify_class item = iterator.next();
-            if (Objects.equals(item.token, token) && Objects.equals(item.uid, uid) && System.currentTimeMillis() - item.expiration < 7200000) {
+            if (tokenMatches(item.tokenHash, token) && Objects.equals(item.uid, uid)
+                    && System.currentTimeMillis() - item.createdAt < VERIFICATION_TTL_MILLIS && verify_list.remove(item)) {
                 ca.push(() -> {
                     String sql = "UPDATE users SET frozen = false WHERE uid = ?";
                     try (Connection connection = ConnectionPool.getConnection(); PreparedStatement statement = connection.prepareStatement(sql)) {
@@ -302,9 +310,8 @@ public class UserProcess {
                     }
                 }, Dispatchers.getIO());
                 return true;
-            } else if (System.currentTimeMillis() - item.expiration > 7200000) {
+            } else if (System.currentTimeMillis() - item.createdAt >= VERIFICATION_TTL_MILLIS) {
                 iterator.remove();
-                return false;
             }
         }
         return false;
@@ -464,13 +471,12 @@ public class UserProcess {
             }
         }
         if (!tempFlag) {
-            String[] passwordParts = user.getPassword().split("\\$");
-            String user_salt = passwordParts[2];
-            String user_hashed = passwordParts[3];
-            String computedPasswordHash = Algorithm.hash(Algorithm.hash(password, MessageDigest.getInstance("SHA-256")) + user_salt, MessageDigest.getInstance("SHA-256"));
-            if (computedPasswordHash.equals(user_hashed)) {
+            if (passwordMatches(password, user.getPassword())) {
                 String token = login.generateToken(64);
                 login.insertInto(token, username);
+                if (user.getPassword().startsWith("$SHA$")) {
+                    userORM.updatePassword(user.getUid(), computePassword(password, true));
+                }
                 updateLastLoginAsync(username);
                 if (!web && ip != null) {
                     redis.insert("login_history_" + username, ip, DatabaseType.QO_TEMP_DATABASE.getValue(), 60).ignoreException();
@@ -481,11 +487,7 @@ public class UserProcess {
             }
             return new Pair<>(false, null);
         } else {
-            String[] passwordParts = tempResult.getSecond().getPassword().split("\\$");
-            String user_salt = passwordParts[2];
-            String user_hashed = passwordParts[3];
-            String computedPasswordHash = Algorithm.hash(Algorithm.hash(password, MessageDigest.getInstance("SHA-256")) + user_salt, MessageDigest.getInstance("SHA-256"));
-            if (computedPasswordHash.equals(user_hashed)) {
+            if (passwordMatches(password, tempResult.getSecond().getPassword())) {
                 return new Pair<>(true, "");
             }
         }
@@ -517,38 +519,57 @@ public class UserProcess {
      * @throws NoSuchAlgorithmException If the SHA-256 algorithm is not available.
      */
     public static String computePassword(String password, boolean formatted) throws NoSuchAlgorithmException {
-        String salt = Algorithm.generateRandomString(16);
-        if (formatted) {
-            return "$SHA$" + salt + "$" + Algorithm.hash(Algorithm.hash(password, MessageDigest.getInstance("SHA-256")) + salt, MessageDigest.getInstance("SHA-256"));
+        return passwordEncoder.encode(password);
+    }
+
+    private static boolean passwordMatches(String password, String encodedPassword) throws NoSuchAlgorithmException {
+        if (encodedPassword == null) return false;
+        if (encodedPassword.startsWith("$2")) return passwordEncoder.matches(password, encodedPassword);
+        String[] parts = encodedPassword.split("\\$");
+        if (parts.length != 4 || !"SHA".equals(parts[1])) return false;
+        String computed = Algorithm.hash(Algorithm.hash(password, MessageDigest.getInstance("SHA-256")) + parts[2], MessageDigest.getInstance("SHA-256"));
+        return MessageDigest.isEqual(computed.getBytes(java.nio.charset.StandardCharsets.UTF_8), parts[3].getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    }
+
+    private static String digestToken(String token) {
+        try {
+            return Algorithm.hash(token, MessageDigest.getInstance("SHA-256"));
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
         }
-        return Algorithm.hash(Algorithm.hash(password, MessageDigest.getInstance("SHA-256")) + salt, MessageDigest.getInstance("SHA-256"));
+    }
+
+    private static boolean tokenMatches(String expectedDigest, String suppliedToken) {
+        if (suppliedToken == null) return false;
+        return MessageDigest.isEqual(expectedDigest.getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                digestToken(suppliedToken).getBytes(java.nio.charset.StandardCharsets.UTF_8));
     }
 
     public static class registry_verify_class {
         String username;
-        String token;
+        String tokenHash;
         Long uid;
-        Long expiration;
+        Long createdAt;
 
         public registry_verify_class(String username, String token, Long uid, Long expiration) {
             this.username = username;
-            this.token = token;
+            this.tokenHash = token;
             this.uid = uid;
-            this.expiration = expiration;
+            this.createdAt = expiration;
         }
     }
 
     public static class password_verify_class {
-        String password;
-        String token;
+        String passwordHash;
+        String tokenHash;
         Long uid;
-        Long expiration;
+        Long createdAt;
 
         public password_verify_class(String password, String token, Long uid, Long expiration) {
-            this.password = password;
-            this.token = token;
+            this.passwordHash = password;
+            this.tokenHash = token;
             this.uid = uid;
-            this.expiration = expiration;
+            this.createdAt = expiration;
         }
     }
     private static String toHex(byte[] bytes) {

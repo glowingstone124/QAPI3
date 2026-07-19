@@ -1,12 +1,12 @@
 package org.qo.utils
 
-import jakarta.servlet.http.HttpServletRequest
+import org.springframework.http.server.reactive.ServerHttpRequest
 import org.springframework.stereotype.Service
 
 @Service
 class UAUtil {
-    fun isCLIToolRequest(request: HttpServletRequest): Boolean {
-        val userAgent: String? = request.getHeader("User-Agent")
+    fun isCLIToolRequest(request: ServerHttpRequest): Boolean {
+        val userAgent: String? = request.headers.getFirst("User-Agent")
         if (userAgent == null) {
             return false;
         }

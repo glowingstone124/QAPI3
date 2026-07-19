@@ -1,41 +1,30 @@
 package org.qo.utils;
 
-import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.http.server.reactive.ServerHttpRequest;
 
-import java.net.InetAddress;
-import java.net.UnknownHostException;
+import java.util.Arrays;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 public class IPUtil {
-    public static String getIpAddr(HttpServletRequest request) {
-        String ipAddress = null;
-        try {
-            ipAddress = request.getHeader("x-forwarded-for");
-            if (ipAddress == null || ipAddress.length() == 0 || "unknown".equalsIgnoreCase(ipAddress)) {
-                ipAddress = request.getHeader("Proxy-Client-IP");
-            }
-            if (ipAddress == null || ipAddress.length() == 0 || "unknown".equalsIgnoreCase(ipAddress)) {
-                ipAddress = request.getHeader("WL-Proxy-Client-IP");
-            }
-            if (ipAddress == null || ipAddress.length() == 0 || "unknown".equalsIgnoreCase(ipAddress)) {
-                ipAddress = request.getRemoteAddr();
-                if (ipAddress.equals("127.0.0.1")) {
-                    InetAddress inet = null;
-                    try {
-                        inet = InetAddress.getLocalHost();
-                    } catch (UnknownHostException e) {
-                        e.printStackTrace();
-                    }
-                    ipAddress = inet.getHostAddress();
-                }
-            }
-            if (ipAddress != null && ipAddress.length() > 15) {
-                if (ipAddress.indexOf(",") > 0) {
-                    ipAddress = ipAddress.substring(0, ipAddress.indexOf(","));
-                }
-            }
-        } catch (Exception e) {
-            ipAddress="";
+    public static String getIpAddr(ServerHttpRequest request) {
+        if (request.getRemoteAddress() == null || request.getRemoteAddress().getAddress() == null) return "unknown";
+        String remoteAddress = request.getRemoteAddress().getAddress().getHostAddress();
+        if (!trustedProxies().contains(remoteAddress)) return remoteAddress;
+
+        String forwarded = request.getHeaders().getFirst("X-Forwarded-For");
+        if (forwarded == null || forwarded.isBlank()) return remoteAddress;
+        String candidate = forwarded.split(",", 2)[0].trim();
+        if (!candidate.matches("^[0-9a-fA-F:.]{2,45}$")) {
+            return remoteAddress;
         }
-        return ipAddress;
+        return candidate;
+    }
+
+    private static Set<String> trustedProxies() {
+        String configured = System.getenv("TRUSTED_PROXY_IPS");
+        if (configured == null || configured.isBlank()) return Set.of();
+        return Arrays.stream(configured.split(","))
+                .map(String::trim).filter(value -> !value.isEmpty()).collect(Collectors.toUnmodifiableSet());
     }
 }

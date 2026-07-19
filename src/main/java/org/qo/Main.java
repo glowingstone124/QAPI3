@@ -13,12 +13,14 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.Bean;
+import org.springframework.beans.factory.annotation.Value;
 
 import org.springframework.scheduling.annotation.EnableAsync;
 import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.web.cors.CorsConfiguration;
-import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
-import org.springframework.web.filter.CorsFilter;
+import org.springframework.web.cors.reactive.UrlBasedCorsConfigurationSource;
+import org.springframework.web.cors.reactive.CorsWebFilter;
+import java.util.Arrays;
 
 
 import static org.qo.utils.Logger.LogLevel.*;
@@ -49,14 +51,15 @@ public class Main {
     }
 
     @Bean
-    public CorsFilter corsFilter() {
+    public CorsWebFilter corsFilter(@Value("${qapi.cors.allowed-origins:}") String allowedOrigins) {
         CorsConfiguration config = new CorsConfiguration();
         config.setAllowCredentials(Boolean.FALSE);
-        config.addAllowedOrigin("*");
-        config.addAllowedHeader("*");
-        config.addAllowedMethod("*");
+        Arrays.stream(allowedOrigins.split(",")).map(String::trim).filter(value -> !value.isEmpty())
+                .forEach(config::addAllowedOrigin);
+        config.setAllowedHeaders(java.util.List.of("Authorization", "Content-Type", "Token"));
+        config.setAllowedMethods(java.util.List.of("GET", "POST", "DELETE", "OPTIONS"));
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
-        source.registerCorsConfiguration("/**", config);
-        return new CorsFilter(source);
+        if (!config.getAllowedOrigins().isEmpty()) source.registerCorsConfiguration("/**", config);
+        return new CorsWebFilter(source);
     }
 }

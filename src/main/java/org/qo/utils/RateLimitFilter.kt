@@ -1,36 +1,34 @@
 package org.qo.utils
 
-import jakarta.servlet.FilterChain
-import jakarta.servlet.http.HttpServletRequest
-import jakarta.servlet.http.HttpServletResponse
+import org.springframework.http.HttpStatus
+import org.springframework.http.MediaType
+import org.springframework.http.server.reactive.ServerHttpRequest
 import org.springframework.stereotype.Component
-import org.springframework.web.filter.OncePerRequestFilter
+import org.springframework.web.server.ServerWebExchange
+import org.springframework.web.server.WebFilter
+import org.springframework.web.server.WebFilterChain
+import reactor.core.publisher.Mono
 
 @Component
-class RateLimitFilter : OncePerRequestFilter() {
+class RateLimitFilter : WebFilter {
 	private val limiter = RateLimiter()
 
-	override fun doFilterInternal(
-		request: HttpServletRequest,
-		response: HttpServletResponse,
-		filterChain: FilterChain
-	) {
-		val path = request.requestURI ?: ""
+	override fun filter(exchange: ServerWebExchange, chain: WebFilterChain): Mono<Void> {
+		val request = exchange.request
+		val path = request.path.pathWithinApplication().value()
 		val clientKey = resolveClientKey(request)
 		if (!limiter.allow(path, clientKey)) {
-			response.status = 429
-			response.contentType = "application/json"
-			response.writer.write("{\"code\":429,\"message\":\"Rate limit exceeded\"}")
-			return
+			val response = exchange.response
+			response.statusCode = HttpStatus.TOO_MANY_REQUESTS
+			response.headers.contentType = MediaType.APPLICATION_JSON
+			val body = response.bufferFactory()
+				.wrap("{\"code\":429,\"message\":\"Rate limit exceeded\"}".toByteArray())
+			return response.writeWith(Mono.just(body))
 		}
-		filterChain.doFilter(request, response)
+		return chain.filter(exchange)
 	}
 
-	private fun resolveClientKey(request: HttpServletRequest): String {
-		val forwarded = request.getHeader("X-Forwarded-For")
-		if (!forwarded.isNullOrBlank()) {
-			return forwarded.split(",").first().trim()
-		}
-		return request.remoteAddr ?: "unknown"
+	private fun resolveClientKey(request: ServerHttpRequest): String {
+		return IPUtil.getIpAddr(request)
 	}
 }

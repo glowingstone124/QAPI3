@@ -3,7 +3,7 @@ import org.gradle.jvm.toolchain.JavaLanguageVersion
 import org.springframework.boot.gradle.tasks.bundling.BootJar
 
 plugins {
-    id("org.springframework.boot") version "3.5.4"
+    id("org.springframework.boot") version "3.5.16"
     id("io.spring.dependency-management") version "1.1.7"
     kotlin("jvm") version "2.2.21"
     kotlin("plugin.spring") version "2.2.21"
@@ -39,8 +39,8 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter")
     implementation("org.springframework.boot:spring-boot-starter-webflux")
     implementation("org.springframework.boot:spring-boot-starter-quartz")
-    implementation("org.springframework.boot:spring-boot-starter-websocket")
     implementation("org.springframework.boot:spring-boot-starter-actuator")
+    implementation("org.springframework.security:spring-security-crypto")
 
     implementation("redis.clients:jedis:3.6.3")
     implementation("org.xerial:sqlite-jdbc:3.34.0")
@@ -76,6 +76,7 @@ sourceSets {
     main {
         resources {
             srcDir(generatedResDir)
+            exclude("druid.properties")
         }
     }
 }

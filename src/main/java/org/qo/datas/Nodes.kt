@@ -10,6 +10,8 @@ import org.qo.services.messageServices.Msg
 import org.springframework.stereotype.Service
 import java.io.FileReader
 import java.io.IOException
+import java.security.MessageDigest
+import java.nio.charset.StandardCharsets
 
 data class Node(
     @SerializedName("name") val name: String,
@@ -77,7 +79,7 @@ class Nodes {
     }
     fun getServerFromToken(input: String): Int {
         nodesData.forEach {
-            if (it.token == input) {
+            if (MessageDigest.isEqual(it.token.toByteArray(StandardCharsets.UTF_8), input.toByteArray(StandardCharsets.UTF_8))) {
                 return it.id
             }
         }

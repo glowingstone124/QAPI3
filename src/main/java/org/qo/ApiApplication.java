@@ -4,7 +4,6 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import jakarta.annotation.PostConstruct;
-import jakarta.servlet.http.HttpServletRequest;
 import org.qo.datas.Database;
 import org.qo.datas.Nodes;
 import org.qo.services.loginService.IPWhitelistServices;
@@ -18,13 +17,13 @@ import org.qo.services.gameStatusService.Status;
 import org.qo.utils.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
-import org.springframework.boot.web.servlet.error.ErrorController;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.core.io.Resource;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.server.reactive.ServerHttpRequest;
 import org.springframework.web.bind.annotation.*;
 
 import java.io.*;
@@ -44,7 +43,7 @@ import static org.qo.utils.UserProcess.*;
 
 @RestController
 @SpringBootApplication
-public class ApiApplication implements ErrorController {
+public class ApiApplication {
     //public static String status = "no old status found";
     public static int serverAlive;
     public static long PackTime;
@@ -101,7 +100,10 @@ public class ApiApplication implements ErrorController {
     }
 
     @PostMapping("/qo/alive/upload")
-    public void getAlive(@RequestBody String data, @RequestHeader(value = "Authorization", required = false) String header) {
+    public ResponseEntity<Void> getAlive(@RequestBody String data, @RequestHeader(value = "Authorization", required = false) String header) {
+        if (header == null || nodes.getServerFromToken(header.replaceFirst("^Bearer ", "")) < 0) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
         JsonObject Heartbeat = JsonParser.parseString(data).getAsJsonObject();
         PackTime = Heartbeat.get("timestamp").getAsLong();
         long currentTime = new Date().getTime();
@@ -121,6 +123,7 @@ public class ApiApplication implements ErrorController {
             }
             default -> serverAlive = -1;
         }
+        return ResponseEntity.noContent().build();
     }
 
     @GetMapping("/qo/alive/download")
@@ -131,8 +134,11 @@ public class ApiApplication implements ErrorController {
     }
 
     @PostMapping("/qo/upload/gametimerecord")
-    public void parser(@RequestParam(name = "name") String name, @RequestParam(name = "time") int time) {
+    public ResponseEntity<Void> parser(@RequestParam(name = "name") String name, @RequestParam(name = "time") int time,
+                                       @RequestHeader("Token") String token) {
+        if (nodes.getServerFromToken(token) < 0) return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
         handleTime(name, time);
+        return ResponseEntity.noContent().build();
     }
 
     @GetMapping("/qo/download/getgametime")
@@ -178,13 +184,18 @@ public class ApiApplication implements ErrorController {
     }
 
     @PostMapping("/qo/online")
-    public void handleOnlineRequest(@RequestParam String name, @RequestParam(required = false, defaultValue = "") String ip) {
+    public ResponseEntity<Void> handleOnlineRequest(@RequestParam String name, @RequestParam(required = false, defaultValue = "") String ip,
+                                                    @RequestHeader("Token") String token) {
+        if (nodes.getServerFromToken(token) < 0) return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
         handlePlayerOnline(name, ip);
+        return ResponseEntity.noContent().build();
     }
 
     @PostMapping("/qo/offline")
-    public void handleOffRequest(@RequestParam String name) {
+    public ResponseEntity<Void> handleOffRequest(@RequestParam String name, @RequestHeader("Token") String token) {
+        if (nodes.getServerFromToken(token) < 0) return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
         handlePlayerOffline(name);
+        return ResponseEntity.noContent().build();
     }
 
     @GetMapping("/qo/download/stats")
@@ -227,25 +238,32 @@ public class ApiApplication implements ErrorController {
      * by the UserProcess.regMinecraftUser method.
      * @throws Exception If an error occurs during the processing of the user data.
      */
-    @RequestMapping("/qo/upload/registry")
-    public ResponseEntity<String> InsertData(@RequestParam(name = "name") String name, @RequestParam(name = "uid") Long uid, @RequestParam(name = "password") String password,@RequestParam int score, HttpServletRequest request) throws Exception {
+    @PostMapping(value = "/qo/upload/registry", consumes = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<String> InsertData(@RequestBody RegisterRequest registration, ServerHttpRequest request) throws Exception {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
         if (ua.isCLIToolRequest(request)) return new ResponseEntity<>("failed", headers, HttpStatus.BAD_REQUEST);
-        return regMinecraftUser(name, uid, request, password, score);
+        return regMinecraftUser(registration.name(), registration.uid(), request, registration.password(), registration.score());
     }
 
-    @RequestMapping("/qo/upload/confirmation")
-    public static ResponseEntity<String> verifyReg(@RequestParam String token, HttpServletRequest request, @RequestParam Long uid, @RequestParam int task) {
+    public record RegisterRequest(String name, Long uid, String password, int score) {}
+
+    @PostMapping(value = "/qo/upload/confirmation", consumes = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<String> verifyReg(@RequestBody ConfirmationRequest confirmation,
+                                            @RequestHeader("Authorization") String authorization) {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
         JsonObject statObj = new JsonObject();
-        switch (task) {
+        if (nodes.getServerFromToken(authorization.replaceFirst("^Bearer ", "")) != 0) {
+            statObj.addProperty("result", false);
+            return new ResponseEntity<>(statObj.toString(), headers, HttpStatus.UNAUTHORIZED);
+        }
+        switch (confirmation.task()) {
             case 0:
-                statObj.addProperty("result", validateMinecraftUser(token, request, uid));
+                statObj.addProperty("result", validateMinecraftUser(confirmation.token(), confirmation.uid()));
                 break;
             case 1:
-                statObj.addProperty("result", validatePasswordUpdateRequest(token, uid));
+                statObj.addProperty("result", validatePasswordUpdateRequest(confirmation.token(), confirmation.uid()));
                 break;
             default:
                 statObj.addProperty("result", false);
@@ -254,10 +272,14 @@ public class ApiApplication implements ErrorController {
         return new ResponseEntity<>(statObj.toString(), headers, HttpStatus.OK);
     }
 
-    @PostMapping("/qo/upload/password")
-    public ResponseEntity<String> requestUpdatePassword(@RequestParam long uid, @RequestParam String password) throws ExecutionException, InterruptedException {
-        return updatePassword(uid, password);
+    public record ConfirmationRequest(String token, Long uid, int task) {}
+
+    @PostMapping(value = "/qo/upload/password", consumes = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<String> requestUpdatePassword(@RequestBody PasswordResetRequest reset) throws ExecutionException, InterruptedException {
+        return updatePassword(reset.uid(), reset.password());
     }
+
+    public record PasswordResetRequest(Long uid, String password) {}
 
     @RequestMapping("/qo/download/avatar")
     public ResponseEntity<String> avartarTrans(@RequestParam() String name) throws Exception {
@@ -273,7 +295,10 @@ public class ApiApplication implements ErrorController {
     }
 
     @GetMapping("/qo/webmsg/download")
-    public ResponseEntity<String> returnWeb() {
+    public ResponseEntity<String> returnWeb(@RequestHeader("Authorization") String authorization) {
+        if (nodes.getServerFromToken(authorization.replaceFirst("^Bearer ", "")) < 0) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("{\"code\":401}");
+        }
         return ri.GeneralHttpHeader(Msg.Companion.webGet());
     }
 
@@ -298,17 +323,22 @@ public class ApiApplication implements ErrorController {
         return new ResponseEntity<>(ipWhitelistServices.whitelistedWrapper(ip), headers, HttpStatus.OK);
     }
 
-    @GetMapping("/qo/game/login")
-    public ResponseEntity<String> login(@RequestParam String username, @RequestParam String password, @RequestParam(required = false) String ip, @RequestParam(required = false) boolean web, HttpServletRequest request) throws NoSuchAlgorithmException {
+    @PostMapping(value = "/qo/game/login", consumes = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<String> login(@RequestBody LoginRequest credentials, ServerHttpRequest request) throws NoSuchAlgorithmException {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
         if (ua.isCLIToolRequest(request)) return new ResponseEntity<>("failed", headers, HttpStatus.BAD_REQUEST);
+        if (credentials.username() == null || credentials.password() == null || credentials.password().length() > 128) {
+            return new ResponseEntity<>("{\"result\":false}", headers, HttpStatus.BAD_REQUEST);
+        }
         JsonObject retObj = new JsonObject();
-        var result = performLogin(username, password, ip, web);
+        var result = performLogin(credentials.username(), credentials.password(), credentials.ip(), Boolean.TRUE.equals(credentials.web()));
         retObj.addProperty("result", result.getFirst());
         retObj.addProperty("token", result.getSecond());
         return new ResponseEntity<>(retObj.toString(), headers, HttpStatus.OK);
     }
+
+    public record LoginRequest(String username, String password, String ip, Boolean web) {}
 
     @PostMapping("/qo/upload/loginattempt")
     public void handleLoginAttemptLogging(@RequestBody String data, @RequestParam(name = "auth", required = true) String auth) throws Exception {

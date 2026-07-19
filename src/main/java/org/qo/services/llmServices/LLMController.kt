@@ -1,26 +1,23 @@
 package org.qo.services.llmServices
 
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOf
 import org.qo.utils.AuthTokens
 import org.springframework.http.HttpHeaders
 import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
 import org.springframework.http.ResponseEntity
+import org.springframework.http.codec.ServerSentEvent
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestHeader
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RestController
-import org.springframework.web.servlet.mvc.method.annotation.SseEmitter
 
 @RestController
 @RequestMapping("/qo/asking")
 class LLMController(private val llmServices: LLMServices) {
-	private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
-
 	@PostMapping("/v1/chat/completions", produces = [MediaType.APPLICATION_JSON_VALUE, MediaType.TEXT_EVENT_STREAM_VALUE])
 	suspend fun chatCompletions(
 		@RequestHeader("token", required = false) token: String?,
@@ -85,46 +82,39 @@ class LLMController(private val llmServices: LLMServices) {
 		@RequestHeader("token", required = false) token: String?,
 		@RequestHeader(HttpHeaders.AUTHORIZATION, required = false) authorization: String?,
 		@RequestBody body: String
-	): SseEmitter {
+	): Flow<ServerSentEvent<String>> {
 		val requestToken = AuthTokens.resolve(token, authorization)
-		val emitter = SseEmitter(0L)
 		if (requestToken.isNullOrBlank()) {
-			emitter.send(SseEmitter.event().data("缺少或无效的令牌").name("error"))
-			emitter.complete()
-			return emitter
+			return flowOf(sse("缺少或无效的令牌", "error"))
 		}
-		scope.launch {
-			val requestBody = llmServices.buildPromptRequest(body, true)
-			sendStream(emitter, requestBody, requestToken)
-		}
-		return emitter
+		val requestBody = llmServices.buildPromptRequest(body, true)
+		return streamEvents(requestBody, requestToken)
 	}
 
-	private suspend fun streamResponse(body: String, token: String): SseEmitter {
-		val emitter = SseEmitter(0L)
-		scope.launch {
-			sendStream(emitter, body, token)
-		}
-		return emitter
+	private fun streamResponse(body: String, token: String): Flow<ServerSentEvent<String>> {
+		return streamEvents(body, token)
 	}
 
-	private suspend fun sendStream(emitter: SseEmitter, body: String, token: String) {
+	private fun streamEvents(body: String, token: String): Flow<ServerSentEvent<String>> = flow {
 		try {
 			val result = llmServices.streamChat(body, token)
 			if (result.status >= 400) {
-				result.chunks.collect { emitter.send(SseEmitter.event().data(it).name("error")) }
-				emitter.complete()
-				return
+				result.chunks.collect { emit(sse(it, "error")) }
+				return@flow
 			}
 			result.chunks.collect { chunk ->
-				emitter.send(SseEmitter.event().data(chunk))
+				emit(sse(chunk))
 			}
-			emitter.send(SseEmitter.event().data("[DONE]"))
-			emitter.complete()
+			emit(sse("[DONE]"))
 		} catch (e: Exception) {
-			emitter.send(SseEmitter.event().data(e.message ?: "LLM stream failed").name("error"))
-			emitter.completeWithError(e)
+			emit(sse(e.message ?: "LLM stream failed", "error"))
 		}
+	}
+
+	private fun sse(data: String, event: String? = null): ServerSentEvent<String> {
+		val builder = ServerSentEvent.builder(data)
+		if (event != null) builder.event(event)
+		return builder.build()
 	}
 
 	private fun jsonResponse(body: String, status: HttpStatus): ResponseEntity<String> {

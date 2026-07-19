@@ -42,12 +42,21 @@ class MsgControllerTest {
 
 	@Test
 	fun download_returnsMessagePayload() {
+		Mockito.`when`(nodes.getServerFromToken("bot-secret")).thenReturn(0)
 		webTestClient.get()
 			.uri("/qo/msglist/download")
+			.header("Authorization", "bot-secret")
 			.exchange()
 			.expectStatus().isOk
 			.expectBody()
 			.jsonPath("$.messages").exists()
 			.jsonPath("$.empty").exists()
+	}
+
+	@Test
+	fun download_rejectsInvalidToken() {
+		Mockito.`when`(nodes.getServerFromToken("invalid")).thenReturn(-1)
+		webTestClient.get().uri("/qo/msglist/download").header("Authorization", "invalid")
+			.exchange().expectStatus().isUnauthorized
 	}
 }

@@ -1,27 +1,33 @@
 package org.qo.services.eliteWeaponServices
 
 import com.google.gson.JsonObject
+import org.qo.datas.Nodes
 import org.qo.utils.ReturnInterface
+import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
+import org.springframework.web.bind.annotation.RequestHeader
 
 @RestController
 @RequestMapping("/qo/elite")
 class EliteWeaponController(
 	private val impl: EliteWeaponImpl,
-	private val ri: ReturnInterface
+	private val ri: ReturnInterface,
+	private val nodes: Nodes
 ) {
 	@GetMapping("/download")
 	fun download(@RequestParam username: String): ResponseEntity<String> {
 		return ri.GeneralHttpHeader(impl.getEliteWeaponsFromUsername(username))
 	}
 
-	@GetMapping("/create")
-	fun create(@RequestParam owner: String, @RequestParam type: String, @RequestParam description: String,@RequestParam name: String): ResponseEntity<String> {
+	@PostMapping("/create")
+	fun create(@RequestParam owner: String, @RequestParam type: String, @RequestParam description: String,@RequestParam name: String,
+	           @RequestHeader("Token") token: String): ResponseEntity<String> {
+		if (nodes.getServerFromToken(token) < 0) return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("{\"code\":401}")
 		impl.handleEliteWeaponRequest(owner, type, description, name)?.let {
 			return ri.GeneralHttpHeader(JsonObject().apply {
 				addProperty("result", true)
@@ -34,7 +40,9 @@ class EliteWeaponController(
 	}
 
 	@PostMapping("/add")
-	fun add(@RequestParam type: String,@RequestParam requester: String, @RequestParam uuid: String, @RequestParam amount: Int): ResponseEntity<String> {
+	fun add(@RequestParam type: String,@RequestParam requester: String, @RequestParam uuid: String, @RequestParam amount: Int,
+	        @RequestHeader("Token") token: String): ResponseEntity<String> {
+		if (nodes.getServerFromToken(token) < 0) return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("{\"code\":401}")
 		if (type == "dmg") {
 			return ri.GeneralHttpHeader(impl.addEliteWeaponDMG(uuid, requester, amount))
 		} else if (type == "kill") {

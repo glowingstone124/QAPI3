@@ -74,6 +74,15 @@ class Msg {
             }
         }
 
+        fun getPublic(): JsonObject {
+            return JsonObject().apply {
+                val publicMessages = JsonArray()
+                msgQueue.asSequence().filter { it.from != 2 }.forEach { publicMessages.add(gson.toJsonTree(it)) }
+                add("messages", publicMessages)
+                addProperty("empty", publicMessages.isEmpty)
+            }
+        }
+
         fun <T> LinkedBlockingQueue<T>.toJsonArray(): JsonArray {
             val arr = JsonArray()
             this.forEach { item ->
