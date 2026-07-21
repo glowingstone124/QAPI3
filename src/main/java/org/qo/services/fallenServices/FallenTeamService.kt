@@ -88,6 +88,8 @@ internal object FallenTeamAllocator {
 class FallenTeamService(private val login: Login) {
 	@Volatile
 	private var schemaReady = false
+	@Volatile
+	private var rosterCache: FallenRosterCache? = null
 	private val assignmentZone = ZoneId.of("Asia/Shanghai")
 	private val assignmentInstant = LocalDate.of(2026, 7, 29).atStartOfDay(assignmentZone).toInstant()
 
@@ -119,6 +121,10 @@ class FallenTeamService(private val login: Login) {
 		ensureSchema()
 		finalizeAssignmentsIfDue()
 		read(username) ?: if (Instant.now().isBefore(assignmentInstant)) null else assignLatecomer(username)
+	}
+
+	suspend fun finalizedRoster(): Map<FallenTeam, List<String>> = withContext(Dispatchers.IO) {
+		readFinalizedRoster()
 	}
 
 	@Scheduled(cron = "0 0 0 29 7 *", zone = "Asia/Shanghai")
@@ -236,6 +242,30 @@ class FallenTeamService(private val login: Login) {
 	}
 
 	@Synchronized
+	private fun readFinalizedRoster(): Map<FallenTeam, List<String>> {
+		val now = System.currentTimeMillis()
+		rosterCache?.takeIf { now - it.loadedAt < ROSTER_CACHE_MILLIS }?.let { return it.roster }
+		ensureSchema()
+		finalizeAssignmentsIfDue()
+		val players = FallenTeam.entries.associateWith { mutableListOf<String>() }
+		ConnectionPool.getConnection().use { connection ->
+			connection.prepareStatement(
+				"SELECT username, actual_team FROM fallen_team_selections WHERE actual_team IS NOT NULL ORDER BY username"
+			).use { statement ->
+				statement.executeQuery().use { result ->
+					while (result.next()) {
+						FallenTeam.parse(result.getString("actual_team"))
+							?.let { players.getValue(it).add(result.getString("username")) }
+					}
+				}
+			}
+		}
+		val roster = players.mapValues { (_, names) -> names.toList() }
+		rosterCache = FallenRosterCache(roster, now)
+		return roster
+	}
+
+	@Synchronized
 	private fun ensureSchema() {
 		if (schemaReady) return
 		ConnectionPool.getConnection().use { connection ->
@@ -285,6 +315,15 @@ class FallenTeamService(private val login: Login) {
 		connection.prepareStatement(
 			"SELECT id FROM fallen_team_assignment_lock WHERE id = 1 FOR UPDATE"
 		).use { statement -> statement.executeQuery().use { check(it.next()) } }
+	}
+
+	private data class FallenRosterCache(
+		val roster: Map<FallenTeam, List<String>>,
+		val loadedAt: Long
+	)
+
+	private companion object {
+		const val ROSTER_CACHE_MILLIS = 5_000L
 	}
 
 	@Synchronized
