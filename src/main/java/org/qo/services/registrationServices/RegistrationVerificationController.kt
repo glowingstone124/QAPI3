@@ -1,0 +1,154 @@
+package org.qo.services.registrationServices
+
+import com.google.gson.JsonArray
+import com.google.gson.JsonObject
+import org.qo.datas.Nodes
+import org.qo.utils.AuthTokens
+import org.qo.utils.ReturnInterface
+import org.springframework.http.HttpHeaders
+import org.springframework.http.HttpStatus
+import org.springframework.http.ResponseEntity
+import org.springframework.web.bind.annotation.GetMapping
+import org.springframework.web.bind.annotation.PostMapping
+import org.springframework.web.bind.annotation.RequestBody
+import org.springframework.web.bind.annotation.RequestHeader
+import org.springframework.web.bind.annotation.RequestMapping
+import org.springframework.web.bind.annotation.RestController
+
+@RestController
+@RequestMapping("/qo/registration")
+class RegistrationVerificationController(
+	private val quizService: RegistrationQuizService,
+	private val nodes: Nodes,
+	private val ri: ReturnInterface
+) {
+	@GetMapping("/verification-methods")
+	fun methods(): ResponseEntity<String> {
+		val quizMetadata = runCatching { quizService.metadata() }.getOrNull()
+		val methods = JsonArray()
+		RegistrationVerificationMethod.entries.forEach { method ->
+			val available = method.available &&
+				(method != RegistrationVerificationMethod.QUIZ || quizMetadata != null)
+			methods.add(JsonObject().apply {
+				addProperty("id", method.id)
+				addProperty("displayName", method.displayName)
+				addProperty("description", method.description)
+				addProperty("available", available)
+				addProperty("legacy", method.legacy)
+				addProperty(
+					"state",
+					if (available) "available"
+					else if (method == RegistrationVerificationMethod.MINECRAFT) "reserved"
+					else "unavailable"
+				)
+				if (method == RegistrationVerificationMethod.QUIZ && quizMetadata != null) {
+					addProperty("questionCount", quizMetadata.questionCount)
+					addProperty("passingScore", quizMetadata.passingScore)
+				}
+			})
+		}
+		return ri.GeneralHttpHeader(JsonObject().apply {
+			addProperty("defaultMethod", RegistrationVerificationMethod.QUIZ.id)
+			add("methods", methods)
+		}.toString())
+	}
+
+	@PostMapping("/quiz/session")
+	fun startQuiz(
+		@RequestBody request: RegistrationQuizSessionRequest
+	): ResponseEntity<String> {
+		val name = request.name
+		val uid = request.uid
+		if (name == null || uid == null) {
+			return response("invalid_registration_data", "Minecraft 用户名或 QQ 号无效。", HttpStatus.BAD_REQUEST)
+		}
+		val session = runCatching { quizService.start(name, uid) }.getOrElse {
+			return response("quiz_configuration_unavailable", "答题配置暂时不可用，请联系管理员。", HttpStatus.SERVICE_UNAVAILABLE)
+		} ?: return response("quiz_session_unavailable", "暂时无法创建答题会话，请稍后重试。", HttpStatus.TOO_MANY_REQUESTS)
+		val questions = JsonArray()
+		session.questions.forEach { question ->
+			questions.add(JsonObject().apply {
+				addProperty("id", question.id)
+				addProperty("text", question.text)
+				addProperty("timeLimitSeconds", question.timeLimitSeconds)
+				add("options", JsonArray().apply { question.options.forEach(::add) })
+			})
+		}
+		return ri.GeneralHttpHeader(JsonObject().apply {
+			addProperty("sessionId", session.id)
+			addProperty("expiresAt", session.expiresAt)
+			addProperty("questionCount", session.questions.size)
+			addProperty("passingScore", session.passingScore)
+			add("questions", questions)
+		}.toString())
+	}
+
+	@PostMapping("/quiz/submit")
+	fun submitQuiz(
+		@RequestBody request: RegistrationQuizSubmissionRequest
+	): ResponseEntity<String> {
+		val sessionId = request.sessionId
+		val name = request.name
+		val uid = request.uid
+		val answers = request.answers
+		if (sessionId.isNullOrBlank() || name == null || uid == null || answers == null) {
+			return response("invalid_quiz_submission", "答题提交格式无效。", HttpStatus.BAD_REQUEST)
+		}
+		val result = quizService.submit(sessionId, name, uid, answers)
+			?: return response("invalid_quiz_session", "答题会话无效、已过期或已使用。", HttpStatus.GONE)
+		return ri.GeneralHttpHeader(JsonObject().apply {
+			addProperty("passed", result.passed)
+			addProperty("score", result.score)
+			addProperty("questionCount", result.questionCount)
+			addProperty("passingScore", result.passingScore)
+			result.verificationToken?.let { addProperty("verificationToken", it) }
+		}.toString())
+	}
+
+	@PostMapping("/minecraft/session")
+	fun reserveMinecraftSession(
+		@RequestBody request: MinecraftVerificationSessionRequest
+	): ResponseEntity<String> {
+		if (!isUsername(request.name) || request.uid == null || request.uid <= 0) {
+			return response("invalid_registration_data", "Minecraft 用户名或 QQ 号无效。", HttpStatus.BAD_REQUEST)
+		}
+		return reserved()
+	}
+
+	@PostMapping("/minecraft/result")
+	fun submitMinecraftResult(
+		@RequestHeader("token", required = false) token: String?,
+		@RequestHeader(HttpHeaders.AUTHORIZATION, required = false) authorization: String?,
+		@RequestBody request: MinecraftVerificationResultRequest
+	): ResponseEntity<String> {
+		val resolved = AuthTokens.resolve(token, authorization)
+		if (resolved == null || nodes.getServerFromToken(resolved) != SURVIVAL_SERVER_ID) {
+			return response("unauthorized", "仅生存服可以提交 Minecraft 测试结果。", HttpStatus.UNAUTHORIZED)
+		}
+		if (request.sessionId.isNullOrBlank() || !isUsername(request.name) || request.passed == null) {
+			return response("invalid_result", "Minecraft 测试结果格式无效。", HttpStatus.BAD_REQUEST)
+		}
+		return reserved()
+	}
+
+	private fun reserved(): ResponseEntity<String> = response(
+		"minecraft_verification_reserved",
+		"Minecraft 世界测试接口已预留，当前尚未开放。",
+		HttpStatus.NOT_IMPLEMENTED
+	)
+
+	private fun isUsername(value: String?): Boolean =
+		value != null && USERNAME.matches(value)
+
+	private fun response(code: String, message: String, status: HttpStatus): ResponseEntity<String> =
+		ri.GeneralHttpHeader(JsonObject().apply {
+			addProperty("code", code)
+			addProperty("message", message)
+			addProperty("state", if (status == HttpStatus.NOT_IMPLEMENTED) "reserved" else "error")
+		}.toString(), status)
+
+	private companion object {
+		const val SURVIVAL_SERVER_ID = 1
+		val USERNAME = Regex("^[A-Za-z0-9_]{3,16}$")
+	}
+}

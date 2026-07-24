@@ -11,6 +11,9 @@ import org.qo.services.loginService.Login;
 import org.qo.services.mmdb.Query;
 import org.qo.services.proxyRelatedServices.ProxyRelatedImpl;
 import org.qo.services.proxyRelatedServices.ProxyStatus;
+import org.qo.services.registrationServices.RegistrationVerificationMethod;
+import org.qo.services.registrationServices.RegistrationQuizProof;
+import org.qo.services.registrationServices.RegistrationQuizService;
 import org.qo.redis.Configuration;
 import org.qo.services.messageServices.Msg;
 import org.qo.services.gameStatusService.Status;
@@ -56,9 +59,10 @@ public class ApiApplication {
     private UserProcess userProcess;
     public IPWhitelistServices ipWhitelistServices;
     private final Nodes nodes;
+    private final RegistrationQuizService registrationQuizService;
 
     @Autowired
-    public ApiApplication(UAUtil uaUtil, ReturnInterface ri, Status status, Login login, IPWhitelistServices ipWhitelistServices, ProxyRelatedImpl proxyRelatedImpl, UserProcess userProcess, Nodes nodes) {
+    public ApiApplication(UAUtil uaUtil, ReturnInterface ri, Status status, Login login, IPWhitelistServices ipWhitelistServices, ProxyRelatedImpl proxyRelatedImpl, UserProcess userProcess, Nodes nodes, RegistrationQuizService registrationQuizService) {
         this.ri = ri;
         this.ua = uaUtil;
         this.status = status;
@@ -67,6 +71,7 @@ public class ApiApplication {
         this.userProcess = userProcess;
         this.proxyRelatedImpl = proxyRelatedImpl;
         this.nodes = nodes;
+        this.registrationQuizService = registrationQuizService;
     }
 
     @PostConstruct
@@ -243,10 +248,33 @@ public class ApiApplication {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
         if (ua.isCLIToolRequest(request)) return new ResponseEntity<>("failed", headers, HttpStatus.BAD_REQUEST);
-        return regMinecraftUser(registration.name(), registration.uid(), request, registration.password(), registration.score());
+        RegistrationVerificationMethod verificationMethod =
+                RegistrationVerificationMethod.parse(registration.verificationMethod());
+        if (verificationMethod == null) {
+            return ri.failed("invalid verification method");
+        }
+        if (verificationMethod == RegistrationVerificationMethod.MINECRAFT) {
+            JsonObject response = new JsonObject();
+            response.addProperty("code", "minecraft_verification_reserved");
+            response.addProperty("message", "Minecraft 世界测试接口已预留，当前尚未开放。");
+            response.addProperty("state", "reserved");
+            return ri.GeneralHttpHeader(response.toString(), HttpStatus.NOT_IMPLEMENTED);
+        }
+        RegistrationQuizProof proof = registrationQuizService.consumeProof(
+                registration.verificationToken(),
+                registration.name(),
+                registration.uid()
+        );
+        if (proof == null) {
+            JsonObject response = new JsonObject();
+            response.addProperty("code", "quiz_verification_required");
+            response.addProperty("message", "答题验证无效、已过期或已使用。");
+            return ri.GeneralHttpHeader(response.toString(), HttpStatus.FORBIDDEN);
+        }
+        return regMinecraftUser(registration.name(), registration.uid(), request, registration.password(), proof.getScore());
     }
 
-    public record RegisterRequest(String name, Long uid, String password, int score) {}
+    public record RegisterRequest(String name, Long uid, String password, int score, String verificationMethod, String verificationToken) {}
 
     @PostMapping(value = "/qo/upload/confirmation", consumes = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<String> verifyReg(@RequestBody ConfirmationRequest confirmation,

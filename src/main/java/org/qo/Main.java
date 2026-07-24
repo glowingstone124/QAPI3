@@ -51,7 +51,7 @@ public class Main {
     }
 
     @Bean
-    public CorsWebFilter corsFilter(@Value("${qapi.cors.allowed-origins:}") String allowedOrigins) {
+    public CorsWebFilter corsFilter(@Value("${qapi.cors.allowed-origins:*}") String allowedOrigins) {
         CorsConfiguration config = new CorsConfiguration();
         config.setAllowCredentials(Boolean.FALSE);
         Arrays.stream(allowedOrigins.split(",")).map(String::trim).filter(value -> !value.isEmpty())
