@@ -274,7 +274,7 @@ public class ApiApplication {
         return regMinecraftUser(registration.name(), registration.uid(), request, registration.password(), proof.getScore());
     }
 
-    public record RegisterRequest(String name, Long uid, String password, int score, String verificationMethod, String verificationToken) {}
+    public record RegisterRequest(String name, Long uid, String password, String verificationMethod, String verificationToken) {}
 
     @PostMapping(value = "/qo/upload/confirmation", consumes = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<String> verifyReg(@RequestBody ConfirmationRequest confirmation,

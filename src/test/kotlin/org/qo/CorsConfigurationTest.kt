@@ -11,7 +11,7 @@ class CorsConfigurationTest {
 	@Test
 	fun `preflight requests allow every origin`() {
 		val exchange = MockServerWebExchange.from(
-			MockServerHttpRequest.options("/qo/download/avatar?name=steve")
+			MockServerHttpRequest.options("https://api.qoriginal.vip/qo/download/avatar?name=steve")
 				.header(HttpHeaders.ORIGIN, "http://localhost:5173")
 				.header(HttpHeaders.ACCESS_CONTROL_REQUEST_METHOD, "GET")
 				.build()
