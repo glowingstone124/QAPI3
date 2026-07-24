@@ -78,11 +78,15 @@ class Nodes {
         }
     }
     fun getServerFromToken(input: String): Int {
-        nodesData.forEach {
-            if (MessageDigest.isEqual(it.token.toByteArray(StandardCharsets.UTF_8), input.toByteArray(StandardCharsets.UTF_8))) {
-                return it.id
-            }
+        return getNodeFromToken(input)?.id ?: -1
+    }
+
+    fun getNodeFromToken(input: String): Node? {
+        return nodesData.firstOrNull {
+            MessageDigest.isEqual(
+                it.token.toByteArray(StandardCharsets.UTF_8),
+                input.toByteArray(StandardCharsets.UTF_8)
+            )
         }
-        return -1
     }
 }

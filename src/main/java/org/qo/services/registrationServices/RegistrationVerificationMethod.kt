@@ -41,3 +41,7 @@ data class MinecraftVerificationResultRequest(
 	val name: String?,
 	val passed: Boolean?
 )
+
+data class MinecraftVerificationClaimRequest(
+	val name: String?
+)
