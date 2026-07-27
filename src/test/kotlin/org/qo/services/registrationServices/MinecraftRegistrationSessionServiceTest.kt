@@ -9,13 +9,14 @@ class MinecraftRegistrationSessionServiceTest {
 	private val service = MinecraftRegistrationSessionService()
 
 	@Test
-	fun `pending session can only be claimed once`() {
+	fun `claimed session can be resumed by the same node only`() {
 		val pending = service.create("Alex_123", 123456)
 
 		val claimed = assertNotNull(service.claim("alex_123", 7))
 		assertEquals(pending.id, claimed.id)
 		assertEquals(MinecraftRegistrationSessionState.CLAIMED, claimed.state)
-		assertNull(service.claim("Alex_123", 7))
+		assertEquals(claimed.id, assertNotNull(service.claim("Alex_123", 7)).id)
+		assertNull(service.claim("Alex_123", 8))
 	}
 
 	@Test
@@ -28,5 +29,6 @@ class MinecraftRegistrationSessionServiceTest {
 		assertEquals(MinecraftRegistrationSessionState.COMPLETED, completed.state)
 		assertEquals(true, completed.passed)
 		assertNull(service.complete(pending.id, "Alex_123", 7, true))
+		assertNull(service.claim("Alex_123", 7))
 	}
 }

@@ -49,7 +49,7 @@ class RegistrationVerificationControllerTest {
 	}
 
 	@Test
-	fun minecraftSessionCanBeCreatedAndClaimedOnceByChambersServer() {
+	fun minecraftSessionCanBeResumedOnlyByItsChambersServer() {
 		webTestClient.post().uri("/qo/registration/minecraft/session")
 			.contentType(MediaType.APPLICATION_JSON)
 			.bodyValue("""{"name":"Alex_123","uid":123456}""")
@@ -79,6 +79,17 @@ class RegistrationVerificationControllerTest {
 
 		webTestClient.post().uri("/qo/registration/minecraft/claim")
 			.header("Token", "server-token")
+			.contentType(MediaType.APPLICATION_JSON)
+			.bodyValue("""{"name":"Alex_123"}""")
+			.exchange()
+			.expectStatus().isOk
+			.expectBody()
+			.jsonPath("$.state").isEqualTo("claimed")
+
+		Mockito.`when`(nodes.getNodeFromToken("other-server-token"))
+			.thenReturn(Node("chambers", 8, Role.SERVER, "other-server-token"))
+		webTestClient.post().uri("/qo/registration/minecraft/claim")
+			.header("Token", "other-server-token")
 			.contentType(MediaType.APPLICATION_JSON)
 			.bodyValue("""{"name":"Alex_123"}""")
 			.exchange()

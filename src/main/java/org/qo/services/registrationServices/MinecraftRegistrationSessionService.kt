@@ -48,12 +48,20 @@ class MinecraftRegistrationSessionService {
 		cleanup()
 		val id = sessionIdByName[normalize(name)] ?: return null
 		val current = sessionsById[id] ?: return null
-		if (current.state != MinecraftRegistrationSessionState.PENDING) return null
-		val claimed = current.copy(
-			state = MinecraftRegistrationSessionState.CLAIMED,
-			claimedByNodeId = nodeId,
-			expiresAt = System.currentTimeMillis() + CLAIMED_SESSION_TTL_MILLIS
-		)
+		val claimed = when (current.state) {
+			MinecraftRegistrationSessionState.PENDING -> current.copy(
+				state = MinecraftRegistrationSessionState.CLAIMED,
+				claimedByNodeId = nodeId,
+				expiresAt = System.currentTimeMillis() + CLAIMED_SESSION_TTL_MILLIS
+			)
+			MinecraftRegistrationSessionState.CLAIMED -> {
+				if (current.claimedByNodeId != nodeId) return null
+				current.copy(
+					expiresAt = System.currentTimeMillis() + CLAIMED_SESSION_TTL_MILLIS
+				)
+			}
+			MinecraftRegistrationSessionState.COMPLETED -> return null
+		}
 		sessionsById[id] = claimed
 		return claimed
 	}
