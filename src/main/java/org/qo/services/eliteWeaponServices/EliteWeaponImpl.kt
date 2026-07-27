@@ -46,17 +46,8 @@ class EliteWeaponImpl(private val db: EliteWeaponDB) {
 		}
 	}
 
-	fun addEliteWeaponDMG(uuid: String, requester: String, amount: Int) : String{
-		if (db.hasEliteWeapon(requester, uuid)) {
-			db.addWeaponDamage(uuid, amount,requester)
-			return "ok->SQL execution"
-		} else {
-			return "err:user & uuid doesn't match"
-		}
-	}
-	fun addEliteWeaponKill(uuid: String, requester: String, amount: Int) : String {
-		if (db.hasEliteWeapon(requester, uuid)) {
-			db.addWeaponKills(uuid, amount,requester)
+	fun addEliteWeaponStats(uuid: String, requester: String, damage: Long, kills: Long): String {
+		if (db.addWeaponStats(uuid, requester, damage, kills)) {
 			return "ok->SQL execution"
 		} else {
 			return "err:user & uuid doesn't match"

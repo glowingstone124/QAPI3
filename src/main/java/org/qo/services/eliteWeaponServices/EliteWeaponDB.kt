@@ -11,6 +11,7 @@ class EliteWeaponDB {
 	fun addNewEliteWeapon(item: EliteWeaponImpl.EliteWeapon) {
 		ConnectionPool.getConnection().use { conn ->
 			conn.prepareStatement(ADD_NEW_ELITE_WEAPON_SQL).use {
+				it.queryTimeout = SQL_QUERY_TIMEOUT_SECONDS
 				it.setString(1, item.uuid)
 				it.setString(2, item.owner)
 				it.setString(3, item.type)
@@ -27,6 +28,7 @@ class EliteWeaponDB {
 		val list = mutableListOf<EliteWeaponImpl.EliteWeapon>()
 		ConnectionPool.getConnection().use { connection ->
 			connection.prepareStatement(GET_ALL_ELITE_WEAPON_SQL).use { stmt ->
+				stmt.queryTimeout = SQL_QUERY_TIMEOUT_SECONDS
 				stmt.setString(1, username)
 
 				stmt.executeQuery().use { rs ->
@@ -52,6 +54,7 @@ class EliteWeaponDB {
 		val sql = "SELECT 1 FROM elite_items WHERE owner = ? AND type = ? LIMIT 1"
 		ConnectionPool.getConnection().use { conn ->
 			conn.prepareStatement(sql).use { stmt ->
+				stmt.queryTimeout = SQL_QUERY_TIMEOUT_SECONDS
 				stmt.setString(1, owner)
 				stmt.setString(2, type)
 				stmt.executeQuery().use { rs ->
@@ -61,49 +64,24 @@ class EliteWeaponDB {
 		}
 	}
 
-	fun hasEliteWeapon(owner: String, uuid:String): Boolean {
-		val sql = "SELECT 1 FROM elite_items WHERE owner = ? AND uuid = ? LIMIT 1"
+	fun addWeaponStats(uuid: String, requester: String, damage: Long, kills: Long): Boolean {
+		val sql = "UPDATE elite_items SET damage = damage + ?, kills = kills + ? WHERE uuid = ? AND owner = ?"
 		ConnectionPool.getConnection().use { conn ->
 			conn.prepareStatement(sql).use { stmt ->
-				stmt.setString(1, owner)
-				stmt.setString(2, uuid)
-				stmt.executeQuery().use { rs ->
-					return rs.next()
-				}
+				stmt.queryTimeout = SQL_QUERY_TIMEOUT_SECONDS
+				stmt.setLong(1, damage)
+				stmt.setLong(2, kills)
+				stmt.setString(3, uuid.trim())
+				stmt.setString(4, requester.trim())
+				return stmt.executeUpdate() > 0
 			}
 		}
 	}
-
-
-	fun addWeaponDamage(uuid: String, dmg: Int, requester: String) {
-		val sql = "UPDATE elite_items SET damage = damage + ? WHERE uuid = ? AND owner = ?"
-		ConnectionPool.getConnection().use { conn ->
-			conn.prepareStatement(sql).use { stmt ->
-				stmt.setInt(1, dmg)
-				stmt.setString(2, uuid.trim())
-				stmt.setString(3, requester.trim())
-				val rows = stmt.executeUpdate()
-				println("updated $rows line")
-			}
-		}
-	}
-	fun addWeaponKills(uuid: String, kills: Int, requester: String) {
-		val sql = "UPDATE elite_items SET kills = kills + ? WHERE uuid = ? AND owner = ?"
-		ConnectionPool.getConnection().use { conn ->
-			conn.prepareStatement(sql).use { stmt ->
-				stmt.setInt(1, kills)
-				stmt.setString(2, uuid.trim())
-				stmt.setString(3, requester.trim())
-				val rows = stmt.executeUpdate()
-				println("updated $rows line")
-			}
-		}
-	}
-
 	fun getSpecfiedEliteWeaponByUuid(uuid: String): EliteWeaponImpl.EliteWeapon? {
 		val sql = "SELECT * FROM elite_items WHERE uuid = ? LIMIT 1"
 		ConnectionPool.getConnection().use { conn ->
 			conn.prepareStatement(sql).use { stmt ->
+				stmt.queryTimeout = SQL_QUERY_TIMEOUT_SECONDS
 				stmt.setString(1, uuid)
 				stmt.executeQuery().use { rs ->
 					while (rs.next()) {
@@ -121,5 +99,9 @@ class EliteWeaponDB {
 			}
 		}
 		return null
+	}
+
+	companion object {
+		private const val SQL_QUERY_TIMEOUT_SECONDS = 3
 	}
 }

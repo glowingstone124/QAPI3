@@ -1,6 +1,8 @@
 package org.qo.services.eliteWeaponServices
 
 import com.google.gson.JsonObject
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import org.qo.datas.Nodes
 import org.qo.utils.ReturnInterface
 import org.springframework.http.HttpStatus
@@ -20,15 +22,20 @@ class EliteWeaponController(
 	private val nodes: Nodes
 ) {
 	@GetMapping("/download")
-	fun download(@RequestParam username: String): ResponseEntity<String> {
-		return ri.GeneralHttpHeader(impl.getEliteWeaponsFromUsername(username))
+	suspend fun download(@RequestParam username: String): ResponseEntity<String> {
+		return withContext(Dispatchers.IO) {
+			ri.GeneralHttpHeader(impl.getEliteWeaponsFromUsername(username))
+		}
 	}
 
 	@PostMapping("/create")
-	fun create(@RequestParam owner: String, @RequestParam type: String, @RequestParam description: String,@RequestParam name: String,
-	           @RequestHeader("Token") token: String): ResponseEntity<String> {
+	suspend fun create(@RequestParam owner: String, @RequestParam type: String, @RequestParam description: String,@RequestParam name: String,
+	                  @RequestHeader("Token") token: String): ResponseEntity<String> {
 		if (nodes.getServerFromToken(token) < 0) return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("{\"code\":401}")
-		impl.handleEliteWeaponRequest(owner, type, description, name)?.let {
+		val uuid = withContext(Dispatchers.IO) {
+			impl.handleEliteWeaponRequest(owner, type, description, name)
+		}
+		uuid?.let {
 			return ri.GeneralHttpHeader(JsonObject().apply {
 				addProperty("result", true)
 				addProperty("uuid", it)
@@ -39,22 +46,31 @@ class EliteWeaponController(
 		}.toString())
 	}
 
-	@PostMapping("/add")
-	fun add(@RequestParam type: String,@RequestParam requester: String, @RequestParam uuid: String, @RequestParam amount: Int,
-	        @RequestHeader("Token") token: String): ResponseEntity<String> {
+	@PostMapping("/batch")
+	suspend fun batch(
+		@RequestParam requester: String,
+		@RequestParam uuid: String,
+		@RequestParam damage: Long,
+		@RequestParam kills: Long,
+		@RequestHeader("Token") token: String
+	): ResponseEntity<String> {
 		if (nodes.getServerFromToken(token) < 0) return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("{\"code\":401}")
-		if (type == "dmg") {
-			return ri.GeneralHttpHeader(impl.addEliteWeaponDMG(uuid, requester, amount))
-		} else if (type == "kill") {
-			return ri.GeneralHttpHeader(impl.addEliteWeaponKill(uuid, requester, amount))
-		} else {
-			return ri.GeneralHttpHeader("Could not process request: type error")
+		if (damage !in 0..MAX_UPDATE_AMOUNT || kills !in 0..MAX_UPDATE_AMOUNT || damage == 0L && kills == 0L) {
+			return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("{\"code\":400,\"message\":\"invalid stats\"}")
+		}
+		return withContext(Dispatchers.IO) {
+			ri.GeneralHttpHeader(impl.addEliteWeaponStats(uuid, requester, damage, kills))
 		}
 	}
 
 	@GetMapping("/query")
-	fun query(@RequestParam uuid: String): ResponseEntity<String> {
-		return ri.GeneralHttpHeader(impl.queryEliteUuid(uuid))
+	suspend fun query(@RequestParam uuid: String): ResponseEntity<String> {
+		return withContext(Dispatchers.IO) {
+			ri.GeneralHttpHeader(impl.queryEliteUuid(uuid))
+		}
 	}
 
+	companion object {
+		private const val MAX_UPDATE_AMOUNT = 1_000_000_000L
+	}
 }

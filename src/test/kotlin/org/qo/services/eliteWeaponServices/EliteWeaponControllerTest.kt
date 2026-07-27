@@ -76,12 +76,12 @@ class EliteWeaponControllerTest {
 	}
 
 	@Test
-	fun add_dmgDelegatesToService() {
+	fun batch_delegatesToService() {
 		authorize()
-		Mockito.`when`(impl.addEliteWeaponDMG("uuid", "req", 3)).thenReturn("ok")
+		Mockito.`when`(impl.addEliteWeaponStats("uuid", "req", 30L, 2L)).thenReturn("ok")
 
 		webTestClient.post()
-			.uri("/qo/elite/add?type=dmg&requester=req&uuid=uuid&amount=3")
+			.uri("/qo/elite/batch?requester=req&uuid=uuid&damage=30&kills=2")
 			.header("Token", "server-secret")
 			.exchange()
 			.expectStatus().isOk
@@ -90,23 +90,20 @@ class EliteWeaponControllerTest {
 	}
 
 	@Test
-	fun add_invalidTypeReturnsError() {
+	fun batch_rejectsEmptyStats() {
 		authorize()
 		webTestClient.post()
-			.uri("/qo/elite/add?type=unknown&requester=req&uuid=uuid&amount=3")
+			.uri("/qo/elite/batch?requester=req&uuid=uuid&damage=0&kills=0")
 			.header("Token", "server-secret")
 			.exchange()
-			.expectStatus().isOk
-			.expectBody(String::class.java)
-			.isEqualTo("Could not process request: type error")
+			.expectStatus().isBadRequest
 
-		Mockito.verify(impl, Mockito.never()).addEliteWeaponDMG(Mockito.anyString(), Mockito.anyString(), Mockito.anyInt())
-		Mockito.verify(impl, Mockito.never()).addEliteWeaponKill(Mockito.anyString(), Mockito.anyString(), Mockito.anyInt())
+		Mockito.verifyNoInteractions(impl)
 	}
 
 	@Test
-	fun add_rejectsMissingToken() {
-		webTestClient.post().uri("/qo/elite/add?type=dmg&requester=req&uuid=uuid&amount=3")
+	fun batch_rejectsMissingToken() {
+		webTestClient.post().uri("/qo/elite/batch?requester=req&uuid=uuid&damage=3&kills=0")
 			.exchange().expectStatus().isBadRequest
 		Mockito.verifyNoInteractions(impl)
 	}

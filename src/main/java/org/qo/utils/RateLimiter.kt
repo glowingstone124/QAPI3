@@ -33,6 +33,7 @@ class RateLimiter {
 		Rule("/qo/download/logingreeting", 60, 60),
 		Rule("/qo/msglist/download", 600, 20),
 		Rule("/qo/authorization/", 400, 60),
+		Rule("/qo/elite/", 1200, 60),
 		Rule("/qo/", 10000, 60)
 	)
 
