@@ -12,6 +12,7 @@ import java.io.FileReader
 import java.io.IOException
 import java.security.MessageDigest
 import java.nio.charset.StandardCharsets
+import java.net.URI
 
 data class Node(
     @SerializedName("name") val name: String,
@@ -31,6 +32,7 @@ data class MessageIn(
     @SerializedName("type") val data: String,
     @SerializedName("time") val time: Long,
     @SerializedName("sender") val sender: String,
+    @SerializedName("images") val images: List<String>? = emptyList(),
 ) {
     fun doHideToken() : JsonObject {
         return JsonObject().apply {
@@ -38,10 +40,31 @@ data class MessageIn(
             addProperty("from", from)
             addProperty("sender", sender)
             addProperty("time", time)
-            addProperty("sender", sender)
+            add("images", Gson().toJsonTree(normalizeImageUrls(images.orEmpty())))
         }
     }
 }
+
+internal fun normalizeImageUrls(urls: List<String>): List<String> =
+    urls.asSequence()
+        .map(String::trim)
+        .filter { it.length in 1..MAX_IMAGE_URL_LENGTH }
+        .filter(::isHttpUrl)
+        .distinct()
+        .take(MAX_IMAGES_PER_MESSAGE)
+        .toList()
+
+private fun isHttpUrl(value: String): Boolean =
+    try {
+        val uri = URI(value)
+        (uri.scheme.equals("http", ignoreCase = true) || uri.scheme.equals("https", ignoreCase = true)) &&
+            !uri.host.isNullOrBlank()
+    } catch (_: IllegalArgumentException) {
+        false
+    }
+
+private const val MAX_IMAGES_PER_MESSAGE = 8
+private const val MAX_IMAGE_URL_LENGTH = 2048
 
 enum class Role {
     SERVER,

@@ -3,6 +3,8 @@ package org.qo.services.messageServices
 import com.google.gson.Gson
 import com.google.gson.JsonArray
 import com.google.gson.JsonObject
+import com.google.gson.JsonSyntaxException
+import com.google.gson.reflect.TypeToken
 import org.qo.datas.ConnectionPool
 import org.qo.utils.Logger
 import org.qo.services.loginService.Login
@@ -93,7 +95,8 @@ class Msg {
 
         fun init() {
             val connection = ConnectionPool.getConnection()
-            val sql = "SELECT message, from_user, sender, time FROM messages ORDER BY time DESC LIMIT $MAX_QUEUE_SIZE"
+            ensureImagesColumn(connection)
+            val sql = "SELECT message, from_user, sender, time, images FROM messages ORDER BY time DESC LIMIT $MAX_QUEUE_SIZE"
             var cnt = 0
             connection.use { conn ->
                 try {
@@ -108,7 +111,8 @@ class Msg {
                                 val fromUser = rs.getInt("from_user")
                                 val sender = rs.getString("sender")
                                 val time = rs.getLong("time")
-                                val msg = Message(message, fromUser, sender, time)
+                                val images = parseImages(rs.getString("images"))
+                                val msg = Message(message, fromUser, sender, time, images)
                                 cnt++
 
                                 messages.add(msg)
@@ -126,11 +130,32 @@ class Msg {
                 }
             }
         }
+
+        private fun ensureImagesColumn(connection: java.sql.Connection) {
+            val exists = connection.prepareStatement("SHOW COLUMNS FROM messages LIKE 'images'").use { statement ->
+                statement.executeQuery().use { it.next() }
+            }
+            if (!exists) {
+                connection.createStatement().use {
+                    it.executeUpdate("ALTER TABLE messages ADD COLUMN images LONGTEXT NULL")
+                }
+            }
+        }
+
+        private fun parseImages(json: String?): List<String> {
+            if (json.isNullOrBlank()) return emptyList()
+            return try {
+                val type = object : TypeToken<List<String>>() {}.type
+                gson.fromJson<List<String>>(json, type).orEmpty()
+            } catch (_: JsonSyntaxException) {
+                emptyList()
+            }
+        }
     }
     @Scheduled(fixedRate = 10000)
     fun insertMessagesIntoSQL() {
         val connection = ConnectionPool.getConnection()
-        val sql = "INSERT INTO messages (message, from_user, sender, time) VALUES (?, ?, ?, ?)"
+        val sql = "INSERT INTO messages (message, from_user, sender, time, images) VALUES (?, ?, ?, ?, ?)"
 
         connection.use { conn ->
             conn.autoCommit = false
@@ -144,6 +169,7 @@ class Msg {
                             statement.setInt(2, message.from)
                             statement.setString(3, message.sender)
                             statement.setLong(4, message.time)
+                            statement.setString(5, gson.toJson(message.images))
                             statement.addBatch()
                         }
                         statement.executeBatch()
@@ -167,5 +193,6 @@ data class Message(
     val message: String,
     val from: Int,
     val sender: String,
-    val time: Long
+    val time: Long,
+    val images: List<String> = emptyList(),
 )
