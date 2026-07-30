@@ -94,11 +94,10 @@ class Msg {
         }
 
         fun init() {
-            val connection = ConnectionPool.getConnection()
-            ensureImagesColumn(connection)
             val sql = "SELECT message, from_user, sender, time, images FROM messages ORDER BY time DESC LIMIT $MAX_QUEUE_SIZE"
             var cnt = 0
-            connection.use { conn ->
+            ConnectionPool.getConnection().use { conn ->
+                ensureImagesColumn(conn)
                 try {
                     val statement: PreparedStatement = conn.prepareStatement(sql)
 
@@ -137,7 +136,7 @@ class Msg {
             }
             if (!exists) {
                 connection.createStatement().use {
-                    it.executeUpdate("ALTER TABLE messages ADD COLUMN images LONGTEXT NULL")
+                    it.executeUpdate("ALTER TABLE messages ADD COLUMN `images` LONGTEXT NULL")
                 }
             }
         }
