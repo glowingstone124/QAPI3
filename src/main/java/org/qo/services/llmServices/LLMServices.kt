@@ -59,9 +59,15 @@ class LLMServices(
 			?: runCatching { Files.readString(Path.of("LLMAPITOKEN")).trim() }.getOrDefault("")
 	}
 
-	enum class MODELS(name: String) {
+	enum class MODELS(val apiName: String) {
 		FAST("deepseek-v4-flash"),
-		THINKING("deepseek-v4-pro")
+		THINKING("deepseek-v4-pro");
+
+		companion object {
+			fun fromRequest(value: String): MODELS? = entries.find {
+				it.name.equals(value, ignoreCase = true) || it.apiName == value
+			}
+		}
 	}
 
 	private val client = HttpClient(CIO) {
@@ -115,7 +121,7 @@ class LLMServices(
 
 	fun buildPromptRequest(prompt: String, stream: Boolean = true, model: MODELS): String {
 		return JsonObject().apply {
-			addProperty("model", model.name)
+			addProperty("model", model.apiName)
 			addProperty("stream", stream)
 			add("messages", jsonParser.parse(
 				"""
@@ -179,11 +185,8 @@ class LLMServices(
 		}
 		val username = qqName?.takeIf { it.isNotBlank() }?.let { decodeHeader(it) } ?: "qq:$qqUid"
 		val requester = LLMRequester(qqUid, username, "qq", qqGroupId)
-		val model = when (model) {
-			"fast" -> MODELS.FAST
-			"thinking" -> MODELS.THINKING
-			else -> return LLMNonStreamResult(400, errorJson("model_not_avaliable", "请求的模型不可用"))
-		}
+		val model = MODELS.fromRequest(model)
+			?: return LLMNonStreamResult(400, errorJson("model_not_available", "请求的模型不可用"))
 		val request = normalizeRequest(body, false, requester, model)
 		val requestId = insertAccessRecord(qqUid, username, request.model, false)
 		if (!reserveRequest("bot:$qqUid")) {
@@ -355,9 +358,7 @@ class LLMServices(
 
 	private fun normalizeRequest(body: String, stream: Boolean, requester: LLMRequester? = null, model: MODELS): NormalizedRequest {
 		val obj = JsonParser.parseString(body).asJsonObject
-		if (!obj.has("model") || obj.get("model").asString.isBlank()) {
-			obj.addProperty("model", model.name)
-		}
+		obj.addProperty("model", model.apiName)
 		requester?.let {
 			obj.addProperty("user_id", it.conversationKey())
 		}
