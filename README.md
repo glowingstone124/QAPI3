@@ -120,6 +120,8 @@ The OpenAI-compatible non-stream chat endpoint can execute built-in tools before
 
 Related environment variables:
 
+- `LLM_SYSTEM_PROMPT`: fixed system prompt text. When set, it takes precedence over the prompt file.
+- `LLM_SYSTEM_PROMPT_FILE`: system prompt file. Linux inotify events, atomic replacements, Docker bind mounts, and Kubernetes ConfigMap/Secret-style replacements are reloaded without restarting the API; invalid or blank updates keep the previous valid prompt.
 - `LLM_TOOLS_ENABLED`: enable built-in tools, default `true`.
 - `LLM_WEB_SEARCH_ENABLED`: enable DeepSeek server-side web search for non-stream `deepseek-v4-flash` requests, default `true`.
 - `LLM_RESPONSES_API_URL`: optional Responses API endpoint, derived from `LLM_API_URL` by default.

@@ -17,6 +17,7 @@ import io.ktor.http.contentType
 import io.ktor.http.isSuccess
 import io.ktor.utils.io.jvm.javaio.toInputStream
 import jakarta.annotation.PostConstruct
+import jakarta.annotation.PreDestroy
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
@@ -58,7 +59,11 @@ class LLMServices(
 	private val maxToolRounds = readInt("LLM_TOOL_MAX_ROUNDS", 3).coerceIn(1, 8)
 	private val sanitizeOutput = readBoolean("LLM_SANITIZE_OUTPUT", true)
 	private val groupContextMaxChars = readInt("LLM_GROUP_CONTEXT_MAX_CHARS", 120000).coerceIn(0, 1_000_000)
-	private val defaultSystemPrompt by lazy { loadSystemPrompt() }
+	private val systemPrompt = ReloadableSystemPrompt(
+		inlinePrompt = System.getenv("LLM_SYSTEM_PROMPT"),
+		promptFile = System.getenv("LLM_SYSTEM_PROMPT_FILE")?.trim()?.takeIf { it.isNotBlank() }?.let(Path::of),
+		fallbackPrompt = builtInSystemPrompt(),
+	)
 	private val upstreamToken by lazy {
 		System.getenv("LLM_API_TOKEN")
 			?: runCatching { Files.readString(Path.of("LLMAPITOKEN")).trim() }.getOrDefault("")
@@ -86,6 +91,7 @@ class LLMServices(
 
 	@PostConstruct
 	fun init() {
+		systemPrompt.start()
 		runCatching {
 			ConnectionPool.getConnection().use { conn ->
 				conn.createStatement().use { stmt ->
@@ -114,6 +120,11 @@ class LLMServices(
 		}.onFailure {
 			println("LLM access record table init failed: ${it.message}")
 		}
+	}
+
+	@PreDestroy
+	fun shutdown() {
+		systemPrompt.close()
 	}
 
 	suspend fun authenticate(token: String): Mapping.Users? {
@@ -412,7 +423,7 @@ class LLMServices(
 		val enriched = JsonArray()
 		val userQuestion = latestUserQuestion(messages)
 		val contextParts = mutableListOf<String>()
-		contextParts.add(defaultSystemPrompt)
+		contextParts.add(systemPrompt.current())
 		requester?.let {
 			contextParts.add(
 				"""
@@ -736,14 +747,7 @@ class LLMServices(
 		""".trimIndent()
 	}
 
-	private fun loadSystemPrompt(): String {
-		System.getenv("LLM_SYSTEM_PROMPT")?.trim()?.takeIf { it.isNotBlank() }?.let { return it }
-		System.getenv("LLM_SYSTEM_PROMPT_FILE")?.trim()?.takeIf { it.isNotBlank() }?.let { file ->
-			runCatching { Files.readString(Path.of(file)).trim() }
-				.getOrNull()
-				?.takeIf { it.isNotBlank() }
-				?.let { return it }
-		}
+	private fun builtInSystemPrompt(): String {
 		return """
 			你是 QO 社区群聊助手“恋恋”。
 			角色一致性：
