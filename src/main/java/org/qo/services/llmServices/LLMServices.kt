@@ -22,6 +22,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import org.qo.datas.ConnectionPool
 import org.qo.datas.Mapping
 import org.qo.datas.Nodes
@@ -43,7 +44,9 @@ class LLMServices(
 	private val authorityNeededServicesImpl: AuthorityNeededServicesImpl,
 	private val nodes: Nodes,
 	private val ragService: RAGService,
+	private val memoryService: LLMMemoryService,
 	private val conversationService: LLMConversationService,
+	private val groupContextService: LLMGroupContextService,
 	private val toolService: LLMToolService,
 ) {
 	private val redis = Redis()
@@ -57,8 +60,8 @@ class LLMServices(
 	private val debugPrompt = readBoolean("LLM_DEBUG_PROMPT", false)
 	private val debugPromptMaxChars = readInt("LLM_DEBUG_PROMPT_MAX_CHARS", 12000).coerceAtLeast(1000)
 	private val maxToolRounds = readInt("LLM_TOOL_MAX_ROUNDS", 3).coerceIn(1, 8)
+	private val groupSummaryTimeoutMs = readLong("LLM_GROUP_SUMMARY_TIMEOUT_MS", 15_000L).coerceIn(1000L, 30_000L)
 	private val sanitizeOutput = readBoolean("LLM_SANITIZE_OUTPUT", true)
-	private val groupContextMaxChars = readInt("LLM_GROUP_CONTEXT_MAX_CHARS", 120000).coerceIn(0, 1_000_000)
 	private val systemPrompt = ReloadableSystemPrompt(
 		inlinePrompt = System.getenv("LLM_SYSTEM_PROMPT"),
 		promptFile = System.getenv("LLM_SYSTEM_PROMPT_FILE")?.trim()?.takeIf { it.isNotBlank() }?.let(Path::of),
@@ -320,7 +323,7 @@ class LLMServices(
 					addProperty("role", "tool")
 					addProperty("tool_call_id", call.id)
 					addProperty("name", call.name)
-					addProperty("content", toolService.execute(call.name, call.arguments, requester.groupId))
+					addProperty("content", toolService.execute(call.name, call.arguments, requester.toolContext()))
 				})
 			}
 		}
@@ -345,7 +348,7 @@ class LLMServices(
 				return response.status.value to sanitizeResponseBody(LLMResponsesAdapter.toChatCompletion(responseText))
 			}
 			val outputs = functionCalls.associate { call ->
-				call.callId to toolService.execute(call.name, call.arguments, requester.groupId)
+				call.callId to toolService.execute(call.name, call.arguments, requester.toolContext())
 			}
 			LLMResponsesAdapter.appendToolOutputs(body, responseText, outputs)
 		}
@@ -400,7 +403,7 @@ class LLMServices(
 		}
 	}
 
-	private fun normalizeRequest(body: String, stream: Boolean, requester: LLMRequester? = null, model: MODELS): NormalizedRequest {
+	private suspend fun normalizeRequest(body: String, stream: Boolean, requester: LLMRequester? = null, model: MODELS): NormalizedRequest {
 		val obj = JsonParser.parseString(body).asJsonObject
 		obj.addProperty("model", model.apiName)
 		requester?.let {
@@ -415,11 +418,19 @@ class LLMServices(
 		val effectiveGroupContext = groupContext ?: requester
 			?.takeIf { it.source == "minecraft" }
 			?.let { buildSyncedChatContext() }
-		obj.add("messages", enrichMessages(obj.getAsJsonArray("messages"), requester, effectiveGroupContext))
+		val userQuestion = latestUserQuestion(obj.getAsJsonArray("messages"))
+		val preparedGroupContext = groupContextService.buildContext(
+			groupId = requester?.groupId,
+			groupContext = effectiveGroupContext,
+			currentQuestion = userQuestion,
+			currentUid = requester?.uid,
+			summarize = ::summarizeGroupContext,
+		)
+		obj.add("messages", enrichMessages(obj.getAsJsonArray("messages"), requester, preparedGroupContext))
 		return NormalizedRequest(obj.get("model").asString, obj.toString(), latestUserQuestion(obj.getAsJsonArray("messages")))
 	}
 
-	private fun enrichMessages(messages: JsonArray, requester: LLMRequester?, groupContext: JsonArray?): JsonArray {
+	private fun enrichMessages(messages: JsonArray, requester: LLMRequester?, groupContext: String?): JsonArray {
 		val enriched = JsonArray()
 		val userQuestion = latestUserQuestion(messages)
 		val contextParts = mutableListOf<String>()
@@ -442,15 +453,16 @@ class LLMServices(
 		ragService.buildContext(userQuestion, requester?.groupId)?.let {
 			contextParts.add(it)
 		}
-		buildGroupContext(groupContext)?.let {
+		memoryService.buildContext(requester?.groupId, userQuestion)?.let {
 			contextParts.add(it)
 		}
+		groupContext?.let(contextParts::add)
 		contextParts.add(hardOutputRules())
 		enriched.add(JsonObject().apply {
 			addProperty("role", "system")
 			addProperty("content", contextParts.joinToString("\n\n"))
 		})
-		requester?.let {
+		requester?.takeIf { groupContext == null }?.let {
 			conversationService.historyMessages(it.conversationKey()).forEach { message ->
 				enriched.add(message)
 			}
@@ -475,47 +487,40 @@ class LLMServices(
 		""".trimIndent()
 	}
 
-	private fun buildGroupContext(groupContext: JsonArray?): String? {
-		if (groupContext == null || groupContext.size() == 0 || groupContextMaxChars <= 0) {
-			return null
+	private suspend fun summarizeGroupContext(existingSummary: String?, messages: List<GroupChatEntry>): String? {
+		if (upstreamToken.isBlank() || messages.isEmpty()) return null
+		val newMessages = messages.joinToString("\n") { entry ->
+			val prefix = if (entry.time > 0) "[${entry.time}] " else ""
+			"$prefix${entry.name}(${entry.uid}): ${entry.content}"
 		}
-		val lines = mutableListOf<String>()
-		var used = 0
-		for (item in groupContext) {
-			val obj = item.takeIf { it.isJsonObject }?.asJsonObject ?: continue
-			val uid = obj.get("uid")?.takeIf { !it.isJsonNull }?.asString ?: "unknown"
-			val name = obj.get("name")?.takeIf { !it.isJsonNull }?.asString ?: "qq:$uid"
-			val content = obj.get("content")?.takeIf { !it.isJsonNull }?.asString?.trim().orEmpty()
-			if (content.isBlank()) {
-				continue
-			}
-			val time = obj.get("time")?.takeIf { !it.isJsonNull }?.asLong
-			val line = if (time != null) {
-				"[$time] $name($uid): $content"
-			} else {
-				"$name($uid): $content"
-			}
-			if (used + line.length > groupContextMaxChars) {
-				break
-			}
-			lines.add(line)
-			used += line.length
+		val request = JsonObject().apply {
+			addProperty("model", MODELS.FAST.apiName)
+			addProperty("stream", false)
+			addProperty("max_tokens", 1200)
+			add("thinking", JsonObject().apply { addProperty("type", "disabled") })
+			add("messages", JsonArray().apply {
+				add(JsonObject().apply {
+					addProperty("role", "system")
+					addProperty("content", "将群聊历史压缩为可供后续对话使用的事实摘要。保留人物、决定、偏好、未解决问题、路线起终点和重要时间；删除寒暄、重复内容和工具语法。不得添加原文没有的信息。直接输出摘要正文。")
+				})
+				add(JsonObject().apply {
+					addProperty("role", "user")
+					addProperty("content", buildString {
+						if (!existingSummary.isNullOrBlank()) {
+							append("已有摘要：\n").append(existingSummary).append("\n\n")
+						}
+						append("需要合并的新消息：\n").append(newMessages)
+					})
+				})
+			})
 		}
-		if (lines.isEmpty()) {
-			return null
+		return withTimeoutOrNull(groupSummaryTimeoutMs) {
+			runCatching {
+				val response = postUpstream("group-summary", request.toString())
+				if (!response.status.isSuccess()) return@runCatching null
+				extractAssistantContent(response.bodyAsText())
+			}.getOrNull()
 		}
-		return """
-			最近跨平台聊天记录如下，按时间从旧到新排列。它用于理解上下文、省略指代和多人对话；不要把这些记录逐字复述给用户。
-			记录格式是：[时间戳] 显示名(身份标识): 内容。
-			身份标识说明：
-			- QQ/<昵称或QQ号>(QQ号)：来自 QQ 群。
-			- Minecraft/<玩家名>(1:<玩家名>)：来自生存服 Minecraft 玩家。
-			- Minecraft-Creative/<玩家名>(4:<玩家名>)：来自创造服 Minecraft 玩家。
-			- Web/<用户名>(3:<用户名>)：来自网页聊天。
-			- System/<来源>(2:<来源>)：来自系统消息。
-			这些前缀是来源标记，不是用户实际名字的一部分。回答时可以称呼玩家名或昵称，不要把 “Minecraft/”、“Web/”、“1:” 这类内部标记当作自然语言称呼。
-			${lines.joinToString("\n")}
-		""".trimIndent()
 	}
 
 	private fun buildSyncedChatContext(): JsonArray {
@@ -743,6 +748,7 @@ class LLMServices(
 			- 地铁路线回答必须只基于 query_metro_lines 的 route、stations、segments、transfers 字段；工具没有返回的信息要说没有查到。
 			- 多轮交通追问时，必须结合聊天历史理解省略指代。例如用户在一条路线后追问“步行呢”“不要下界呢”“只走主世界呢”，应使用上一条路线的起终点并通过 query_metro_lines 的结构化参数重新查询。
 			- 工具返回 found=false、matches 为空、stations 为空或 content 表示未检索到时，要明确说没有查到，不要用常识补全 QO 服务器信息。
+			- 只有用户明确要求记住时才能调用 add_memory；只有用户明确要求忘记时才能调用 forget_memory。必须以工具返回结果判断是否保存或删除成功。
 			- 绝对不要把工具调用语法输出给用户，包括 tool_calls、invoke、parameter、DSML、XML 标签或 JSON 工具参数。
 		""".trimIndent()
 	}
@@ -766,6 +772,7 @@ class LLMServices(
 			- 用户询问地铁线路、站点、区间、坐标时，使用 query_metro_lines。
 			- 多轮交通追问时，结合聊天历史补全上一条路线的起终点，并用 query_metro_lines 重新查询。
 			- 用户询问 Minecraft、QO 玩法、指令、规则资料时，可以使用 search_minecraft_knowledge。
+			- 用户明确要求记住信息时，使用 add_memory；询问以前记住的内容时，使用 search_memory；明确要求忘记时，使用 forget_memory。
 			- 工具结果是内部资料，回答时直接整理成自然语言，不要暴露原始 JSON。
 		""".trimIndent()
 	}
@@ -787,12 +794,11 @@ class LLMServices(
 	private fun readInt(name: String, defaultValue: Int): Int =
 		System.getenv(name)?.trim()?.toIntOrNull() ?: defaultValue
 
+	private fun readLong(name: String, defaultValue: Long): Long =
+		System.getenv(name)?.trim()?.toLongOrNull() ?: defaultValue
+
 	private fun readBoolean(name: String, defaultValue: Boolean): Boolean =
-		when (System.getenv(name)?.trim()?.lowercase()) {
-			"1", "true", "yes", "on" -> true
-			"0", "false", "no", "off" -> false
-			else -> defaultValue
-		}
+		System.getenv(name)?.trim()?.lowercase()?.toBooleanStrictOrNull() ?: defaultValue
 
 	private suspend fun insertAccessRecord(uid: Long, username: String, model: String, stream: Boolean): Long = withContext(Dispatchers.IO) {
 		runCatching {
@@ -883,6 +889,7 @@ class LLMServices(
 		val minecraftRelated: MinecraftRelated? = null,
 	) {
 		fun conversationKey(): String = listOfNotNull(conversationSource, groupId?.toString(), uid.toString()).joinToString(":")
+		fun toolContext(): LLMToolContext = LLMToolContext(groupId, uid.toString(), name)
 	}
 	private data class ToolCall(val id: String, val name: String, val arguments: String?)
 	private data class Usage(val promptTokens: Int?, val completionTokens: Int?, val totalTokens: Int?)

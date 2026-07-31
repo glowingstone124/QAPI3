@@ -117,17 +117,34 @@ The OpenAI-compatible non-stream chat endpoint can execute built-in tools before
 - `get_server_status`: query Minecraft server status and player counts.
 - `query_metro_lines`: search metro lines, stations, sections, and signal coordinates.
 - `search_minecraft_knowledge`: search the configured RAG knowledge base for Minecraft/QO information.
+- `add_memory`: create or update a structured per-group long-term memory.
+- `search_memory`: query structured memories for the current group.
+- `forget_memory`: delete structured memories only when explicitly requested.
+
+Structured memories are stored in the automatically created MySQL `llm_memories` table. A memory is uniquely identified by `group_id + subject + memory_key`, so multiple facts about the same subject can coexist. On the first startup after upgrading, legacy `data/llm/rag/<groupId>/memory.txt` and `data/llm/rag/groups/<groupId>/memory.txt` files are imported once; completion is recorded in `llm_memory_migrations`. Legacy files are retained for rollback but are excluded from RAG after migration.
+
+Group context always retains the newest raw messages. Older messages are incrementally summarized with `deepseek-v4-flash`; summaries are persisted per group and refreshed only after enough messages age out of the recent window. Boolean environment variables accept only `true` and `false`.
 
 Related environment variables:
 
 - `LLM_SYSTEM_PROMPT`: fixed system prompt text. When set, it takes precedence over the prompt file.
 - `LLM_SYSTEM_PROMPT_FILE`: system prompt file. Linux inotify events, atomic replacements, Docker bind mounts, and Kubernetes ConfigMap/Secret-style replacements are reloaded without restarting the API; invalid or blank updates keep the previous valid prompt.
+- `LLM_GROUP_SUMMARY_ENABLED`: enable per-group rolling summaries for messages older than the recent window, default `true`.
+- `LLM_GROUP_SUMMARY_DIR`: persistent rolling-summary directory, default `data/llm/summaries`.
+- `LLM_GROUP_CONTEXT_RECENT_MESSAGES`: number of newest raw group messages retained, default `40`.
+- `LLM_GROUP_CONTEXT_RECENT_CHARS`: maximum characters for newest raw group messages, default `20000`.
+- `LLM_GROUP_CONTEXT_PENDING_CHARS`: maximum unsummarized older-message characters retained while waiting for the next summary update, default `4000`.
+- `LLM_GROUP_SUMMARY_MIN_NEW_MESSAGES`: newly aged messages required before updating an existing summary, default `10`.
+- `LLM_GROUP_SUMMARY_MIN_NEW_CHARS`: newly aged characters required before updating an existing summary, default `3000`.
+- `LLM_GROUP_SUMMARY_MAX_CHARS`: maximum persisted summary characters per group, default `3000`.
+- `LLM_GROUP_SUMMARY_TIMEOUT_MS`: maximum time spent updating a summary before falling back to raw pending history, default `15000`.
+- `LLM_MEMORY_CONTEXT_MAX_ITEMS`: maximum relevant memories injected into a request, default `5`.
+- `LLM_MEMORY_CONTEXT_MAX_CHARS`: maximum memory context characters, default `3000`.
 - `LLM_TOOLS_ENABLED`: enable built-in tools, default `true`.
 - `LLM_WEB_SEARCH_ENABLED`: enable DeepSeek server-side web search for non-stream `deepseek-v4-flash` requests, default `true`.
 - `LLM_RESPONSES_API_URL`: optional Responses API endpoint, derived from `LLM_API_URL` by default.
 - `LLM_TOOL_MAX_ROUNDS`: maximum tool-call loops per request, default `3`.
 - `LLM_TOOL_METRO_MAX_RESULTS`: maximum metro search results returned to the model, default `12`.
-- `LLM_GROUP_CONTEXT_MAX_CHARS`: maximum group chat context characters accepted from bot requests, default `120000`.
 
 ## For Contributors
 

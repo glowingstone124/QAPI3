@@ -100,6 +100,7 @@ class RAGService {
 				stream
 					.filter { it.isRegularFile() }
 					.filter { it.extension.lowercase(Locale.ROOT) in setOf("md", "txt") }
+					.filter { it.fileName.toString() != "memory.txt" }
 					.flatMap { path -> splitFile(path).stream() }
 					.toList()
 			}
@@ -116,12 +117,6 @@ class RAGService {
 		val embedded = chunks.count { it.embedding != null }
 		println("RAG loaded ${chunks.size} chunk(s) from $knowledgeDir; embedded=$embedded")
 	}
-
-	fun groupMemoryPath(groupId: Long): Path =
-		knowledgeDir
-			.resolve(groupId.toString())
-			.resolve("memory.txt")
-			.normalize()
 
 	private suspend fun search(question: String, groupId: Long?): List<RAGMatch> {
 		val scopedChunks = chunks.filter { it.groupId == null || it.groupId == groupId }
@@ -298,11 +293,7 @@ class RAGService {
 		System.getenv(name)?.trim()?.toDoubleOrNull() ?: defaultValue
 
 	private fun readBoolean(name: String, defaultValue: Boolean): Boolean =
-		when (System.getenv(name)?.trim()?.lowercase(Locale.ROOT)) {
-			"1", "true", "yes", "on" -> true
-			"0", "false", "no", "off" -> false
-			else -> defaultValue
-		}
+		System.getenv(name)?.trim()?.lowercase(Locale.ROOT)?.toBooleanStrictOrNull() ?: defaultValue
 
 	private data class RAGChunk(
 		val id: String,

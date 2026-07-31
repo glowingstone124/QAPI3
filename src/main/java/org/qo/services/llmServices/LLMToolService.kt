@@ -90,14 +90,46 @@ class LLMToolService(
 		))
 		add(functionTool(
 			name = "add_memory",
-			description = "持久化保存一个群内记忆。只有用户明确要求记住、保存、以后记得某条信息时才使用；不要主动保存普通聊天。",
+			description = "新增或更新一条结构化群长期记忆。只有用户明确要求记住、保存、以后记得某条信息时才使用；不要主动保存普通聊天。相同 subject 和 memory_key 会更新原记录。",
 			properties = linkedMapOf(
-				"data" to property(
+				"subject" to property(
 					type = "string",
-					description = "需要保存的记忆内容。不要包含用户未明确要求保存的额外推测。"
-				)
+					description = "记忆主体，例如玩家名、项目名、地点或群约定。"
+				),
+				"memory_key" to property(
+					type = "string",
+					description = "事实属性键，例如 favorite_drink、preferred_name、project_role、event_time。"
+				),
+				"fact" to property(
+					type = "string",
+					description = "需要保存的事实。不要包含用户未明确要求保存的额外推测。"
+				),
+				"category" to property(
+					type = "string",
+					description = "分类，例如 preference、identity、project、decision、schedule；默认 general。"
+				),
+				"expires_in_days" to property(
+					type = "integer",
+					description = "可选有效天数。临时安排应设置；长期事实不设置。"
+				),
 			),
-			required = listOf("data")
+			required = listOf("subject", "memory_key", "fact")
+		))
+		add(functionTool(
+			name = "search_memory",
+			description = "按主体或内容查询当前群的结构化长期记忆。用户询问以前要求记住的内容、偏好、约定或决定时使用。",
+			properties = linkedMapOf(
+				"query" to property(type = "string", description = "要查询的人、事、偏好、约定或关键词。")
+			),
+			required = listOf("query")
+		))
+		add(functionTool(
+			name = "forget_memory",
+			description = "删除当前群的一条结构化长期记忆。只有用户明确要求忘记或删除记忆时才使用。优先使用 memory_id 精确删除；关键词只删除最佳匹配的一条。",
+			properties = linkedMapOf(
+				"memory_id" to property(type = "string", description = "search_memory 返回的记忆 ID。"),
+				"query" to property(type = "string", description = "没有 ID 时用于匹配待删除记忆的关键词。")
+			)
 		))
 	}
 
@@ -138,30 +170,77 @@ class LLMToolService(
 		})
 	}
 
-	fun execute(name: String, rawArguments: String?, requesterGroupId: Long?): String {
+	fun execute(name: String, rawArguments: String?, context: LLMToolContext): String {
 		val args = parseArguments(rawArguments)
 		return runCatching {
 			when (name) {
 				"get_server_status" -> getServerStatus(args)
 				"query_metro_lines" -> queryMetroLines(args)
-				"search_minecraft_knowledge" -> searchMinecraftKnowledge(args, requesterGroupId)
-				"add_memory" -> addMemory(args, requesterGroupId)
+				"search_minecraft_knowledge" -> searchMinecraftKnowledge(args, context.groupId)
+				"add_memory" -> addMemory(args, context)
+				"search_memory" -> searchMemory(args, context.groupId)
+				"forget_memory" -> forgetMemory(args, context.groupId)
 				else -> errorResult("unknown_tool", "未知工具：$name")
 			}
 		}.getOrElse { errorResult("tool_error", it.message ?: "工具执行失败") }
 	}
 
-	private fun addMemory(args: JsonObject, requesterGroupId: Long?): String {
-		val groupId = requesterGroupId ?: return errorResult("missing_group", "缺少群上下文，无法保存记忆")
-		val content = args.get("data")?.takeIf { !it.isJsonNull }?.asString?.trim().orEmpty()
-		if (content.isBlank()) {
-			return errorResult("bad_arguments", "data 不能为空")
+	private fun addMemory(args: JsonObject, context: LLMToolContext): String {
+		val groupId = context.groupId ?: return errorResult("missing_group", "缺少群上下文，无法保存记忆")
+		val fact = (args.get("fact") ?: args.get("data"))?.takeIf { !it.isJsonNull }?.asString?.trim().orEmpty()
+		val subject = args.get("subject")?.takeIf { !it.isJsonNull }?.asString?.trim().orEmpty()
+		val memoryKey = args.get("memory_key")?.takeIf { !it.isJsonNull }?.asString?.trim().orEmpty()
+		if (subject.isBlank() || memoryKey.isBlank() || fact.isBlank()) {
+			return errorResult("bad_arguments", "subject、memory_key 和 fact 不能为空")
 		}
-		val saved = llmMemoryService.insertMemory(content.take(2000), groupId)
+		val category = args.get("category")?.takeIf { !it.isJsonNull }?.asString ?: "general"
+		val expiryDays = args.get("expires_in_days")?.takeIf { !it.isJsonNull }?.asLong?.coerceIn(1, 3650)
+		val expiresAt = expiryDays?.let { System.currentTimeMillis() + it * 86_400_000L }
+		val mutation = llmMemoryService.upsertMemory(
+			groupId = groupId,
+			subject = subject,
+			memoryKey = memoryKey,
+			fact = fact,
+			category = category,
+			sourceUid = context.uid,
+			sourceName = context.name,
+			expiresAt = expiresAt,
+		) ?: return errorResult("bad_arguments", "记忆内容无效")
 		return gson.toJson(JsonObject().apply {
 			addProperty("tool", "add_memory")
-			addProperty("saved", saved)
+			addProperty("saved", true)
+			addProperty("created", mutation.created)
 			addProperty("group_id", groupId)
+			add("memory", gson.toJsonTree(mutation.record))
+		})
+	}
+
+	private fun searchMemory(args: JsonObject, requesterGroupId: Long?): String {
+		val groupId = requesterGroupId ?: return errorResult("missing_group", "缺少群上下文，无法查询记忆")
+		val query = args.get("query")?.takeIf { !it.isJsonNull }?.asString?.trim().orEmpty()
+		if (query.isBlank()) return errorResult("bad_arguments", "query 不能为空")
+		val memories = llmMemoryService.search(groupId, query, 8)
+		return gson.toJson(JsonObject().apply {
+			addProperty("tool", "search_memory")
+			addProperty("group_id", groupId)
+			addProperty("returned", memories.size)
+			add("memories", gson.toJsonTree(memories))
+		})
+	}
+
+	private fun forgetMemory(args: JsonObject, requesterGroupId: Long?): String {
+		val groupId = requesterGroupId ?: return errorResult("missing_group", "缺少群上下文，无法删除记忆")
+		val memoryId = args.get("memory_id")?.takeIf { !it.isJsonNull }?.asString?.trim()
+		val query = args.get("query")?.takeIf { !it.isJsonNull }?.asString?.trim()
+		if (memoryId.isNullOrBlank() && query.isNullOrBlank()) {
+			return errorResult("bad_arguments", "memory_id 和 query 至少提供一个")
+		}
+		val removed = llmMemoryService.forget(groupId, memoryId, query)
+		return gson.toJson(JsonObject().apply {
+			addProperty("tool", "forget_memory")
+			addProperty("group_id", groupId)
+			addProperty("removed", removed.size)
+			add("memories", gson.toJsonTree(removed))
 		})
 	}
 
@@ -475,9 +554,7 @@ class LLMToolService(
 		System.getenv(name)?.trim()?.toIntOrNull() ?: defaultValue
 
 	private fun readBoolean(name: String, defaultValue: Boolean): Boolean =
-		when (System.getenv(name)?.trim()?.lowercase()) {
-			"1", "true", "yes", "on" -> true
-			"0", "false", "no", "off" -> false
-			else -> defaultValue
-		}
+		System.getenv(name)?.trim()?.lowercase()?.toBooleanStrictOrNull() ?: defaultValue
 }
+
+data class LLMToolContext(val groupId: Long?, val uid: String?, val name: String?)
