@@ -121,6 +121,8 @@ The OpenAI-compatible non-stream chat endpoint can execute built-in tools before
 Related environment variables:
 
 - `LLM_TOOLS_ENABLED`: enable built-in tools, default `true`.
+- `LLM_WEB_SEARCH_ENABLED`: enable DeepSeek server-side web search for non-stream `deepseek-v4-flash` requests, default `true`.
+- `LLM_RESPONSES_API_URL`: optional Responses API endpoint, derived from `LLM_API_URL` by default.
 - `LLM_TOOL_MAX_ROUNDS`: maximum tool-call loops per request, default `3`.
 - `LLM_TOOL_METRO_MAX_RESULTS`: maximum metro search results returned to the model, default `12`.
 - `LLM_GROUP_CONTEXT_MAX_CHARS`: maximum group chat context characters accepted from bot requests, default `120000`.

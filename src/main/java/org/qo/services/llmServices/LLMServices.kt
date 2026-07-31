@@ -48,6 +48,11 @@ class LLMServices(
 	private val redis = Redis()
 	private val jsonParser = JsonParser()
 	private val upstreamUrl = System.getenv("LLM_API_URL") ?: "https://api.deepseek.com/v1/chat/completions"
+	private val responsesUpstreamUrl = System.getenv("LLM_RESPONSES_API_URL")
+		?: upstreamUrl.takeIf { it.endsWith("/chat/completions") }
+			?.removeSuffix("/chat/completions")?.plus("/responses")
+		?: "https://api.deepseek.com/v1/responses"
+	private val webSearchEnabled = readBoolean("LLM_WEB_SEARCH_ENABLED", true)
 	private val debugPrompt = readBoolean("LLM_DEBUG_PROMPT", false)
 	private val debugPromptMaxChars = readInt("LLM_DEBUG_PROMPT_MAX_CHARS", 12000).coerceAtLeast(1000)
 	private val maxToolRounds = readInt("LLM_TOOL_MAX_ROUNDS", 3).coerceIn(1, 8)
@@ -267,6 +272,9 @@ class LLMServices(
 		requester: LLMRequester,
 		source: String,
 	): Pair<Int, String> {
+		if (webSearchEnabled && request.model == MODELS.FAST.apiName) {
+			return completeWithResponsesApi(request, requester, source)
+		}
 		if (!toolService.enabled()) {
 			val response = postUpstream(source, request.body)
 			return response.status.value to sanitizeResponseBody(response.bodyAsText())
@@ -308,7 +316,32 @@ class LLMServices(
 		return 502 to errorJson("tool_round_limit", "工具调用轮数超过限制，请调高 LLM_TOOL_MAX_ROUNDS")
 	}
 
-	private suspend fun postUpstream(source: String, body: String) = client.post(upstreamUrl) {
+	private suspend fun completeWithResponsesApi(
+		request: NormalizedRequest,
+		requester: LLMRequester,
+		source: String,
+	): Pair<Int, String> {
+		val functionTools = if (toolService.enabled()) toolService.definitions() else JsonArray()
+		val body = LLMResponsesAdapter.fromChatRequest(request.body, functionTools, enableWebSearch = true)
+		repeat(maxToolRounds) { round ->
+			val response = postUpstream("$source/responses-round-${round + 1}", body.toString(), responsesUpstreamUrl)
+			val responseText = response.bodyAsText()
+			if (!response.status.isSuccess()) {
+				return response.status.value to responseText
+			}
+			val functionCalls = LLMResponsesAdapter.functionCalls(responseText)
+			if (functionCalls.isEmpty()) {
+				return response.status.value to sanitizeResponseBody(LLMResponsesAdapter.toChatCompletion(responseText))
+			}
+			val outputs = functionCalls.associate { call ->
+				call.callId to toolService.execute(call.name, call.arguments, requester.groupId)
+			}
+			LLMResponsesAdapter.appendToolOutputs(body, responseText, outputs)
+		}
+		return 502 to errorJson("tool_round_limit", "工具调用轮数超过限制，请调高 LLM_TOOL_MAX_ROUNDS")
+	}
+
+	private suspend fun postUpstream(source: String, body: String, url: String = upstreamUrl) = client.post(url) {
 		header(HttpHeaders.Authorization, "Bearer $upstreamToken")
 		contentType(ContentType.Application.Json)
 		debugPrompt(source, body)
