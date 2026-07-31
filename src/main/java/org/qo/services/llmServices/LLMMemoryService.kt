@@ -1,6 +1,7 @@
 package org.qo.services.llmServices
 
 import jakarta.annotation.PostConstruct
+import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.stereotype.Service
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
@@ -10,7 +11,7 @@ import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
 @Service
-class LLMMemoryService(private val repository: LLMMemoryRepository) {
+class LLMMemoryService @Autowired constructor(private val repository: LLMMemoryRepository) {
 	internal data class Config(
 		val legacyKnowledgeDir: Path,
 		val contextMaxItems: Int,

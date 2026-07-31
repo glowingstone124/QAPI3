@@ -1,6 +1,7 @@
 package org.qo.services.llmServices
 
 import org.junit.jupiter.api.io.TempDir
+import org.springframework.context.annotation.AnnotationConfigApplicationContext
 import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.test.Test
@@ -12,6 +13,17 @@ import kotlin.test.assertTrue
 class LLMMemoryServiceTest {
 	@TempDir
 	lateinit var tempDir: Path
+
+	@Test
+	fun `spring selects the repository constructor`() {
+		AnnotationConfigApplicationContext().use { context ->
+			context.beanFactory.registerSingleton("memoryRepository", FakeMemoryRepository())
+			context.register(LLMMemoryService::class.java)
+			context.refresh()
+
+			assertNotNull(context.getBean(LLMMemoryService::class.java))
+		}
+	}
 
 	@Test
 	fun `upserts memory by group category and subject`() {
