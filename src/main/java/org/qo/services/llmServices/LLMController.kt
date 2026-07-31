@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestHeader
 import org.springframework.web.bind.annotation.RequestMapping
+import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
 
 @RestController
@@ -22,7 +23,8 @@ class LLMController(private val llmServices: LLMServices) {
 	suspend fun chatCompletions(
 		@RequestHeader("token", required = false) token: String?,
 		@RequestHeader(HttpHeaders.AUTHORIZATION, required = false) authorization: String?,
-		@RequestBody body: String
+		@RequestParam(name = "model", required = false, defaultValue = "fast") model: String = "fast",
+		@RequestBody body: String,
 	): Any {
 		val requestToken = AuthTokens.resolve(token, authorization)
 			?: return jsonResponse("""{"error":{"message":"缺少或无效的令牌","type":"invalid_token","code":"invalid_token"}}""", HttpStatus.UNAUTHORIZED)
@@ -30,11 +32,13 @@ class LLMController(private val llmServices: LLMServices) {
 		val stream = runCatching {
 			com.google.gson.JsonParser.parseString(body).asJsonObject.get("stream")?.asBoolean == true
 		}.getOrDefault(false)
-
+		val useModel = LLMServices.MODELS.entries
+			.find { it.name == model }
+			?: return jsonResponse("""{"error":{"message":"请求的模型不存在","type":"invalid_model","code":"invalid_model"}}""", HttpStatus.BAD_REQUEST)
 		return if (stream) {
-			streamResponse(body, requestToken)
+			streamResponse(body, requestToken, useModel)
 		} else {
-			val result = runCatching { llmServices.completeChat(body, requestToken) }.getOrElse {
+			val result = runCatching { llmServices.completeChat(body, requestToken, useModel) }.getOrElse {
 				LLMNonStreamResult(400, """{"error":{"message":"${it.message ?: "请求格式错误"}","type":"bad_request","code":"bad_request"}}""")
 			}
 			jsonResponse(result.body, HttpStatus.valueOf(result.status))
@@ -48,12 +52,13 @@ class LLMController(private val llmServices: LLMServices) {
 		@RequestHeader("X-QQ-UID") qqUid: Long,
 		@RequestHeader("X-QQ-Group-ID", required = false) qqGroupId: Long?,
 		@RequestHeader("X-QQ-Name", required = false) qqName: String?,
+		@RequestParam(name = "model", required = false, defaultValue = "fast") model: String = "fast",
 		@RequestBody body: String
 	): ResponseEntity<String> {
 		val requestToken = AuthTokens.resolve(token, authorization)
 			?: return jsonResponse("""{"error":{"message":"缺少或无效的令牌","type":"invalid_token","code":"invalid_token"}}""", HttpStatus.UNAUTHORIZED)
 
-		val result = runCatching { llmServices.completeBotChat(body, requestToken, qqUid, qqGroupId, qqName) }.getOrElse {
+		val result = runCatching { llmServices.completeBotChat(body, requestToken, qqUid, qqGroupId, qqName, model) }.getOrElse {
 			LLMNonStreamResult(400, """{"error":{"message":"${it.message ?: "请求格式错误"}","type":"bad_request","code":"bad_request"}}""")
 		}
 		return jsonResponse(result.body, HttpStatus.valueOf(result.status))
@@ -66,12 +71,15 @@ class LLMController(private val llmServices: LLMServices) {
 		@RequestHeader("X-Minecraft-Name") minecraftName: String,
 		@RequestHeader("X-Minecraft-Coordinate") minecraftDim: String,
 		@RequestHeader("X-Minecraft-HP") minecraftHP: String,
+		@RequestParam(name = "model", required = false, defaultValue = "fast") model: String = "fast",
 		@RequestBody body: String
 	): ResponseEntity<String> {
 		val requestToken = AuthTokens.resolve(token, authorization)
 			?: return jsonResponse("""{"error":{"message":"缺少或无效的令牌","type":"invalid_token","code":"invalid_token"}}""", HttpStatus.UNAUTHORIZED)
-
-		val result = runCatching { llmServices.completeMinecraftChat(body, requestToken, minecraftName, minecraftDim, minecraftHP) }.getOrElse {
+		val useModel = LLMServices.MODELS.entries
+			.find { it.name == model }
+			?: return jsonResponse("""{"error":{"message":"请求的模型不存在","type":"invalid_model","code":"invalid_model"}}""", HttpStatus.BAD_REQUEST)
+		val result = runCatching { llmServices.completeMinecraftChat(body, requestToken, minecraftName, minecraftDim, minecraftHP, useModel) }.getOrElse {
 			LLMNonStreamResult(400, """{"error":{"message":"${it.message ?: "请求格式错误"}","type":"bad_request","code":"bad_request"}}""")
 		}
 		return jsonResponse(result.body, HttpStatus.valueOf(result.status))
@@ -81,23 +89,27 @@ class LLMController(private val llmServices: LLMServices) {
 	fun handleResponse(
 		@RequestHeader("token", required = false) token: String?,
 		@RequestHeader(HttpHeaders.AUTHORIZATION, required = false) authorization: String?,
+		@RequestParam(name = "model", required = false, defaultValue = "fast") model: String = "fast",
 		@RequestBody body: String
 	): Flow<ServerSentEvent<String>> {
 		val requestToken = AuthTokens.resolve(token, authorization)
 		if (requestToken.isNullOrBlank()) {
 			return flowOf(sse("缺少或无效的令牌", "error"))
 		}
-		val requestBody = llmServices.buildPromptRequest(body, true)
-		return streamEvents(requestBody, requestToken)
+		val useModel = LLMServices.MODELS.entries
+			.find { it.name == model }
+			?: return flowOf(sse("请求的模型不存在","error"))
+		val requestBody = llmServices.buildPromptRequest(body, true, useModel)
+		return streamEvents(requestBody, requestToken, useModel)
 	}
 
-	private fun streamResponse(body: String, token: String): Flow<ServerSentEvent<String>> {
-		return streamEvents(body, token)
+	private fun streamResponse(body: String, token: String, model: LLMServices.MODELS): Flow<ServerSentEvent<String>> {
+		return streamEvents(body, token, model)
 	}
 
-	private fun streamEvents(body: String, token: String): Flow<ServerSentEvent<String>> = flow {
+	private fun streamEvents(body: String, token: String, model: LLMServices.MODELS): Flow<ServerSentEvent<String>> = flow {
 		try {
-			val result = llmServices.streamChat(body, token)
+			val result = llmServices.streamChat(body, token, model)
 			if (result.status >= 400) {
 				result.chunks.collect { emit(sse(it, "error")) }
 				return@flow

@@ -48,7 +48,6 @@ class LLMServices(
 	private val redis = Redis()
 	private val jsonParser = JsonParser()
 	private val upstreamUrl = System.getenv("LLM_API_URL") ?: "https://api.deepseek.com/v1/chat/completions"
-	private val upstreamModel = System.getenv("LLM_DEFAULT_MODEL") ?: "deepseek-chat"
 	private val debugPrompt = readBoolean("LLM_DEBUG_PROMPT", false)
 	private val debugPromptMaxChars = readInt("LLM_DEBUG_PROMPT_MAX_CHARS", 12000).coerceAtLeast(1000)
 	private val maxToolRounds = readInt("LLM_TOOL_MAX_ROUNDS", 3).coerceIn(1, 8)
@@ -59,6 +58,12 @@ class LLMServices(
 		System.getenv("LLM_API_TOKEN")
 			?: runCatching { Files.readString(Path.of("LLMAPITOKEN")).trim() }.getOrDefault("")
 	}
+
+	enum class MODELS(name: String) {
+		FAST("deepseek-v4-flash"),
+		THINKING("deepseek-v4-pro")
+	}
+
 	private val client = HttpClient(CIO) {
 		install(HttpTimeout) {
 			requestTimeoutMillis = 120 * 1000
@@ -108,9 +113,9 @@ class LLMServices(
 		return user
 	}
 
-	fun buildPromptRequest(prompt: String, stream: Boolean = true): String {
+	fun buildPromptRequest(prompt: String, stream: Boolean = true, model: MODELS): String {
 		return JsonObject().apply {
-			addProperty("model", upstreamModel)
+			addProperty("model", model.name)
 			addProperty("stream", stream)
 			add("messages", jsonParser.parse(
 				"""
@@ -123,10 +128,10 @@ class LLMServices(
 		}.toString()
 	}
 
-	suspend fun completeChat(body: String, token: String): LLMNonStreamResult {
+	suspend fun completeChat(body: String, token: String, model: MODELS): LLMNonStreamResult {
 		val user = authenticate(token) ?: return LLMNonStreamResult(401, errorJson("invalid_token", "权限验证失败"))
 		val requester = LLMRequester(user.uid, user.username, "login")
-		val request = normalizeRequest(body, false, requester)
+		val request = normalizeRequest(body, false, requester, model)
 		val requestId = insertAccessRecord(user.uid, user.username, request.model, false)
 		if (!reserveRequest(token)) {
 			updateAccessRecord(requestId, "rejected", errorMessage = "duplicate request")
@@ -151,10 +156,10 @@ class LLMServices(
 		}
 	}
 
-	suspend fun streamChat(body: String, token: String): LLMStreamResult {
+	suspend fun streamChat(body: String, token: String, model: MODELS): LLMStreamResult {
 		val user = authenticate(token) ?: return LLMStreamResult(401, flowOfText(errorJson("invalid_token", "权限验证失败")))
 		val requester = LLMRequester(user.uid, user.username, "login")
-		val request = normalizeRequest(body, true, requester)
+		val request = normalizeRequest(body, true, requester, model)
 		val requestId = insertAccessRecord(user.uid, user.username, request.model, true)
 		if (!reserveRequest(token)) {
 			updateAccessRecord(requestId, "rejected", errorMessage = "duplicate request")
@@ -168,13 +173,18 @@ class LLMServices(
 		return LLMStreamResult(200, streamFromUpstream(request.body, requestId, "stream"))
 	}
 
-	suspend fun completeBotChat(body: String, token: String, qqUid: Long, qqGroupId: Long?, qqName: String?): LLMNonStreamResult {
+	suspend fun completeBotChat(body: String, token: String, qqUid: Long, qqGroupId: Long?, qqName: String?, model: String): LLMNonStreamResult {
 		if (!authenticateServerToken(token)) {
 			return LLMNonStreamResult(401, errorJson("invalid_token", "Bot token 验证失败"))
 		}
 		val username = qqName?.takeIf { it.isNotBlank() }?.let { decodeHeader(it) } ?: "qq:$qqUid"
 		val requester = LLMRequester(qqUid, username, "qq", qqGroupId)
-		val request = normalizeRequest(body, false, requester)
+		val model = when (model) {
+			"fast" -> MODELS.FAST
+			"thinking" -> MODELS.THINKING
+			else -> return LLMNonStreamResult(400, errorJson("model_not_avaliable", "请求的模型不可用"))
+		}
+		val request = normalizeRequest(body, false, requester, model)
 		val requestId = insertAccessRecord(qqUid, username, request.model, false)
 		if (!reserveRequest("bot:$qqUid")) {
 			updateAccessRecord(requestId, "rejected", errorMessage = "duplicate request")
@@ -199,7 +209,7 @@ class LLMServices(
 		}
 	}
 
-	suspend fun completeMinecraftChat(body: String, token: String, minecraftName: String, minecraftCoordinate: String, minecraftHP: String): LLMNonStreamResult {
+	suspend fun completeMinecraftChat(body: String, token: String, minecraftName: String, minecraftCoordinate: String, minecraftHP: String, model: MODELS): LLMNonStreamResult {
 		val serverId = authenticatedServerId(token)
 			?: return LLMNonStreamResult(401, errorJson("invalid_token", "Minecraft token 验证失败"))
 		val playerName = minecraftName.trim()
@@ -224,7 +234,7 @@ class LLMServices(
 				minecraftHP,
 			)
 		)
-		val request = normalizeRequest(body, false, requester)
+		val request = normalizeRequest(body, false, requester, model)
 		val requestId = insertAccessRecord(user.uid, playerName, request.model, false)
 		if (!reserveRequest("minecraft:$playerName")) {
 			updateAccessRecord(requestId, "rejected", errorMessage = "duplicate request")
@@ -343,10 +353,10 @@ class LLMServices(
 		}
 	}
 
-	private fun normalizeRequest(body: String, stream: Boolean, requester: LLMRequester? = null): NormalizedRequest {
+	private fun normalizeRequest(body: String, stream: Boolean, requester: LLMRequester? = null, model: MODELS): NormalizedRequest {
 		val obj = JsonParser.parseString(body).asJsonObject
 		if (!obj.has("model") || obj.get("model").asString.isBlank()) {
-			obj.addProperty("model", upstreamModel)
+			obj.addProperty("model", model.name)
 		}
 		requester?.let {
 			obj.addProperty("user_id", it.conversationKey())
