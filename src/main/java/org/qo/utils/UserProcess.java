@@ -60,9 +60,6 @@ public class UserProcess {
     private static CoroutineAdapter ca;
     private static final Redis redis = new Redis();
 
-    private static final Map<String, ScheduledFuture<?>> onlineTasks = new ConcurrentHashMap<>();
-    private static final ScheduledExecutorService schedulerService = Executors.newScheduledThreadPool(4);
-
     @Autowired
     public UserProcess(CoroutineAdapter ca) {
         UserProcess.ca = ca;
@@ -438,20 +435,12 @@ public class UserProcess {
     public static void handlePlayerOnline(String name, String ip) {
         if (Boolean.FALSE.equals(redis.exists("online" + name, DatabaseType.QO_ONLINE_DATABASE.getValue()).ignoreException())) {
             redis.insert("online" + name, "true", DatabaseType.QO_ONLINE_DATABASE.getValue()).ignoreException();
-            ScheduledFuture<?> future = schedulerService.scheduleAtFixedRate(()-> {
-                redis.insert("login_history_" + name, ip, DatabaseType.QO_TEMP_DATABASE.getValue(), 60).ignoreException();
-            }, 0, 40, TimeUnit.SECONDS);
-            onlineTasks.put(name, future);
         }
     }
 
     public static void handlePlayerOffline(String name) {
         if (Boolean.TRUE.equals(redis.exists("online" + name, DatabaseType.QO_ONLINE_DATABASE.getValue()).ignoreException())) {
             redis.delete("online" + name, DatabaseType.QO_ONLINE_DATABASE.getValue()).ignoreException();
-            ScheduledFuture<?> future = onlineTasks.remove(name);
-            if (future != null) {
-                future.cancel(true);
-            }
         }
     }
 
@@ -478,12 +467,7 @@ public class UserProcess {
                     userORM.updatePassword(user.getUid(), computePassword(password, true));
                 }
                 updateLastLoginAsync(username);
-                if (!web && ip != null) {
-                    redis.insert("login_history_" + username, ip, DatabaseType.QO_TEMP_DATABASE.getValue(), 60).ignoreException();
-                }
                 return new Pair<>(true, token);
-            } else {
-                redis.delete("login_history_" + username, DatabaseType.QO_TEMP_DATABASE.getValue()).ignoreException();
             }
             return new Pair<>(false, null);
         } else {

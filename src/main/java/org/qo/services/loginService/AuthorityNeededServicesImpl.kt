@@ -9,8 +9,6 @@ import org.qo.datas.Mapping
 import org.qo.datas.Nodes
 import org.qo.services.messageServices.Msg
 import org.qo.utils.ReturnInterface
-import org.qo.redis.DatabaseType
-import org.qo.redis.Redis
 import org.qo.utils.SerializeUtils.convertToJsonArray
 import org.springframework.stereotype.Service
 import java.security.MessageDigest
@@ -24,7 +22,6 @@ class AuthorityNeededServicesImpl(
 	private val nodes: Nodes,
 ) {
 	val gson = Gson()
-	val redis = Redis()
 	data class WebChatWrapper(
 		val message: String,
 		val timestamp: Long,
@@ -147,17 +144,6 @@ class AuthorityNeededServicesImpl(
 			return Pair(null, false)
 		}
 		return Pair(userORM.readAsync(accountName!!),true)
-	}
-	fun getPlayerLogin(username: String): Pair<Boolean, String> {
-		redis.exists("login_history_$username", DatabaseType.QO_TEMP_DATABASE.value).ignoreException()?.let {
-			if (!it) {
-				return Pair(false,"")
-			} else {
-				val result = redis.get("login_history_$username",DatabaseType.QO_TEMP_DATABASE.value).ignoreException().orEmpty()
-				return Pair(true, result)
-			}
-		}
-		return Pair(false,"")
 	}
 }
 

@@ -8,6 +8,7 @@ import org.qo.datas.Database;
 import org.qo.datas.Nodes;
 import org.qo.services.loginService.IPWhitelistServices;
 import org.qo.services.loginService.Login;
+import org.qo.services.loginService.RecentLoginService;
 import org.qo.services.mmdb.Query;
 import org.qo.services.proxyRelatedServices.ProxyRelatedImpl;
 import org.qo.services.proxyRelatedServices.ProxyStatus;
@@ -60,9 +61,10 @@ public class ApiApplication {
     public IPWhitelistServices ipWhitelistServices;
     private final Nodes nodes;
     private final RegistrationQuizService registrationQuizService;
+    private final RecentLoginService recentLoginService;
 
     @Autowired
-    public ApiApplication(UAUtil uaUtil, ReturnInterface ri, Status status, Login login, IPWhitelistServices ipWhitelistServices, ProxyRelatedImpl proxyRelatedImpl, UserProcess userProcess, Nodes nodes, RegistrationQuizService registrationQuizService) {
+    public ApiApplication(UAUtil uaUtil, ReturnInterface ri, Status status, Login login, IPWhitelistServices ipWhitelistServices, ProxyRelatedImpl proxyRelatedImpl, UserProcess userProcess, Nodes nodes, RegistrationQuizService registrationQuizService, RecentLoginService recentLoginService) {
         this.ri = ri;
         this.ua = uaUtil;
         this.status = status;
@@ -72,6 +74,7 @@ public class ApiApplication {
         this.proxyRelatedImpl = proxyRelatedImpl;
         this.nodes = nodes;
         this.registrationQuizService = registrationQuizService;
+        this.recentLoginService = recentLoginService;
     }
 
     @PostConstruct
@@ -361,6 +364,9 @@ public class ApiApplication {
         }
         JsonObject retObj = new JsonObject();
         var result = performLogin(credentials.username(), credentials.password(), credentials.ip(), Boolean.TRUE.equals(credentials.web()));
+        if (result.getFirst() && !Boolean.TRUE.equals(credentials.web())) {
+            recentLoginService.recordSuccessfulLogin(credentials.username(), credentials.ip());
+        }
         retObj.addProperty("result", result.getFirst());
         retObj.addProperty("token", result.getSecond());
         return new ResponseEntity<>(retObj.toString(), headers, HttpStatus.OK);

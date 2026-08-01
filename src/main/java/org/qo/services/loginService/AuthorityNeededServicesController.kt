@@ -5,12 +5,14 @@ import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import org.qo.datas.GsonProvider.gson
 import org.qo.datas.Mapping
+import org.qo.datas.Nodes
 import org.qo.utils.ReturnInterface
 import org.qo.utils.AuthTokens
 import org.qo.services.loginService.IPWhitelistServices.WhitelistReasons
 import org.qo.orm.UserORM
 import org.qo.utils.SerializeUtils.convertToJsonArray
 import org.springframework.http.HttpHeaders
+import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.DeleteMapping
@@ -31,7 +33,9 @@ class AuthorityNeededServicesController(
 	private val ipWhitelistServices: IPWhitelistServices,
 	private val authorityNeededServicesImpl: AuthorityNeededServicesImpl,
 	private val playerCardCustomizationImpl: PlayerCardCustomizationImpl,
-	private val affiliatedAccountServices: AffiliatedAccountServices
+	private val affiliatedAccountServices: AffiliatedAccountServices,
+	private val nodes: Nodes,
+	private val recentLoginService: RecentLoginService
 ) {
 	private fun resolveLoginToken(tokenHeader: String?, authorizationHeader: String?): String? {
 		return AuthTokens.resolve(tokenHeader, authorizationHeader)
@@ -171,31 +175,21 @@ class AuthorityNeededServicesController(
 		return ri.GeneralHttpHeader(authorityNeededServicesImpl.calculateFortune(resolvedToken))
 	}
 
-	@GetMapping("/templogin")
-	suspend fun getPlayerRecentLogin(
-		@RequestParam name: String,
-		@RequestHeader("token", required = false) token: String?,
-		@RequestHeader(HttpHeaders.AUTHORIZATION, required = false) authorization: String?
+	@PostMapping("/auto-login")
+	fun autoLogin(
+		@RequestHeader("Token", required = false) token: String?,
+		@RequestBody request: AutoLoginRequest
 	): ResponseEntity<String> {
-		val returnObj = JsonObject()
-		val resolvedToken = resolveLoginToken(token, authorization)
-		if (resolvedToken == null) {
-			returnObj.addProperty("ok", false)
-			returnObj.addProperty("error", "Missing token.")
-			return ri.GeneralHttpHeader(returnObj.toString())
+		if (token == null || nodes.getServerFromToken(token) < 0) {
+			return ri.GeneralHttpHeader(JsonObject().apply {
+				addProperty("ok", false)
+				addProperty("error", "unauthorized")
+			}.toString(), HttpStatus.UNAUTHORIZED)
 		}
-		val (username, errorCode) = login.validate(resolvedToken)
-		if (username == null || username != name) {
-			returnObj.addProperty("ok", false)
-			returnObj.addProperty("error", authorityNeededServicesImpl.getErrorMessage(errorCode))
-			return ri.GeneralHttpHeader(returnObj.toString())
-		}
-		val result = authorityNeededServicesImpl.getPlayerLogin(name)
-		returnObj.addProperty("ok", result.first)
-		if (result.first) {
-			returnObj.addProperty("ip", result.second)
-		}
-		return ri.GeneralHttpHeader(returnObj.toString())
+
+		return ri.GeneralHttpHeader(JsonObject().apply {
+			addProperty("ok", recentLoginService.canAutoLogin(request.username, request.ip))
+		}.toString())
 	}
 
 	@GetMapping("/cards/obtained")
@@ -280,6 +274,11 @@ data class Return(
 		return gson.toJson(this)
 	}
 }
+
+data class AutoLoginRequest(
+	val username: String?,
+	val ip: String?
+)
 
 fun Boolean.toHumanReadableJson(): String {
 	return JsonObject().apply { addProperty("result", this@toHumanReadableJson) }.toString()

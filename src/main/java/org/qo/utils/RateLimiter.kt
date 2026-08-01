@@ -24,7 +24,7 @@ class RateLimiter {
 		Rule("/qo/game/login", 100, 60),
 		Rule("/qo/upload/registry", 10, 30),
 		Rule("/qo/upload/password", 10, 30),
-		Rule("/qo/authorization/templogin", 20, 30),
+		Rule("/qo/authorization/auto-login", 20, 30),
 		Rule("/qo/asking/ask", 5, 30),
 		Rule("/qo/download/registry", 800, 30),
 		Rule("/qo/download/name", 800, 30),
