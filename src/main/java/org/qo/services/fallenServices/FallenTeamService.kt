@@ -8,8 +8,6 @@ import org.qo.services.loginService.Login
 import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Service
 import java.time.Instant
-import java.time.LocalDate
-import java.time.ZoneId
 
 enum class FallenTeam {
 	A, B, C;
@@ -90,8 +88,7 @@ class FallenTeamService(private val login: Login) {
 	private var schemaReady = false
 	@Volatile
 	private var rosterCache: FallenRosterCache? = null
-	private val assignmentZone = ZoneId.of("Asia/Shanghai")
-	private val assignmentInstant = LocalDate.of(2026, 7, 29).atStartOfDay(assignmentZone).toInstant()
+	private val assignmentInstant = FallenSchedule.assignmentInstant
 
 	suspend fun selectionForToken(token: String): Pair<String?, FallenTeamSelection?> {
 		val (username, errorCode) = login.validate(token)
@@ -127,7 +124,7 @@ class FallenTeamService(private val login: Login) {
 		readFinalizedRoster()
 	}
 
-	@Scheduled(cron = "0 0 0 29 7 *", zone = "Asia/Shanghai")
+	@Scheduled(cron = FallenSchedule.ASSIGNMENT_CRON, zone = FallenSchedule.ASSIGNMENT_ZONE_ID)
 	fun finalizeScheduledAssignments() {
 		ensureSchema()
 		finalizeAssignmentsIfDue()
