@@ -68,12 +68,47 @@ class RegistrationVerificationController(
 	): ResponseEntity<String> {
 		val name = request.name
 		val uid = request.uid
-		if (name == null || uid == null) {
-			return response("invalid_registration_data", "Minecraft 用户名或 QQ 号无效。", HttpStatus.BAD_REQUEST)
+		if (name == null) {
+			return response("missing_minecraft_username", "缺少 Minecraft 用户名。", HttpStatus.BAD_REQUEST) {
+				addProperty("field", "name")
+			}
 		}
-		val session = runCatching { quizService.start(name, uid) }.getOrElse {
+		if (uid == null) {
+			return response("missing_qq_uid", "缺少 QQ 号。", HttpStatus.BAD_REQUEST) {
+				addProperty("field", "uid")
+			}
+		}
+		val startResult = runCatching { quizService.start(name, uid) }.getOrElse {
 			return response("quiz_configuration_unavailable", "答题配置暂时不可用，请联系管理员。", HttpStatus.SERVICE_UNAVAILABLE)
-		} ?: return response("quiz_session_unavailable", "暂时无法创建答题会话，请稍后重试。", HttpStatus.TOO_MANY_REQUESTS)
+		}
+		val session = when (startResult) {
+			is RegistrationQuizStartResult.Started -> startResult.session
+			RegistrationQuizStartResult.InvalidUsername -> return response(
+				"invalid_minecraft_username",
+				"Minecraft 用户名格式无效：应为 3–16 位，且只能包含英文字母、数字和下划线。",
+				HttpStatus.BAD_REQUEST
+			) {
+				addProperty("field", "name")
+				addProperty("requirement", "3-16 characters: A-Z, a-z, 0-9, underscore")
+			}
+			RegistrationQuizStartResult.InvalidUid -> return response(
+				"invalid_qq_uid",
+				"QQ 号无效：必须是大于 0 的整数。",
+				HttpStatus.BAD_REQUEST
+			) {
+				addProperty("field", "uid")
+				addProperty("minimum", 1)
+			}
+			is RegistrationQuizStartResult.CapacityReached -> return response(
+				"quiz_session_capacity_reached",
+				"当前有效答题会话已达上限，请等待已有会话过期后重试。",
+				HttpStatus.TOO_MANY_REQUESTS
+			) {
+				addProperty("activeSessions", startResult.activeSessions)
+				addProperty("limit", startResult.limit)
+				addProperty("sessionTtlSeconds", RegistrationQuizService.QUIZ_SESSION_TTL_MILLIS / 1_000)
+			}
+		}
 		val questions = JsonArray()
 		session.questions.forEach { question ->
 			questions.add(JsonObject().apply {
@@ -193,11 +228,17 @@ class RegistrationVerificationController(
 	private fun isUsername(value: String?): Boolean =
 		value != null && USERNAME.matches(value)
 
-	private fun response(code: String, message: String, status: HttpStatus): ResponseEntity<String> =
+	private fun response(
+		code: String,
+		message: String,
+		status: HttpStatus,
+		details: JsonObject.() -> Unit = {}
+	): ResponseEntity<String> =
 		ri.GeneralHttpHeader(JsonObject().apply {
 			addProperty("code", code)
 			addProperty("message", message)
 			addProperty("state", if (status == HttpStatus.NOT_IMPLEMENTED) "reserved" else "error")
+			details()
 		}.toString(), status)
 
 	private companion object {

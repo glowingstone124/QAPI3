@@ -49,6 +49,29 @@ class RegistrationVerificationControllerTest {
 	}
 
 	@Test
+	fun quizSessionReportsDetailedUsernameAndUidValidationErrors() {
+		webTestClient.post().uri("/qo/registration/quiz/session")
+			.contentType(MediaType.APPLICATION_JSON)
+			.bodyValue("""{"name":"a!","uid":123456}""")
+			.exchange()
+			.expectStatus().isBadRequest
+			.expectBody()
+			.jsonPath("$.code").isEqualTo("invalid_minecraft_username")
+			.jsonPath("$.field").isEqualTo("name")
+			.jsonPath("$.requirement").isNotEmpty
+
+		webTestClient.post().uri("/qo/registration/quiz/session")
+			.contentType(MediaType.APPLICATION_JSON)
+			.bodyValue("""{"name":"Alex_123","uid":0}""")
+			.exchange()
+			.expectStatus().isBadRequest
+			.expectBody()
+			.jsonPath("$.code").isEqualTo("invalid_qq_uid")
+			.jsonPath("$.field").isEqualTo("uid")
+			.jsonPath("$.minimum").isEqualTo(1)
+	}
+
+	@Test
 	fun minecraftSessionCanBeResumedOnlyByItsChambersServer() {
 		webTestClient.post().uri("/qo/registration/minecraft/session")
 			.contentType(MediaType.APPLICATION_JSON)

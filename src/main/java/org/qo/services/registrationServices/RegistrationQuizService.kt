@@ -24,6 +24,16 @@ data class RegistrationQuizSession(
 	val questions: List<RegistrationQuizQuestion>
 )
 
+sealed interface RegistrationQuizStartResult {
+	data class Started(val session: RegistrationQuizSession) : RegistrationQuizStartResult
+	data object InvalidUsername : RegistrationQuizStartResult
+	data object InvalidUid : RegistrationQuizStartResult
+	data class CapacityReached(
+		val activeSessions: Int,
+		val limit: Int
+	) : RegistrationQuizStartResult
+}
+
 data class RegistrationQuizResult(
 	val passed: Boolean,
 	val score: Int,
@@ -58,13 +68,17 @@ class RegistrationQuizService {
 	}
 
 	@Synchronized
-	fun start(name: String, uid: Long): RegistrationQuizSession? {
+	fun start(name: String, uid: Long): RegistrationQuizStartResult {
 		cleanup()
-		if (!USERNAME.matches(name) || uid <= 0 || sessions.size >= MAX_ACTIVE_SESSIONS) return null
-		val definition = loadDefinition()
+		if (!USERNAME.matches(name)) return RegistrationQuizStartResult.InvalidUsername
+		if (uid <= 0) return RegistrationQuizStartResult.InvalidUid
 		sessions.entries.removeIf {
 			it.value.name.equals(name, ignoreCase = true) || it.value.uid == uid
 		}
+		if (sessions.size >= MAX_ACTIVE_SESSIONS) {
+			return RegistrationQuizStartResult.CapacityReached(sessions.size, MAX_ACTIVE_SESSIONS)
+		}
+		val definition = loadDefinition()
 		val session = RegistrationQuizSession(
 			id = UUID.randomUUID().toString(),
 			name = name,
@@ -74,7 +88,7 @@ class RegistrationQuizService {
 			questions = definition.questions
 		)
 		sessions[session.id] = session
-		return session
+		return RegistrationQuizStartResult.Started(session)
 	}
 
 	fun submit(sessionId: String, name: String, uid: Long, answers: List<Int>): RegistrationQuizResult? {
