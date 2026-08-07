@@ -63,6 +63,21 @@ class LLMController(private val llmServices: LLMServices) {
 		return jsonResponse(result.body, HttpStatus.valueOf(result.status))
 	}
 
+	@PostMapping("/v1/chat/history", produces = [MediaType.APPLICATION_JSON_VALUE])
+	fun archiveBotChatHistory(
+		@RequestHeader("token", required = false) token: String?,
+		@RequestHeader(HttpHeaders.AUTHORIZATION, required = false) authorization: String?,
+		@RequestHeader("X-QQ-Group-ID") qqGroupId: Long,
+		@RequestBody body: String,
+	): ResponseEntity<String> {
+		val requestToken = AuthTokens.resolve(token, authorization)
+			?: return jsonResponse("""{"error":{"message":"缺少或无效的令牌","type":"invalid_token","code":"invalid_token"}}""", HttpStatus.UNAUTHORIZED)
+		val result = runCatching { llmServices.archiveBotChatHistory(requestToken, qqGroupId, body) }.getOrElse {
+			LLMNonStreamResult(400, """{"error":{"message":"${it.message ?: "请求格式错误"}","type":"bad_request","code":"bad_request"}}""")
+		}
+		return jsonResponse(result.body, HttpStatus.valueOf(result.status))
+	}
+
 	@PostMapping("/v1/chat/completions/minecraft", produces = [MediaType.APPLICATION_JSON_VALUE])
 	suspend fun minecraftChatCompletions(
 		@RequestHeader("token", required = false) token: String?,

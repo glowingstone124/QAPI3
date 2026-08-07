@@ -21,7 +21,8 @@ class LLMToolService(
 	private val metroService: MetroServiceImpl,
 	private val transportationService: TransportationServiceImpl,
 	private val ragService: RAGService,
-	private val llmMemoryService: LLMMemoryService
+	private val llmMemoryService: LLMMemoryService,
+	private val chatHistoryService: LLMChatHistoryService,
 ) {
 	private val gson: Gson = GsonBuilder().disableHtmlEscaping().create()
 	private val maxMetroResults = readInt("LLM_TOOL_METRO_MAX_RESULTS", 12).coerceIn(1, 50)
@@ -85,6 +86,18 @@ class LLMToolService(
 					type = "string",
 					description = "需要检索的问题或关键词。"
 				),
+			),
+			required = listOf("query")
+		))
+		add(functionTool(
+			name = "search_chat_history",
+			description = "检索当前群已经持久化的历史聊天。当用户询问较早讨论、某人以前说过什么、旧决定或当前滑动窗口之外的信息时使用。查询范围始终限制在当前群。",
+			properties = linkedMapOf(
+				"query" to property(type = "string", description = "聊天内容关键词；可与 uid、时间范围组合。"),
+				"uid" to property(type = "integer", description = "可选 QQ uid，只查该成员。"),
+				"from_time" to property(type = "integer", description = "可选起始 Unix 时间戳，支持秒或毫秒。"),
+				"to_time" to property(type = "integer", description = "可选结束 Unix 时间戳，支持秒或毫秒。"),
+				"limit" to property(type = "integer", description = "返回条数，默认 12，最大 30。"),
 			),
 			required = listOf("query")
 		))
@@ -177,6 +190,7 @@ class LLMToolService(
 				"get_server_status" -> getServerStatus(args)
 				"query_metro_lines" -> queryMetroLines(args)
 				"search_minecraft_knowledge" -> searchMinecraftKnowledge(args, context.groupId)
+				"search_chat_history" -> searchChatHistory(args, context.groupId)
 				"add_memory" -> addMemory(args, context)
 				"search_memory" -> searchMemory(args, context.groupId)
 				"forget_memory" -> forgetMemory(args, context.groupId)
@@ -184,6 +198,26 @@ class LLMToolService(
 			}
 		}.getOrElse { errorResult("tool_error", it.message ?: "工具执行失败") }
 	}
+
+	private fun searchChatHistory(args: JsonObject, requesterGroupId: Long?): String {
+		val groupId = requesterGroupId ?: return errorResult("missing_group", "缺少群上下文，无法查询聊天历史")
+		val query = args.get("query")?.takeIf { !it.isJsonNull }?.asString?.trim().orEmpty()
+		if (query.isBlank()) return errorResult("bad_arguments", "query 不能为空")
+		val uid = args.get("uid")?.takeIf { !it.isJsonNull }?.asLong
+		val fromTime = normalizeTimestamp(args.get("from_time")?.takeIf { !it.isJsonNull }?.asLong)
+		val toTime = normalizeTimestamp(args.get("to_time")?.takeIf { !it.isJsonNull }?.asLong)
+		val limit = args.get("limit")?.takeIf { !it.isJsonNull }?.asInt ?: 12
+		val messages = chatHistoryService.search(groupId, query, uid, fromTime, toTime, limit)
+			.map { it.copy(content = it.content.take(1000)) }
+		return gson.toJson(JsonObject().apply {
+			addProperty("tool", "search_chat_history")
+			addProperty("group_id", groupId)
+			addProperty("returned", messages.size)
+			add("messages", gson.toJsonTree(messages))
+		})
+	}
+
+	private fun normalizeTimestamp(value: Long?): Long? = value?.let { if (it in 1..9_999_999_999L) it * 1000 else it }
 
 	private fun addMemory(args: JsonObject, context: LLMToolContext): String {
 		val groupId = context.groupId ?: return errorResult("missing_group", "缺少群上下文，无法保存记忆")

@@ -29,8 +29,8 @@ class LLMGroupContextService() {
 
 	private var config = Config(
 		summaryDir = Path.of(System.getenv("LLM_GROUP_SUMMARY_DIR") ?: "data/llm/summaries"),
-		recentMaxMessages = readInt("LLM_GROUP_CONTEXT_RECENT_MESSAGES", 40).coerceIn(1, 500),
-		recentMaxChars = readInt("LLM_GROUP_CONTEXT_RECENT_CHARS", 20_000).coerceAtLeast(1000),
+		recentMaxMessages = readInt("LLM_GROUP_CONTEXT_RECENT_MESSAGES", 80).coerceIn(1, 500),
+		recentMaxChars = readInt("LLM_GROUP_CONTEXT_RECENT_CHARS", 30_000).coerceAtLeast(1000),
 		pendingMaxChars = readInt("LLM_GROUP_CONTEXT_PENDING_CHARS", 4000).coerceAtLeast(500),
 		summaryMinNewMessages = readInt("LLM_GROUP_SUMMARY_MIN_NEW_MESSAGES", 10).coerceAtLeast(1),
 		summaryMinNewChars = readInt("LLM_GROUP_SUMMARY_MIN_NEW_CHARS", 3000).coerceAtLeast(200),
