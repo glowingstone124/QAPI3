@@ -12,9 +12,9 @@ class LLMMemberProfileContextService() {
 	)
 
 	private var config = Config(
-		maxProfiles = readInt("LLM_MEMBER_PROFILE_CONTEXT_MAX_ITEMS", 30).coerceIn(1, 100),
-		maxFactsPerProfile = readInt("LLM_MEMBER_PROFILE_CONTEXT_MAX_FACTS", 12).coerceIn(0, 50),
-		maxChars = readInt("LLM_MEMBER_PROFILE_CONTEXT_MAX_CHARS", 12_000).coerceAtLeast(1000),
+		maxProfiles = readInt("LLM_MEMBER_PROFILE_CONTEXT_MAX_ITEMS", 50).coerceIn(1, 100),
+		maxFactsPerProfile = readInt("LLM_MEMBER_PROFILE_CONTEXT_MAX_FACTS", 16).coerceIn(0, 50),
+		maxChars = readInt("LLM_MEMBER_PROFILE_CONTEXT_MAX_CHARS", 20_000).coerceAtLeast(1000),
 	)
 
 	internal constructor(config: Config) : this() {

@@ -24,7 +24,9 @@ class RegistrationVerificationController(
 	private val minecraftSessionService: MinecraftRegistrationSessionService,
 	private val nodes: Nodes,
 	private val ri: ReturnInterface,
-	@Value("\${qapi.registration.chambers-node-names:chambers}") chamberNodeNames: String
+	@Value("\${qapi.registration.chambers-node-names:chambers}") chamberNodeNames: String,
+	@param:Value("\${qapi.registration.chambers-address:qoriginal.vip}") private val chambersAddress: String,
+	@param:Value("\${qapi.registration.chambers-enabled:false}") private val chambersEnabled: Boolean,
 ) {
 	private val allowedChambersNodeNames = chamberNodeNames.split(",")
 		.map { it.trim().lowercase() }
@@ -37,7 +39,8 @@ class RegistrationVerificationController(
 		val methods = JsonArray()
 		RegistrationVerificationMethod.entries.forEach { method ->
 			val available = method.available &&
-				(method != RegistrationVerificationMethod.QUIZ || quizMetadata != null)
+				(method != RegistrationVerificationMethod.QUIZ || quizMetadata != null) &&
+				(method != RegistrationVerificationMethod.MINECRAFT || chambersEnabled)
 			methods.add(JsonObject().apply {
 				addProperty("id", method.id)
 				addProperty("displayName", method.displayName)
@@ -53,6 +56,9 @@ class RegistrationVerificationController(
 				if (method == RegistrationVerificationMethod.QUIZ && quizMetadata != null) {
 					addProperty("questionCount", quizMetadata.questionCount)
 					addProperty("passingScore", quizMetadata.passingScore)
+				}
+				if (method == RegistrationVerificationMethod.MINECRAFT) {
+					addProperty("serverAddress", chambersAddress.trim())
 				}
 			})
 		}
@@ -153,6 +159,7 @@ class RegistrationVerificationController(
 	fun startMinecraftSession(
 		@RequestBody request: MinecraftVerificationSessionRequest
 	): ResponseEntity<String> {
+		chambersUnavailable()?.let { return it }
 		if (!isUsername(request.name) || request.uid == null || request.uid <= 0) {
 			return response("invalid_registration_data", "Minecraft 用户名或 QQ 号无效。", HttpStatus.BAD_REQUEST)
 		}
@@ -170,6 +177,7 @@ class RegistrationVerificationController(
 		@RequestHeader(HttpHeaders.AUTHORIZATION, required = false) authorization: String?,
 		@RequestBody request: MinecraftVerificationClaimRequest
 	): ResponseEntity<String> {
+		chambersUnavailable()?.let { return it }
 		val nodeId = authenticateChambersNode(token, authorization)
 			?: return response("unauthorized", "仅测试服务器可以领取 Minecraft 测试请求。", HttpStatus.UNAUTHORIZED)
 		val name = request.name
@@ -190,12 +198,41 @@ class RegistrationVerificationController(
 		}.toString())
 	}
 
+	@PostMapping("/minecraft/status")
+	fun minecraftSessionStatus(
+		@RequestBody request: MinecraftVerificationStatusRequest
+	): ResponseEntity<String> {
+		chambersUnavailable()?.let { return it }
+		val sessionId = request.sessionId
+		val name = request.name
+		val uid = request.uid
+		if (sessionId.isNullOrBlank() || !isUsername(name) || uid == null || uid <= 0) {
+			return response("invalid_registration_data", "Minecraft 测试会话查询格式无效。", HttpStatus.BAD_REQUEST)
+		}
+		val session = minecraftSessionService.status(sessionId, name!!, uid)
+			?: return response(
+				"invalid_minecraft_session",
+				"Minecraft 测试会话无效或已过期。",
+				HttpStatus.GONE
+			)
+		return ri.GeneralHttpHeader(JsonObject().apply {
+			addProperty("sessionId", session.id)
+			addProperty("expiresAt", session.expiresAt)
+			addProperty("state", session.state.name.lowercase())
+			if (session.state == MinecraftRegistrationSessionState.COMPLETED) {
+				addProperty("passed", session.passed == true)
+				if (session.passed == true) addProperty("verificationToken", session.id)
+			}
+		}.toString())
+	}
+
 	@PostMapping("/minecraft/result")
 	fun submitMinecraftResult(
 		@RequestHeader("token", required = false) token: String?,
 		@RequestHeader(HttpHeaders.AUTHORIZATION, required = false) authorization: String?,
 		@RequestBody request: MinecraftVerificationResultRequest
 	): ResponseEntity<String> {
+		chambersUnavailable()?.let { return it }
 		val nodeId = authenticateChambersNode(token, authorization)
 			?: return response("unauthorized", "仅测试服务器可以提交 Minecraft 测试结果。", HttpStatus.UNAUTHORIZED)
 		if (request.sessionId.isNullOrBlank() || !isUsername(request.name) || request.passed == null) {
@@ -224,6 +261,14 @@ class RegistrationVerificationController(
 		if (node.role != Role.SERVER || node.name.lowercase() !in allowedChambersNodeNames) return null
 		return node.id
 	}
+
+	private fun chambersUnavailable(): ResponseEntity<String>? =
+		if (chambersEnabled) null
+		else response(
+			"minecraft_verification_unavailable",
+			"Chamber 世界测试暂未开放。",
+			HttpStatus.SERVICE_UNAVAILABLE
+		)
 
 	private fun isUsername(value: String?): Boolean =
 		value != null && USERNAME.matches(value)

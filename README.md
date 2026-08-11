@@ -8,8 +8,6 @@ This program contains these features:
 ## Future RoadMaps
 More codes in Kotlin
 
-Rankings (Like destroy & place) with QPlugin
-
 DIY player card with QCommunity WEB
 
 Add Discord support
@@ -115,6 +113,7 @@ GET `/qo/download/registry?name=glowingstone124` ->
 The OpenAI-compatible non-stream chat endpoint can execute built-in tools before returning the final assistant message.
 
 - `get_server_status`: query Minecraft server status and player counts.
+- `get_player_rankings`: query mining, placement, and cumulative playtime leaderboards.
 - `query_metro_lines`: search metro lines, stations, sections, and signal coordinates.
 - `search_minecraft_knowledge`: search the configured RAG knowledge base for Minecraft/QO information.
 - `add_memory`: create or update a structured per-group long-term memory.
@@ -131,18 +130,18 @@ Related environment variables:
 - `LLM_SYSTEM_PROMPT_FILE`: system prompt file. Linux inotify events, atomic replacements, Docker bind mounts, and Kubernetes ConfigMap/Secret-style replacements are reloaded without restarting the API; invalid or blank updates keep the previous valid prompt.
 - `LLM_GROUP_SUMMARY_ENABLED`: enable per-group rolling summaries for messages older than the recent window, default `true`.
 - `LLM_GROUP_SUMMARY_DIR`: persistent rolling-summary directory, default `data/llm/summaries`.
-- `LLM_GROUP_CONTEXT_RECENT_MESSAGES`: number of newest raw group messages retained, default `80`.
-- `LLM_GROUP_CONTEXT_RECENT_CHARS`: maximum characters for newest raw group messages, default `30000`.
-- `LLM_GROUP_CONTEXT_PENDING_CHARS`: maximum unsummarized older-message characters retained while waiting for the next summary update, default `4000`.
-- `LLM_GROUP_SUMMARY_MIN_NEW_MESSAGES`: newly aged messages required before updating an existing summary, default `10`.
-- `LLM_GROUP_SUMMARY_MIN_NEW_CHARS`: newly aged characters required before updating an existing summary, default `3000`.
-- `LLM_GROUP_SUMMARY_MAX_CHARS`: maximum persisted summary characters per group, default `3000`.
+- `LLM_GROUP_CONTEXT_RECENT_MESSAGES`: number of newest raw group messages retained, default `160`.
+- `LLM_GROUP_CONTEXT_RECENT_CHARS`: maximum characters for newest raw group messages, default `60000`.
+- `LLM_GROUP_CONTEXT_PENDING_CHARS`: maximum unsummarized older-message characters retained while waiting for the next summary update, default `8000`.
+- `LLM_GROUP_SUMMARY_MIN_NEW_MESSAGES`: newly aged messages required before updating an existing summary, default `6`.
+- `LLM_GROUP_SUMMARY_MIN_NEW_CHARS`: newly aged characters required before updating an existing summary, default `1500`.
+- `LLM_GROUP_SUMMARY_MAX_CHARS`: maximum persisted summary characters per group, default `5000`.
 - `LLM_GROUP_SUMMARY_TIMEOUT_MS`: maximum time spent updating a summary before falling back to raw pending history, default `15000`.
-- `LLM_MEMORY_CONTEXT_MAX_ITEMS`: maximum relevant memories injected into a request, default `5`.
-- `LLM_MEMORY_CONTEXT_MAX_CHARS`: maximum memory context characters, default `3000`.
-- `LLM_MEMBER_PROFILE_CONTEXT_MAX_ITEMS`: maximum qbot high-activity member profiles injected into one request, default `30`.
-- `LLM_MEMBER_PROFILE_CONTEXT_MAX_FACTS`: maximum self-declared facts accepted from each member profile, default `12`.
-- `LLM_MEMBER_PROFILE_CONTEXT_MAX_CHARS`: maximum total qbot member-profile context characters, default `12000`.
+- `LLM_MEMORY_CONTEXT_MAX_ITEMS`: maximum relevant memories injected into a request, default `10`.
+- `LLM_MEMORY_CONTEXT_MAX_CHARS`: maximum memory context characters, default `6000`.
+- `LLM_MEMBER_PROFILE_CONTEXT_MAX_ITEMS`: maximum qbot high-activity member profiles injected into one request, default `50`.
+- `LLM_MEMBER_PROFILE_CONTEXT_MAX_FACTS`: maximum self-declared facts accepted from each member profile, default `16`.
+- `LLM_MEMBER_PROFILE_CONTEXT_MAX_CHARS`: maximum total qbot member-profile context characters, default `20000`.
 
 QQ group messages are archived in the `llm_chat_history` table through `POST /qo/asking/v1/chat/history`. The bot endpoint also backfills its sliding `group_context`, using stable source IDs and `INSERT IGNORE` for idempotency. The LLM can retrieve older, group-scoped records with the `search_chat_history` tool; results never cross group boundaries.
 - `LLM_TOOLS_ENABLED`: enable built-in tools, default `true`.

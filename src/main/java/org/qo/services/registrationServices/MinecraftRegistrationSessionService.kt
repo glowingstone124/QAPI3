@@ -70,6 +70,13 @@ class MinecraftRegistrationSessionService {
 	fun complete(sessionId: String, name: String, nodeId: Int, passed: Boolean): MinecraftRegistrationSession? {
 		cleanup()
 		val current = sessionsById[sessionId] ?: return null
+		if (current.state == MinecraftRegistrationSessionState.COMPLETED) {
+			return current.takeIf {
+				it.claimedByNodeId == nodeId &&
+					it.name.equals(name, ignoreCase = true) &&
+					it.passed == passed
+			}
+		}
 		if (current.state != MinecraftRegistrationSessionState.CLAIMED
 			|| current.claimedByNodeId != nodeId
 			|| !current.name.equals(name, ignoreCase = true)
@@ -87,6 +94,34 @@ class MinecraftRegistrationSessionService {
 	internal fun get(sessionId: String): MinecraftRegistrationSession? {
 		cleanup()
 		return sessionsById[sessionId]
+	}
+
+	@Synchronized
+	fun status(sessionId: String, name: String, uid: Long): MinecraftRegistrationSession? {
+		cleanup()
+		return sessionsById[sessionId]?.takeIf {
+			it.name.equals(name, ignoreCase = true) && it.uid == uid
+		}
+	}
+
+	/**
+	 * Atomically consumes a passed session as the one-time registration proof.
+	 * Failed, unfinished, mismatched, and already-consumed sessions are rejected.
+	 */
+	@Synchronized
+	fun consumePassed(sessionId: String?, name: String?, uid: Long?): Boolean {
+		cleanup()
+		if (sessionId.isNullOrBlank() || name.isNullOrBlank() || uid == null) return false
+		val session = sessionsById[sessionId] ?: return false
+		if (
+			session.state != MinecraftRegistrationSessionState.COMPLETED ||
+			session.passed != true ||
+			!session.name.equals(name, ignoreCase = true) ||
+			session.uid != uid
+		) return false
+		if (!sessionsById.remove(session.id, session)) return false
+		sessionIdByName.remove(normalize(session.name), session.id)
+		return true
 	}
 
 	private fun cleanup() {

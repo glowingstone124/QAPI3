@@ -89,6 +89,25 @@ Response: JSON array of objects with fields: `title`, `date`, `author`, `summary
 ### `GET /qo/download/statpic`
 Returns a PNG image (`output.png`).
 
+### `GET /qo/rankings`
+Returns the mining, placement, and cumulative playtime leaderboards. Optional query parameter
+`limit` defaults to `50` and is capped at `100`.
+
+Response (example):
+```json
+{
+  "generatedAt": 1700000000000,
+  "rankings": {
+    "destroy": [{"rank": 1, "name": "Steve", "value": 1200, "unit": "blocks"}],
+    "place": [{"rank": 1, "name": "Alex", "value": 900, "unit": "blocks"}],
+    "playtime": [{"rank": 1, "name": "Steve", "value": 3600, "unit": "minutes"}]
+  }
+}
+```
+
+Legacy object-map endpoints remain available at `/qo/destroy/download`, `/qo/place/download`,
+and `/qo/playtime/download`.
+
 ---
 
 ## Messaging

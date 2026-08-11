@@ -5,6 +5,7 @@ import com.google.gson.JsonObject
 import org.qo.orm.UserORM
 import org.qo.datas.Nodes
 import org.springframework.stereotype.Service
+import java.util.concurrent.ConcurrentHashMap
 
 @Service
 class Status() {
@@ -21,7 +22,7 @@ class Status() {
         addProperty("reason", "no old status found")
     }
 
-    val statusMap = hashMapOf<Int, JsonObject>()
+    val statusMap = ConcurrentHashMap<Int, JsonObject>()
 
     fun upload(input: String, header: String) {
         val serverId = nodes.getServerFromToken(header)
@@ -31,9 +32,9 @@ class Status() {
     }
 
     fun download(id: Int): JsonObject {
-        return statusMap[id]?.apply {
+        return statusMap[id]?.deepCopy()?.apply {
             addProperty("totalcount", userORM.count())
-        } ?: fallbackStatus
+        } ?: fallbackStatus.deepCopy()
     }
 
     fun countOnline(): Int {

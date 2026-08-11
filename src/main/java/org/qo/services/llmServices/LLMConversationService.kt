@@ -7,7 +7,7 @@ import java.util.concurrent.ConcurrentHashMap
 
 @Service
 class LLMConversationService {
-	private val maxTurns = readInt("LLM_HISTORY_MAX_TURNS", 8).coerceIn(0, 30)
+	private val maxTurns = readInt("LLM_HISTORY_MAX_TURNS", 12).coerceIn(0, 30)
 	private val ttlMs = readLong("LLM_HISTORY_TTL_MS", 30 * 60 * 1000L).coerceAtLeast(60_000L)
 	private val conversations = ConcurrentHashMap<String, Conversation>()
 

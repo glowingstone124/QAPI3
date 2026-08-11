@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RestController
 import org.springframework.web.bind.annotation.RequestHeader
+import org.springframework.web.bind.annotation.RequestParam
 
 @RestController
 class RankingController(
@@ -16,6 +17,13 @@ class RankingController(
 	private val ri: ReturnInterface,
 	private val nodes: Nodes
 ) {
+	@GetMapping("/qo/rankings", "/qo/rankings/")
+	fun leaderboards(
+		@RequestParam(required = false, defaultValue = "50") limit: Int
+	): ResponseEntity<String> {
+		return ri.GeneralHttpHeader(service.leaderboards(limit).toString())
+	}
+
 	@GetMapping("/qo/place/download", "/qo/place/download/")
 	fun downloadPlace(): ResponseEntity<String> {
 		return ri.GeneralHttpHeader(service.download(RankingKind.PLACE))
@@ -30,6 +38,11 @@ class RankingController(
 	@GetMapping("/qo/destroy/download", "/qo/destroy/download/")
 	fun downloadDestroy(): ResponseEntity<String> {
 		return ri.GeneralHttpHeader(service.download(RankingKind.DESTROY))
+	}
+
+	@GetMapping("/qo/playtime/download", "/qo/playtime/download/")
+	fun downloadPlaytime(): ResponseEntity<String> {
+		return ri.GeneralHttpHeader(service.download(RankingKind.PLAYTIME))
 	}
 
 	@PostMapping("/qo/destroy/upload", "/qo/destroy/upload/")

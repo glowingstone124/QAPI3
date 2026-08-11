@@ -7,6 +7,7 @@ import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import org.qo.services.gameStatusService.Status
 import org.qo.services.metroServices.MetroServiceImpl
+import org.qo.services.rankingServices.RankingService
 import org.qo.services.transportationServices.Dimension
 import org.qo.services.transportationServices.LineType
 import org.qo.services.transportationServices.RouteConstraints
@@ -23,6 +24,7 @@ class LLMToolService(
 	private val ragService: RAGService,
 	private val llmMemoryService: LLMMemoryService,
 	private val chatHistoryService: LLMChatHistoryService,
+	private val rankingService: RankingService,
 ) {
 	private val gson: Gson = GsonBuilder().disableHtmlEscaping().create()
 	private val maxMetroResults = readInt("LLM_TOOL_METRO_MAX_RESULTS", 12).coerceIn(1, 50)
@@ -41,6 +43,16 @@ class LLMToolService(
 				"server_name" to property(
 					type = "string",
 					description = "服务器名称，可选 survival、生存、creative、创造。"
+				),
+			)
+		))
+		add(functionTool(
+			name = "get_player_rankings",
+			description = "查询 QO 玩家挖掘方块、放置方块和累计在线时长榜单。用户询问榜单、排行、谁挖得最多、谁在线最久时使用。",
+			properties = linkedMapOf(
+				"limit" to property(
+					type = "integer",
+					description = "每个榜单返回的人数，默认 10，最大 20。"
 				),
 			)
 		))
@@ -188,6 +200,7 @@ class LLMToolService(
 		return runCatching {
 			when (name) {
 				"get_server_status" -> getServerStatus(args)
+				"get_player_rankings" -> getPlayerRankings(args)
 				"query_metro_lines" -> queryMetroLines(args)
 				"search_minecraft_knowledge" -> searchMinecraftKnowledge(args, context.groupId)
 				"search_chat_history" -> searchChatHistory(args, context.groupId)
@@ -197,6 +210,11 @@ class LLMToolService(
 				else -> errorResult("unknown_tool", "未知工具：$name")
 			}
 		}.getOrElse { errorResult("tool_error", it.message ?: "工具执行失败") }
+	}
+
+	private fun getPlayerRankings(args: JsonObject): String {
+		val limit = args.get("limit")?.takeIf { !it.isJsonNull }?.asInt ?: 10
+		return rankingService.leaderboards(limit.coerceIn(1, 20)).toString()
 	}
 
 	private fun searchChatHistory(args: JsonObject, requesterGroupId: Long?): String {

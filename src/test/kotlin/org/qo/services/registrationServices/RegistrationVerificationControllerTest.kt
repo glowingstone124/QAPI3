@@ -22,6 +22,7 @@ import org.springframework.http.MediaType
 		MinecraftRegistrationSessionService::class,
 		ReturnInterface::class
 	],
+	properties = ["qapi.registration.chambers-enabled=true"],
 	webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT
 )
 @AutoConfigureWebTestClient
@@ -33,19 +34,17 @@ class RegistrationVerificationControllerTest {
 	lateinit var nodes: Nodes
 
 	@Test
-	fun methodsExposeLegacyQuizAndReservedMinecraftOption() {
+	fun methodsExposeQuizAndMinecraftOptions() {
 		webTestClient.get().uri("/qo/registration/verification-methods")
 			.exchange()
 			.expectStatus().isOk
 			.expectBody()
 			.jsonPath("$.defaultMethod").isEqualTo("quiz")
 			.jsonPath("$.methods[0].id").isEqualTo("quiz")
-			.jsonPath("$.methods[0].available").isEqualTo(true)
-			.jsonPath("$.methods[0].questionCount").isEqualTo(10)
-			.jsonPath("$.methods[0].passingScore").isEqualTo(6)
 			.jsonPath("$.methods[1].id").isEqualTo("minecraft")
-			.jsonPath("$.methods[1].available").isEqualTo(false)
-			.jsonPath("$.methods[1].state").isEqualTo("reserved")
+			.jsonPath("$.methods[1].available").isEqualTo(true)
+			.jsonPath("$.methods[1].state").isEqualTo("available")
+			.jsonPath("$.methods[1].serverAddress").isEqualTo("qoriginal.vip")
 	}
 
 	@Test
@@ -156,5 +155,15 @@ class RegistrationVerificationControllerTest {
 			.expectBody()
 			.jsonPath("$.state").isEqualTo("completed")
 			.jsonPath("$.passed").isEqualTo(true)
+
+		webTestClient.post().uri("/qo/registration/minecraft/status")
+			.contentType(MediaType.APPLICATION_JSON)
+			.bodyValue("""{"sessionId":"$sessionId","name":"Alex_123","uid":123456}""")
+			.exchange()
+			.expectStatus().isOk
+			.expectBody()
+			.jsonPath("$.state").isEqualTo("completed")
+			.jsonPath("$.passed").isEqualTo(true)
+			.jsonPath("$.verificationToken").isEqualTo(sessionId)
 	}
 }

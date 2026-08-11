@@ -18,7 +18,7 @@ enum class RegistrationVerificationMethod(
 		id = "minecraft",
 		displayName = "Minecraft 世界测试",
 		description = "进入 Minecraft 世界完成交互测试。",
-		available = false,
+		available = true,
 		legacy = false
 	);
 
@@ -44,4 +44,10 @@ data class MinecraftVerificationResultRequest(
 
 data class MinecraftVerificationClaimRequest(
 	val name: String?
+)
+
+data class MinecraftVerificationStatusRequest(
+	val sessionId: String?,
+	val name: String?,
+	val uid: Long?
 )

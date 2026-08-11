@@ -20,8 +20,8 @@ class LLMMemoryService @Autowired constructor(private val repository: LLMMemoryR
 
 	private var config = Config(
 		legacyKnowledgeDir = Path.of(System.getenv("RAG_KNOWLEDGE_DIR") ?: "data/llm/rag"),
-		contextMaxItems = readInt("LLM_MEMORY_CONTEXT_MAX_ITEMS", 5).coerceIn(1, 20),
-		contextMaxChars = readInt("LLM_MEMORY_CONTEXT_MAX_CHARS", 3000).coerceAtLeast(500),
+		contextMaxItems = readInt("LLM_MEMORY_CONTEXT_MAX_ITEMS", 10).coerceIn(1, 20),
+		contextMaxChars = readInt("LLM_MEMORY_CONTEXT_MAX_CHARS", 6000).coerceAtLeast(500),
 	)
 	private val locks = ConcurrentHashMap<Long, Any>()
 

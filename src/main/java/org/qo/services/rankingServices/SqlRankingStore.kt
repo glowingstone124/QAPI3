@@ -5,10 +5,12 @@ import org.springframework.stereotype.Service
 
 @Service
 class SqlRankingStore : RankingStore {
-	override fun read(kind: RankingKind): Map<String, Long> {
-		val sql = "SELECT username, ${kind.columnName} FROM users WHERE ${kind.columnName} > 0 ORDER BY ${kind.columnName} DESC"
+	override fun read(kind: RankingKind, limit: Int): Map<String, Long> {
+		val sql = "SELECT username, ${kind.columnName} FROM users WHERE ${kind.columnName} > 0 " +
+			"ORDER BY ${kind.columnName} DESC, username ASC LIMIT ?"
 		ConnectionPool.getConnection().use { connection ->
 			connection.prepareStatement(sql).use { statement ->
+				statement.setInt(1, limit.coerceIn(1, 100))
 				statement.executeQuery().use { resultSet ->
 					val result = linkedMapOf<String, Long>()
 					while (resultSet.next()) {

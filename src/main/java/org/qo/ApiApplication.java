@@ -15,11 +15,13 @@ import org.qo.services.proxyRelatedServices.ProxyStatus;
 import org.qo.services.registrationServices.RegistrationVerificationMethod;
 import org.qo.services.registrationServices.RegistrationQuizProof;
 import org.qo.services.registrationServices.RegistrationQuizService;
+import org.qo.services.registrationServices.MinecraftRegistrationSessionService;
 import org.qo.redis.Configuration;
 import org.qo.services.messageServices.Msg;
 import org.qo.services.gameStatusService.Status;
 import org.qo.utils.*;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.core.io.Resource;
@@ -61,10 +63,12 @@ public class ApiApplication {
     public IPWhitelistServices ipWhitelistServices;
     private final Nodes nodes;
     private final RegistrationQuizService registrationQuizService;
+    private final MinecraftRegistrationSessionService minecraftRegistrationSessionService;
+    private final boolean chambersEnabled;
     private final RecentLoginService recentLoginService;
 
     @Autowired
-    public ApiApplication(UAUtil uaUtil, ReturnInterface ri, Status status, Login login, IPWhitelistServices ipWhitelistServices, ProxyRelatedImpl proxyRelatedImpl, UserProcess userProcess, Nodes nodes, RegistrationQuizService registrationQuizService, RecentLoginService recentLoginService) {
+    public ApiApplication(UAUtil uaUtil, ReturnInterface ri, Status status, Login login, IPWhitelistServices ipWhitelistServices, ProxyRelatedImpl proxyRelatedImpl, UserProcess userProcess, Nodes nodes, RegistrationQuizService registrationQuizService, MinecraftRegistrationSessionService minecraftRegistrationSessionService, RecentLoginService recentLoginService, @Value("${qapi.registration.chambers-enabled:false}") boolean chambersEnabled) {
         this.ri = ri;
         this.ua = uaUtil;
         this.status = status;
@@ -74,6 +78,8 @@ public class ApiApplication {
         this.proxyRelatedImpl = proxyRelatedImpl;
         this.nodes = nodes;
         this.registrationQuizService = registrationQuizService;
+        this.minecraftRegistrationSessionService = minecraftRegistrationSessionService;
+        this.chambersEnabled = chambersEnabled;
         this.recentLoginService = recentLoginService;
     }
 
@@ -257,11 +263,24 @@ public class ApiApplication {
             return ri.failed("invalid verification method");
         }
         if (verificationMethod == RegistrationVerificationMethod.MINECRAFT) {
-            JsonObject response = new JsonObject();
-            response.addProperty("code", "minecraft_verification_reserved");
-            response.addProperty("message", "Minecraft 世界测试接口已预留，当前尚未开放。");
-            response.addProperty("state", "reserved");
-            return ri.GeneralHttpHeader(response.toString(), HttpStatus.NOT_IMPLEMENTED);
+            if (!chambersEnabled) {
+                JsonObject response = new JsonObject();
+                response.addProperty("code", "minecraft_verification_unavailable");
+                response.addProperty("message", "Chamber 世界测试暂未开放。");
+                return ri.GeneralHttpHeader(response.toString(), HttpStatus.SERVICE_UNAVAILABLE);
+            }
+            boolean verified = minecraftRegistrationSessionService.consumePassed(
+                    registration.verificationToken(),
+                    registration.name(),
+                    registration.uid()
+            );
+            if (!verified) {
+                JsonObject response = new JsonObject();
+                response.addProperty("code", "minecraft_verification_required");
+                response.addProperty("message", "Minecraft 世界测试未通过、已过期或已使用。");
+                return ri.GeneralHttpHeader(response.toString(), HttpStatus.FORBIDDEN);
+            }
+            return regMinecraftUser(registration.name(), registration.uid(), request, registration.password(), 0);
         }
         RegistrationQuizProof proof = registrationQuizService.consumeProof(
                 registration.verificationToken(),

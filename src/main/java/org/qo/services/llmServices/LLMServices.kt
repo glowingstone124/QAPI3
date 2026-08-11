@@ -792,6 +792,7 @@ class LLMServices(
 			- 优先根据知识库资料回答；资料没有覆盖时说明缺少依据。
 			工具使用：
 			- 用户询问服务器当前人数、在线人数、MSPT、服务器状态时，使用 get_server_status。
+			- 用户询问挖掘、放置、在线时长榜单或玩家排行时，使用 get_player_rankings。
 			- 用户询问地铁线路、站点、区间、坐标时，使用 query_metro_lines。
 			- 多轮交通追问时，结合聊天历史补全上一条路线的起终点，并用 query_metro_lines 重新查询。
 			- 用户询问 Minecraft、QO 玩法、指令、规则资料时，可以使用 search_minecraft_knowledge。
