@@ -194,4 +194,5 @@ data class Message(
     val sender: String,
     val time: Long,
     val images: List<String> = emptyList(),
+    val id: String? = null,
 )

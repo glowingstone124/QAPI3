@@ -26,6 +26,7 @@ data class Node(
 }
 
 data class MessageIn(
+    @SerializedName("id") val id: String? = null,
     @SerializedName("message") val message: String,
     @SerializedName("from") val from: Int,
     @SerializedName("token") val token: String,
@@ -36,6 +37,8 @@ data class MessageIn(
 ) {
     fun doHideToken() : JsonObject {
         return JsonObject().apply {
+            id?.trim()?.takeIf { it.isNotEmpty() && it.length <= MAX_MESSAGE_ID_LENGTH }
+                ?.let { addProperty("id", it) }
             addProperty("message", message)
             addProperty("from", from)
             addProperty("sender", sender)
@@ -65,6 +68,7 @@ private fun isHttpUrl(value: String): Boolean =
 
 private const val MAX_IMAGES_PER_MESSAGE = 8
 private const val MAX_IMAGE_URL_LENGTH = 2048
+private const val MAX_MESSAGE_ID_LENGTH = 256
 
 enum class Role {
     SERVER,

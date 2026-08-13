@@ -8,6 +8,7 @@ class MessageInTest {
 	@Test
 	fun `message output keeps only safe image links`() {
 		val message = MessageIn(
+			id = "qq:946085440:123",
 			message = "[图片]",
 			from = 0,
 			token = "secret",
@@ -26,6 +27,7 @@ class MessageInTest {
 
 		assertEquals(1, images.size())
 		assertEquals("http://baidu.com/1.jpg", images[0].asString)
+		assertEquals("qq:946085440:123", output.get("id").asString)
 		assertEquals(false, output.has("token"))
 	}
 
