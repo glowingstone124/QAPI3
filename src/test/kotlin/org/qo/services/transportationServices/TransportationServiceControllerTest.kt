@@ -1,5 +1,6 @@
 package org.qo.services.transportationServices
 
+import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Test
 import org.mockito.Mockito
 import org.qo.TestApiApplication
@@ -12,7 +13,7 @@ import org.springframework.test.web.reactive.server.WebTestClient
 
 @SpringBootTest(
 	classes = [TestApiApplication::class, TransportationServiceController::class],
-	webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT
+	webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
 )
 @AutoConfigureWebTestClient
 class TransportationServiceControllerTest {
@@ -23,12 +24,12 @@ class TransportationServiceControllerTest {
 	lateinit var service: TransportationServiceImpl
 
 	@Test
-	fun getStationById_returnsStation() {
+	fun getStationById_returnsStation() = runTest {
 		val station = Station(
 			NAME = "Central",
 			ID = "S1",
 			SCREEN_LOCATION = arrayOf(Location(1.0, 2.0, 3.0, Dimension.OVERWORLD)),
-			NAME_EN = "Central"
+			NAME_EN = "Central",
 		)
 		Mockito.`when`(service.getStationById("S1")).thenReturn(station)
 
@@ -43,7 +44,7 @@ class TransportationServiceControllerTest {
 	}
 
 	@Test
-	fun getStationById_returnsNotFoundPayloadWhenMissing() {
+	fun getStationById_returnsNotFoundPayloadWhenMissing() = runTest {
 		Mockito.`when`(service.getStationById("missing")).thenReturn(null)
 
 		webTestClient.get()
@@ -67,7 +68,7 @@ class TransportationServiceControllerTest {
 	}
 
 	@Test
-	fun getLineDetailById_returnsLineAndTransferLines() {
+	fun getLineDetailById_returnsLineAndTransferLines() = runTest {
 		val detail = LineDetail(
 			line = TransferLineInfo(
 				id = 1,
@@ -75,7 +76,7 @@ class TransportationServiceControllerTest {
 				dimension = Dimension.OVERWORLD,
 				name = "Metro A",
 				nameEn = "Metro A",
-				color = "#ff0000"
+				color = "#ff0000",
 			),
 			stations = listOf(
 				LineStationDetail(
@@ -89,11 +90,11 @@ class TransportationServiceControllerTest {
 							dimension = Dimension.NETHER,
 							name = "Rapid B",
 							nameEn = "Rapid B",
-							color = "#00ff00"
-						)
-					)
-				)
-			)
+							color = "#00ff00",
+						),
+					),
+				),
+			),
 		)
 		Mockito.`when`(service.queryLineDetailById(1)).thenReturn(detail)
 
@@ -112,10 +113,10 @@ class TransportationServiceControllerTest {
 	}
 
 	@Test
-	fun calculateRoute_returnsRouteResult() {
+	fun calculateRoute_returnsRouteResult() = runTest {
 		val expectedConstraints = RouteConstraints(
 			bannedDimensions = setOf(Dimension.THE_END, Dimension.OVERWORLD),
-			bannedLineTypes = setOf(LineType.WALK)
+			bannedLineTypes = setOf(LineType.WALK),
 		)
 		val routeResult = RouteResult(
 			stationIds = listOf("S1", "S2"),
@@ -129,29 +130,23 @@ class TransportationServiceControllerTest {
 					lineType = LineType.METRO,
 					color = "#000000",
 					stationIds = listOf("S1", "S2"),
-					time = 30
-				)
+					time = 30,
+				),
 			),
 			transfers = emptyList(),
 			totalTime = 30,
-			totalStops = 1
+			totalStops = 1,
 		)
-		Mockito.`when`(
-			service.calculateRoute(
-				"S1",
-				"S2",
-				expectedConstraints
-			)
-		).thenReturn(routeResult)
+		Mockito.`when`(service.calculateRoute("S1", "S2", expectedConstraints)).thenReturn(routeResult)
 
-			val body = """
-				{
-					"start": "S1",
-					"end": "S2",
-					"exclude_dims": ["minecraft:the_end", "overworld"],
-					"exclude_types": ["walk"]
-				}
-			""".trimIndent()
+		val body = """
+			{
+				"start": "S1",
+				"end": "S2",
+				"exclude_dims": ["minecraft:the_end", "overworld"],
+				"exclude_types": ["walk"]
+			}
+		""".trimIndent()
 
 		webTestClient.post()
 			.uri("/qo/transportation/calculate")
@@ -163,10 +158,6 @@ class TransportationServiceControllerTest {
 			.jsonPath("$.totalStops").isEqualTo(1)
 			.jsonPath("$.totalTime").isEqualTo(30)
 
-		Mockito.verify(service).calculateRoute(
-			"S1",
-			"S2",
-			expectedConstraints
-		)
+		Mockito.verify(service).calculateRoute("S1", "S2", expectedConstraints)
 	}
 }

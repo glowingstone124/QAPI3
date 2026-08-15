@@ -1,7 +1,15 @@
 package org.qo.services.llmServices
 
-import jakarta.annotation.PostConstruct
+import jakarta.annotation.PreDestroy
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.boot.context.event.ApplicationReadyEvent
+import org.springframework.context.event.EventListener
 import org.springframework.stereotype.Service
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
@@ -23,16 +31,28 @@ class LLMMemoryService @Autowired constructor(private val repository: LLMMemoryR
 		contextMaxItems = readInt("LLM_MEMORY_CONTEXT_MAX_ITEMS", 10).coerceIn(1, 20),
 		contextMaxChars = readInt("LLM_MEMORY_CONTEXT_MAX_CHARS", 6000).coerceAtLeast(500),
 	)
-	private val locks = ConcurrentHashMap<Long, Any>()
+	private val locks = ConcurrentHashMap<Long, Mutex>()
+	private val migrationScope = CoroutineScope(SupervisorJob())
 
 	internal constructor(repository: LLMMemoryRepository, config: Config) : this(repository) {
 		this.config = config
 	}
 
-	@PostConstruct
-	fun migrateLegacyMemory() {
+	@EventListener(ApplicationReadyEvent::class)
+	fun scheduleLegacyMemoryMigration() {
+		migrationScope.launch {
+			migrateLegacyMemory()
+		}
+	}
+
+	@PreDestroy
+	fun shutdown() {
+		migrationScope.cancel()
+	}
+
+	suspend fun migrateLegacyMemory() {
 		if (repository.isMigrationComplete(LEGACY_MIGRATION_KEY)) return
-		runCatching {
+		try {
 			var imported = 0
 			legacyMemoryFiles().forEach { (groupId, path) ->
 				Files.readAllLines(path, StandardCharsets.UTF_8).forEach lineLoop@{ line ->
@@ -63,12 +83,12 @@ class LLMMemoryService @Autowired constructor(private val repository: LLMMemoryR
 			}
 			repository.markMigrationComplete(LEGACY_MIGRATION_KEY)
 			println("[LLM] legacy memory migration completed; imported=$imported")
-		}.onFailure {
-			println("[LLM] legacy memory migration failed and will retry on next startup: ${it.message}")
+		} catch (error: Exception) {
+			println("[LLM] legacy memory migration failed and will retry on next startup: ${error.message}")
 		}
 	}
 
-	fun upsertMemory(
+	suspend fun upsertMemory(
 		groupId: Long,
 		subject: String,
 		memoryKey: String,
@@ -83,7 +103,7 @@ class LLMMemoryService @Autowired constructor(private val repository: LLMMemoryR
 		val normalizedFact = normalize(fact).take(2000)
 		val normalizedCategory = normalizeCategory(category)
 		if (normalizedSubject.isBlank() || normalizedKey.isBlank() || normalizedFact.isBlank()) return null
-		return synchronized(lockFor(groupId)) {
+		return lockFor(groupId).withLock {
 			val now = System.currentTimeMillis()
 			val existing = repository.findByIdentity(groupId, normalizedSubject, normalizedKey)
 			if (existing != null) {
@@ -131,14 +151,14 @@ class LLMMemoryService @Autowired constructor(private val repository: LLMMemoryR
 		}
 	}
 
-	fun search(groupId: Long, query: String, limit: Int = config.contextMaxItems): List<LLMMemoryRecord> {
+	suspend fun search(groupId: Long, query: String, limit: Int = config.contextMaxItems): List<LLMMemoryRecord> {
 		val now = System.currentTimeMillis()
 		val records = repository.findByGroup(groupId).filter { it.expiresAt == null || it.expiresAt > now }
 		if (query.isBlank()) return records.sortedByDescending { it.updatedAt }.take(limit.coerceIn(1, 50))
 		return rank(records, query, limit)
 	}
 
-	fun buildContext(groupId: Long?, question: String): String? {
+	suspend fun buildContext(groupId: Long?, question: String): String? {
 		if (groupId == null || question.isBlank()) return null
 		val matches = search(groupId, question, config.contextMaxItems)
 		if (matches.isEmpty()) return null
@@ -158,7 +178,7 @@ class LLMMemoryService @Autowired constructor(private val repository: LLMMemoryR
 		""".trimIndent()
 	}
 
-	fun forget(groupId: Long, memoryId: String?, query: String?): List<LLMMemoryRecord> = synchronized(lockFor(groupId)) {
+	suspend fun forget(groupId: Long, memoryId: String?, query: String?): List<LLMMemoryRecord> = lockFor(groupId).withLock {
 		val records = repository.findByGroup(groupId)
 		val removed = when {
 			!memoryId.isNullOrBlank() -> records.filter { it.id == memoryId }
@@ -241,7 +261,7 @@ class LLMMemoryService @Autowired constructor(private val repository: LLMMemoryR
 		.trim('_')
 		.take(80)
 
-	private fun lockFor(groupId: Long): Any = locks.computeIfAbsent(groupId) { Any() }
+	private fun lockFor(groupId: Long): Mutex = locks.computeIfAbsent(groupId) { Mutex() }
 
 	private companion object {
 		const val LEGACY_MIGRATION_KEY = "legacy-memory-txt-v1"

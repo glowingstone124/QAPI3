@@ -1,12 +1,13 @@
 package org.qo.services.eliteWeaponServices
 
+import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import org.mockito.Mockito
 
 class EliteWeaponImplTest {
 	@Test
-	fun batchedStatsUseOneConditionalUpdate() {
+	fun batchedStatsUseOneConditionalUpdate() = runTest {
 		val db = Mockito.mock(EliteWeaponDB::class.java)
 		Mockito.`when`(db.addWeaponStats("weapon-id", "owner", 125L, 3L)).thenReturn(true)
 		val service = EliteWeaponImpl(db)
@@ -17,7 +18,7 @@ class EliteWeaponImplTest {
 	}
 
 	@Test
-	fun batchedStatsRejectUnknownWeapon() {
+	fun batchedStatsRejectUnknownWeapon() = runTest {
 		val db = Mockito.mock(EliteWeaponDB::class.java)
 		Mockito.`when`(db.addWeaponStats("missing", "owner", 10L, 0L)).thenReturn(false)
 		val service = EliteWeaponImpl(db)

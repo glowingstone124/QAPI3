@@ -32,7 +32,7 @@ class LLMController(private val llmServices: LLMServices) {
 		val stream = runCatching {
 			com.google.gson.JsonParser.parseString(body).asJsonObject.get("stream")?.asBoolean == true
 		}.getOrDefault(false)
-		val useModel = LLMServices.MODELS.fromRequest(model)
+		val useModel = llmServices.modelFromRequest(model)
 			?: return jsonResponse("""{"error":{"message":"请求的模型不存在","type":"invalid_model","code":"invalid_model"}}""", HttpStatus.BAD_REQUEST)
 		return if (stream) {
 			streamResponse(body, requestToken, useModel)
@@ -64,7 +64,7 @@ class LLMController(private val llmServices: LLMServices) {
 	}
 
 	@PostMapping("/v1/chat/history", produces = [MediaType.APPLICATION_JSON_VALUE])
-	fun archiveBotChatHistory(
+	suspend fun archiveBotChatHistory(
 		@RequestHeader("token", required = false) token: String?,
 		@RequestHeader(HttpHeaders.AUTHORIZATION, required = false) authorization: String?,
 		@RequestHeader("X-QQ-Group-ID") qqGroupId: Long,
@@ -90,7 +90,7 @@ class LLMController(private val llmServices: LLMServices) {
 	): ResponseEntity<String> {
 		val requestToken = AuthTokens.resolve(token, authorization)
 			?: return jsonResponse("""{"error":{"message":"缺少或无效的令牌","type":"invalid_token","code":"invalid_token"}}""", HttpStatus.UNAUTHORIZED)
-		val useModel = LLMServices.MODELS.fromRequest(model)
+		val useModel = llmServices.modelFromRequest(model)
 			?: return jsonResponse("""{"error":{"message":"请求的模型不存在","type":"invalid_model","code":"invalid_model"}}""", HttpStatus.BAD_REQUEST)
 		val result = runCatching { llmServices.completeMinecraftChat(body, requestToken, minecraftName, minecraftDim, minecraftHP, useModel) }.getOrElse {
 			LLMNonStreamResult(400, """{"error":{"message":"${it.message ?: "请求格式错误"}","type":"bad_request","code":"bad_request"}}""")
@@ -109,7 +109,7 @@ class LLMController(private val llmServices: LLMServices) {
 		if (requestToken.isNullOrBlank()) {
 			return flowOf(sse("缺少或无效的令牌", "error"))
 		}
-		val useModel = LLMServices.MODELS.fromRequest(model)
+		val useModel = llmServices.modelFromRequest(model)
 			?: return flowOf(sse("请求的模型不存在","error"))
 		val requestBody = llmServices.buildPromptRequest(body, true, useModel)
 		return streamEvents(requestBody, requestToken, useModel)

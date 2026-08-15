@@ -1,5 +1,6 @@
 package org.qo.services.advancementServices
 
+import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Test
 import org.mockito.Mockito
 import org.qo.TestApiApplication
@@ -14,7 +15,7 @@ import org.springframework.test.web.reactive.server.WebTestClient
 
 @SpringBootTest(
 	classes = [TestApiApplication::class, AdvancementServiceController::class],
-	webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT
+	webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
 )
 @AutoConfigureWebTestClient
 class AdvancementServiceControllerTest {
@@ -28,7 +29,7 @@ class AdvancementServiceControllerTest {
 	lateinit var nodes: Nodes
 
 	@Test
-	fun upload_rejectsInvalidProvider() {
+	fun upload_rejectsInvalidProvider() = runTest {
 		Mockito.`when`(nodes.getServerFromToken("bad-token")).thenReturn(-1)
 
 		val body = """
@@ -51,15 +52,11 @@ class AdvancementServiceControllerTest {
 	}
 
 	@Test
-	fun upload_acceptsValidAdvancement() {
+	fun upload_acceptsValidAdvancement() = runTest {
 		val advancement = AdvancementsEnum.fromId(2)!!
 		Mockito.`when`(nodes.getServerFromToken("ok-token")).thenReturn(1)
-		Mockito.`when`(
-			advancementServiceImpl.addAdvancementCompletion(
-				advancement,
-				"alex"
-			)
-		).thenReturn(AdvancementServiceImpl.AddAdvancementResult.SUCCESS)
+		Mockito.`when`(advancementServiceImpl.addAdvancementCompletion(advancement, "alex"))
+			.thenReturn(AdvancementServiceImpl.AddAdvancementResult.SUCCESS)
 
 		val body = """
 			{

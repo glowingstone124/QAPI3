@@ -1,5 +1,6 @@
 package org.qo.services.messageServices
 
+import org.qo.utils.AuthTokens
 import org.qo.utils.ReturnInterface
 import org.qo.datas.Nodes
 import org.qo.utils.UAUtil
@@ -39,7 +40,8 @@ class MsgController @Autowired constructor(
 
     @GetMapping("/qo/msglist/download")
     fun returnMsg(@RequestHeader("Authorization") authorization: String): ResponseEntity<String> {
-        if (nodes.getServerFromToken(authorization.removePrefix("Bearer ")) < 0) {
+        val token = AuthTokens.resolve(null, authorization)
+        if (token == null || nodes.getServerFromToken(token) < 0) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("{\"code\":401}")
         }
         return ri.GeneralHttpHeader(Msg.Companion.get().toString())

@@ -16,7 +16,7 @@ class AffiliatedAccountServicesTest {
 	@Test
 	fun addAffiliatedAccount_createsAccountAndConsumesInviteAtomically() = runBlocking {
 		val successfulOrm = Mockito.mock(AffiliatedAccountORM::class.java) { invocation ->
-			if (invocation.method.name == "createUsingInvite") true
+			if (invocation.method.name == "createUsingInviteAsync") true
 			else Mockito.RETURNS_DEFAULTS.answer(invocation)
 		}
 		val successfulService = AffiliatedAccountServices(successfulOrm, login)
@@ -29,7 +29,7 @@ class AffiliatedAccountServicesTest {
 
 		assertTrue(result)
 		val invocation = Mockito.mockingDetails(successfulOrm).invocations.single {
-			it.method.name == "createUsingInvite"
+			it.method.name == "createUsingInviteAsync"
 		}
 		val account = invocation.arguments.single() as AffiliatedAccountServices.AffiliatedAccount
 		assertEquals("child", account.name)
@@ -39,9 +39,14 @@ class AffiliatedAccountServicesTest {
 
 	@Test
 	fun addAffiliatedAccount_returnsFalseWhenNoInviteCanBeConsumed() = runBlocking {
+		val unsuccessfulOrm = Mockito.mock(AffiliatedAccountORM::class.java) { invocation ->
+			if (invocation.method.name == "createUsingInviteAsync") false
+			else Mockito.RETURNS_DEFAULTS.answer(invocation)
+		}
+		val unsuccessfulService = AffiliatedAccountServices(unsuccessfulOrm, login)
 		Mockito.`when`(login.validate("host-token")).thenReturn(Pair("host", 0))
 
-		val result = service.addAffiliatedAccount(
+		val result = unsuccessfulService.addAffiliatedAccount(
 			"host-token",
 			"""{"name":"child","password":"secret"}"""
 		)
@@ -52,12 +57,12 @@ class AffiliatedAccountServicesTest {
 	@Test
 	fun removeAffiliatedAccount_deletesOnlyForAuthenticatedHost() = runBlocking {
 		Mockito.`when`(login.validate("host-token")).thenReturn(Pair("host", 0))
-		Mockito.`when`(orm.deleteByNameAndHost("child", "host")).thenReturn(true)
+		Mockito.`when`(orm.deleteByNameAndHostAsync("child", "host")).thenReturn(true)
 
 		val result = service.removeAffiliatedAccount("host-token", "child")
 
 		assertTrue(result)
-		Mockito.verify(orm).deleteByNameAndHost("child", "host")
+		Mockito.verify(orm).deleteByNameAndHostAsync("child", "host")
 	}
 
 	@Test
@@ -67,13 +72,13 @@ class AffiliatedAccountServicesTest {
 		val result = service.removeAffiliatedAccount("bad-token", "child")
 
 		assertFalse(result)
-		Mockito.verify(orm, Mockito.never()).deleteByNameAndHost(Mockito.anyString(), Mockito.anyString())
+		Mockito.verify(orm, Mockito.never()).deleteByNameAndHostAsync(Mockito.anyString(), Mockito.anyString())
 	}
 
 	@Test
 	fun getAffiliatedAccount_doesNotExposePasswordHash() = runBlocking {
 		Mockito.`when`(login.validate("host-token")).thenReturn(Pair("host", 0))
-		Mockito.`when`(orm.readByHost("host")).thenReturn(
+		Mockito.`when`(orm.readByHostAsync("host")).thenReturn(
 			listOf(AffiliatedAccountServices.AffiliatedAccount("child", "host", "password-hash"))
 		)
 

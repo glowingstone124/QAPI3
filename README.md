@@ -39,6 +39,24 @@ To add components, sub servers, please add node object in `nodes.json`
 
 and then they can post messages, add new features, etc...
 
+### Database configuration
+
+Database access is managed by Spring Data R2DBC. Connection settings continue
+to come from `data/sql/info.json`:
+
+```json
+{
+  "url": "jdbc:mysql://db.example:3306/qapi",
+  "username": "qapi",
+  "password": "change-me"
+}
+```
+
+The existing `jdbc:mysql:` URL is converted to `r2dbc:mysql:` when the pool is
+created. The original pool defaults (initial/minimum idle 5, maximum 100,
+3-second acquisition timeout, and 60-second eviction interval) are retained;
+do not configure a JDBC `DataSource` for request handling.
+
 ### API Endpoint
 
 GET `/qo/download/status` -> 
@@ -146,9 +164,47 @@ Related environment variables:
 QQ group messages are archived in the `llm_chat_history` table through `POST /qo/asking/v1/chat/history`. The bot endpoint also backfills its sliding `group_context`, using stable source IDs and `INSERT IGNORE` for idempotency. The LLM can retrieve older, group-scoped records with the `search_chat_history` tool; results never cross group boundaries.
 - `LLM_TOOLS_ENABLED`: enable built-in tools, default `true`.
 - `LLM_WEB_SEARCH_ENABLED`: enable DeepSeek server-side web search for non-stream `deepseek-v4-flash` requests, default `true`.
-- `LLM_RESPONSES_API_URL`: optional Responses API endpoint, derived from `LLM_API_URL` by default.
+- `LLM_PROVIDERS_FILE`: provider configuration JSON path, default `data/llm/providers.json`.
+- `LLM_PROVIDER`: selected provider name. If omitted, the JSON `defaultProvider` is used.
+- `LLM_RESPONSES_API_URL`: legacy fallback Responses API endpoint. Provider JSON should use an explicit `responsesUrl`.
+- `LLM_RESPONSES_MODELS`: legacy comma-separated Responses model aliases. Provider JSON should use `responsesModels`.
 - `LLM_TOOL_MAX_ROUNDS`: maximum tool-call loops per request, default `3`.
 - `LLM_TOOL_METRO_MAX_RESULTS`: maximum metro search results returned to the model, default `12`.
+
+Provider configuration example (`data/llm/providers.json`):
+
+```json
+{
+  "defaultProvider": "deepseek",
+  "providers": {
+    "deepseek": {
+      "chatCompletionsUrl": "https://api.deepseek.com/v1/chat/completions",
+      "responsesUrl": "https://api.deepseek.com/v1/responses",
+      "tokenFile": "LLMAPITOKEN",
+      "models": {
+        "fast": "deepseek-v4-flash",
+        "thinking": "deepseek-v4-pro"
+      },
+      "responsesModels": ["fast"]
+    },
+    "another-provider": {
+      "chatCompletionsUrl": "https://example.com/v1/chat/completions",
+      "responsesUrl": "https://example.com/v1/responses",
+      "tokenFile": "data/llm/another-provider.token",
+      "models": {
+        "fast": "provider-fast-model",
+        "thinking": "provider-thinking-model"
+      },
+      "responsesModels": ["fast", "thinking"]
+    }
+  }
+}
+```
+
+`responsesUrl` is always used as written and is never derived from or truncated from
+`chatCompletionsUrl`. Set `LLM_PROVIDER=another-provider` to switch providers.
+`responsesModels` controls which model aliases use the Responses API; `LLM_WEB_SEARCH_ENABLED`
+only controls whether the Responses request includes web search.
 
 ## For Contributors
 

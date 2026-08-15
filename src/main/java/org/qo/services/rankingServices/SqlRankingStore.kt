@@ -1,38 +1,25 @@
 package org.qo.services.rankingServices
 
-import org.qo.datas.ConnectionPool
+import org.qo.datas.ReactiveDatabase
 import org.springframework.stereotype.Service
 
 @Service
-class SqlRankingStore : RankingStore {
-	override fun read(kind: RankingKind, limit: Int): Map<String, Long> {
-		val sql = "SELECT username, ${kind.columnName} FROM users WHERE ${kind.columnName} > 0 " +
-			"ORDER BY ${kind.columnName} DESC, username ASC LIMIT ?"
-		ConnectionPool.getConnection().use { connection ->
-			connection.prepareStatement(sql).use { statement ->
-				statement.setInt(1, limit.coerceIn(1, 100))
-				statement.executeQuery().use { resultSet ->
-					val result = linkedMapOf<String, Long>()
-					while (resultSet.next()) {
-						result[resultSet.getString("username")] = resultSet.getLong(kind.columnName)
-					}
-					return result
-				}
-			}
-		}
+class SqlRankingStore(
+	private val database: ReactiveDatabase,
+) : RankingStore {
+	override suspend fun read(kind: RankingKind, limit: Int): Map<String, Long> {
+		val sql = "SELECT username, ${kind.columnName} FROM users WHERE ${kind.columnName} > 0 ORDER BY ${kind.columnName} DESC, username ASC LIMIT ?"
+		return database.all(sql, listOf(limit.coerceIn(1, 100))) { row ->
+			row.get("username", String::class.java)!! to (row.get(kind.columnName, java.lang.Long::class.java)?.toLong() ?: 0L)
+		}.associateTo(linkedMapOf()) { it }
 	}
 
-	override fun increment(kind: RankingKind, delta: Map<String, Long>): Int {
+	override suspend fun increment(kind: RankingKind, delta: Map<String, Long>): Int {
 		if (delta.isEmpty()) return 0
 		val sql = "UPDATE users SET ${kind.columnName} = COALESCE(${kind.columnName}, 0) + ? WHERE username = ?"
-		ConnectionPool.getConnection().use { connection ->
-			connection.prepareStatement(sql).use { statement ->
-				delta.forEach { (username, amount) ->
-					statement.setLong(1, amount)
-					statement.setString(2, username)
-					statement.addBatch()
-				}
-				return statement.executeBatch().sum()
+		return database.inTransaction {
+			delta.entries.sumOf { (username, amount) ->
+				if (database.execute(sql, listOf(amount, username)) > 0) 1 else 0
 			}
 		}
 	}

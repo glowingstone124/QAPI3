@@ -1,13 +1,14 @@
 package org.qo.services.loginService
 
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withContext
-import org.qo.datas.ConnectionPool
 import org.qo.datas.GsonProvider.gson
+import org.qo.datas.ReactiveDatabase
 import org.qo.orm.LoginToken
 import org.qo.orm.LoginTokenORM
+import org.qo.orm.reactiveDatabase
+import org.qo.orm.unsupportedSyncApi
 import org.springframework.stereotype.Service
+import kotlinx.coroutines.reactor.mono
+import reactor.core.publisher.Mono
 import java.security.SecureRandom
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.io.encoding.Base64
@@ -15,11 +16,21 @@ import kotlin.io.encoding.ExperimentalEncodingApi
 
 @Service
 class Login {
+	private var databaseOverride: ReactiveDatabase? = null
 	val loginTokenORM: LoginTokenORM = LoginTokenORM()
+
+	constructor()
+
+	constructor(database: ReactiveDatabase) : this() {
+		this.databaseOverride = database
+	}
+
+	private val database: ReactiveDatabase
+		get() = reactiveDatabase(databaseOverride)
 
 	private data class CachedLoginHistory(
 		val history: List<LoginLog>,
-		val expiresAt: Long
+		val expiresAt: Long,
 	)
 
 	companion object {
@@ -40,7 +51,7 @@ class Login {
 			trimLoginHistoryCacheIfNeeded()
 			loginHistoryCache[username] = CachedLoginHistory(
 				history = history,
-				expiresAt = System.currentTimeMillis() + loginHistoryCacheTtlMs
+				expiresAt = System.currentTimeMillis() + loginHistoryCacheTtlMs,
 			)
 		}
 
@@ -72,9 +83,11 @@ class Login {
 		return Base64.encode(bytes)
 	}
 
-	fun insertInto(loginToken: String, user: String) = runBlocking {
+	fun insertInto(loginToken: String, user: String): Unit = unsupportedSyncApi("Login.insertInto")
+
+	suspend fun insertIntoAsync(loginToken: String, user: String) {
 		loginTokenORM.create(
-			LoginToken (
+			LoginToken(
 				loginToken,
 				user,
 				System.currentTimeMillis() + 604800000,
@@ -82,80 +95,59 @@ class Login {
 		)
 	}
 
-	/**
-	 * Validate a token is valid or not.
-	 * @return (username,0) if success, (null, 3) if failed.
-	*/
-	suspend fun validate(loginToken: String): Pair<String?,Int> {
+	fun insertIntoReactive(loginToken: String, user: String): Mono<Void> =
+		mono { insertIntoAsync(loginToken, user) }.then()
+
+	suspend fun validate(loginToken: String): Pair<String?, Int> {
 		val result = loginTokenORM.read(loginToken) ?: return Pair(null, 1)
 		if (result.expires < System.currentTimeMillis()) {
 			loginTokenORM.delete(loginToken)
-			return Pair(null,3)
+			return Pair(null, 3)
 		}
-		return Pair(result.user,0)
+		return Pair(result.user, 0)
 	}
 
-	fun insertLoginLog(data: String) {
-		val conn = ConnectionPool.getConnection()
-		val log = gson.fromJson(data, LoginLog::class.java)
-		val sql = "INSERT INTO login_logs(username, time, success) VALUES (?, ?, ?)"
+	fun insertLoginLog(data: String): Unit = unsupportedSyncApi("Login.insertLoginLog")
 
-		conn.use {
-			it.prepareStatement(sql).use { stmt ->
-				stmt.setString(1, log.user)
-				stmt.setLong(2, log.date)
-				stmt.setBoolean(3, log.success)
-				stmt.executeUpdate()
-			}
-		}
+	suspend fun insertLoginLogAsync(data: String) {
+		val log = gson.fromJson(data, LoginLog::class.java)
+		database.execute(
+			"INSERT INTO login_logs(username, time, success) VALUES (?, ?, ?)",
+			listOf(log.user, log.date, log.success),
+		)
 		loginHistoryCache.remove(log.user)
 	}
 
+	fun insertLoginLogReactive(data: String): Mono<Void> =
+		mono { insertLoginLogAsync(data) }.then()
 
-	fun queryLoginHistory(username: String): List<LoginLog> {
+	fun queryLoginHistory(username: String): List<LoginLog> = unsupportedSyncApi("Login.queryLoginHistory")
+
+	suspend fun queryLoginHistoryAsync(username: String): List<LoginLog> {
 		readCachedLoginHistory(username)?.let { return it }
-		val conn = ConnectionPool.getConnection()
-		val sql = """
-            SELECT username, time, success 
-            FROM login_logs 
-            WHERE username = ? 
-            ORDER BY time DESC 
+		return database.all(
+			"""
+            SELECT username, time, success
+            FROM login_logs
+            WHERE username = ?
+            ORDER BY time DESC
             LIMIT 3
-        """
-
-		val result = ArrayList<LoginLog>()
-
-		conn.use {
-			it.prepareStatement(sql).use { stmt ->
-				stmt.setString(1, username)
-				stmt.executeQuery().use { rs ->
-					while (rs.next()) {
-						result.add(
-							LoginLog(
-								user = rs.getString("username"),
-								date = rs.getLong("time"),
-								success = rs.getBoolean("success")
-							)
-						)
-					}
-				}
-			}
-		}
-
-		return result.also {
+        """.trimIndent(),
+			listOf(username),
+		) { row ->
+			LoginLog(
+				user = row.get("username", String::class.java).orEmpty(),
+				date = org.qo.orm.longValue(row.get("time")) ?: 0L,
+				success = org.qo.orm.booleanValue(row.get("success")) ?: false,
+			)
+		}.also {
 			cacheLoginHistory(username, it)
 		}
 	}
-	suspend fun queryLoginHistoryAsync(username: String): List<LoginLog> = withContext(Dispatchers.IO) {
-		queryLoginHistory(username)
-	}
-
-
 
 	data class LoginLog(
 		val user: String,
 		val date: Long,
-		val success: Boolean
+		val success: Boolean,
 	)
-
 }

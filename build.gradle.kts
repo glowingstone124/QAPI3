@@ -38,17 +38,16 @@ dependencies {
 
     implementation("org.springframework.boot:spring-boot-starter")
     implementation("org.springframework.boot:spring-boot-starter-webflux")
+    implementation("org.springframework.boot:spring-boot-starter-data-r2dbc")
     implementation("org.springframework.boot:spring-boot-starter-quartz")
     implementation("org.springframework.boot:spring-boot-starter-actuator")
     implementation("org.springframework.security:spring-security-crypto")
 
     implementation("redis.clients:jedis:3.6.3")
-    implementation("org.xerial:sqlite-jdbc:3.34.0")
     implementation("com.google.code.gson:gson:2.10.1")
     implementation("org.commonmark:commonmark:0.20.0")
-    implementation("com.mysql:mysql-connector-j:8.4.0")
     implementation("org.jetbrains:annotations:23.0.0")
-    implementation("com.alibaba:druid:1.2.22")
+    runtimeOnly("io.asyncer:r2dbc-mysql:1.4.3")
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-reactor")
@@ -62,6 +61,9 @@ dependencies {
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation("org.jetbrains.kotlin:kotlin-test")
     testImplementation("org.mockito:mockito-core")
+    testImplementation("io.r2dbc:r2dbc-h2")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test")
+    testImplementation("io.ktor:ktor-client-mock:$ktorVersion")
 
     implementation("jakarta.mail:jakarta.mail-api:2.1.5")
 }

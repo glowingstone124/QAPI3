@@ -47,7 +47,8 @@ class AuthorityNeededServicesController(
 
 	@PostMapping("/account/frozen")
 	suspend fun frozenQOAccount(@RequestHeader authorization: String, @RequestParam uid: Long): ResponseEntity<String> {
-		if(authorityNeededServicesImpl.frozenQOAccount(authorization, uid)) {
+		val resolvedToken = AuthTokens.resolve(null, authorization) ?: return missingTokenResponse()
+		if(authorityNeededServicesImpl.frozenQOAccount(resolvedToken, uid)) {
 			return ri.GeneralHttpHeader("ok")
 		} else {
 			return ri.GeneralHttpHeader("Failed")
@@ -93,8 +94,8 @@ class AuthorityNeededServicesController(
 	}
 
 	@GetMapping("/account/card")
-	fun getAccountCardInfo(@RequestParam profileUuid: String): ResponseEntity<String> {
-		val result = playerCardCustomizationImpl.getProfileDetail(profileUuid)
+	suspend fun getAccountCardInfo(@RequestParam profileUuid: String): ResponseEntity<String> {
+		val result = playerCardCustomizationImpl.getProfileDetailAsync(profileUuid)
 		if (result == null) {
 			return ri.GeneralHttpHeader(JsonObject().apply {
 				addProperty("error", "no profile found")
@@ -207,7 +208,7 @@ class AuthorityNeededServicesController(
 		}
 		return ReturnInterface().GeneralHttpHeader(
 			playerCardCustomizationImpl
-				.getPlayerCardListAsJson(username!!)
+				.getPlayerCardListAsJsonAsync(username!!)
 				.toString()
 		)
 	}
@@ -215,7 +216,7 @@ class AuthorityNeededServicesController(
 	@GetMapping("/cards/info")
 	suspend fun getCardInfo(@RequestParam id: Long): ResponseEntity<String> {
 		val returnObj = JsonObject()
-		val result = playerCardCustomizationImpl.getCardInformation(id) ?: return ri.GeneralHttpHeader(
+		val result = playerCardCustomizationImpl.getCardInformationAsync(id) ?: return ri.GeneralHttpHeader(
 			returnObj.apply {
 				addProperty("error", "card not found")
 			}.toString()
@@ -225,7 +226,7 @@ class AuthorityNeededServicesController(
 
 	@GetMapping("/cards/all")
 	suspend fun getAllCards(): ResponseEntity<String> {
-		return ri.GeneralHttpHeader(playerCardCustomizationImpl.getAllCards().convertToJsonArray().toString())
+		return ri.GeneralHttpHeader(playerCardCustomizationImpl.getAllCardsAsync().convertToJsonArray().toString())
 	}
 
 	@GetMapping("/avatars/all")

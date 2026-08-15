@@ -4,7 +4,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import jakarta.annotation.PostConstruct;
-import org.qo.datas.Database;
+import org.qo.datas.DatabaseHealth;
 import org.qo.datas.Nodes;
 import org.qo.services.loginService.IPWhitelistServices;
 import org.qo.services.loginService.Login;
@@ -39,11 +39,11 @@ import java.nio.file.Path;
 import java.security.NoSuchAlgorithmException;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.Date;
+import reactor.core.publisher.Mono;
 
 import static org.qo.utils.UserProcess.*;
 
@@ -66,9 +66,10 @@ public class ApiApplication {
     private final MinecraftRegistrationSessionService minecraftRegistrationSessionService;
     private final boolean chambersEnabled;
     private final RecentLoginService recentLoginService;
+    private final DatabaseHealth databaseHealth;
 
     @Autowired
-    public ApiApplication(UAUtil uaUtil, ReturnInterface ri, Status status, Login login, IPWhitelistServices ipWhitelistServices, ProxyRelatedImpl proxyRelatedImpl, UserProcess userProcess, Nodes nodes, RegistrationQuizService registrationQuizService, MinecraftRegistrationSessionService minecraftRegistrationSessionService, RecentLoginService recentLoginService, @Value("${qapi.registration.chambers-enabled:false}") boolean chambersEnabled) {
+    public ApiApplication(UAUtil uaUtil, ReturnInterface ri, Status status, Login login, IPWhitelistServices ipWhitelistServices, ProxyRelatedImpl proxyRelatedImpl, UserProcess userProcess, Nodes nodes, RegistrationQuizService registrationQuizService, MinecraftRegistrationSessionService minecraftRegistrationSessionService, RecentLoginService recentLoginService, DatabaseHealth databaseHealth, @Value("${qapi.registration.chambers-enabled:false}") boolean chambersEnabled) {
         this.ri = ri;
         this.ua = uaUtil;
         this.status = status;
@@ -81,6 +82,7 @@ public class ApiApplication {
         this.minecraftRegistrationSessionService = minecraftRegistrationSessionService;
         this.chambersEnabled = chambersEnabled;
         this.recentLoginService = recentLoginService;
+        this.databaseHealth = databaseHealth;
     }
 
     @PostConstruct
@@ -107,7 +109,7 @@ public class ApiApplication {
         returnObj.addProperty("code", 0);
         returnObj.addProperty("build", Funcs.version);
         returnObj.addProperty("online", status.countOnline() + " server(s)");
-        returnObj.addProperty("sql", Database.SQLAvailable());
+        returnObj.addProperty("sql", databaseHealth.isAvailable());
         returnObj.addProperty("redis", Configuration.INSTANCE.getEnableRedis());
         returnObj.addProperty("proxies", proxyRelatedImpl.getProxies(ProxyStatus.ALIVE).size());
         return ri.GeneralHttpHeader(returnObj.toString());
@@ -115,7 +117,8 @@ public class ApiApplication {
 
     @PostMapping("/qo/alive/upload")
     public ResponseEntity<Void> getAlive(@RequestBody String data, @RequestHeader(value = "Authorization", required = false) String header) {
-        if (header == null || nodes.getServerFromToken(header.replaceFirst("^Bearer ", "")) < 0) {
+        String token = AuthTokens.INSTANCE.resolve(null, header);
+        if (token == null || nodes.getServerFromToken(token) < 0) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
         }
         JsonObject Heartbeat = JsonParser.parseString(data).getAsJsonObject();
@@ -148,34 +151,34 @@ public class ApiApplication {
     }
 
     @PostMapping("/qo/upload/gametimerecord")
-    public ResponseEntity<Void> parser(@RequestParam(name = "name") String name, @RequestParam(name = "time") int time,
+    public Mono<ResponseEntity<Void>> parser(@RequestParam(name = "name") String name, @RequestParam(name = "time") int time,
                                        @RequestHeader("Token") String token) {
-        if (nodes.getServerFromToken(token) < 0) return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
-        handleTime(name, time);
-        return ResponseEntity.noContent().build();
+        if (nodes.getServerFromToken(token) < 0) return Mono.just(ResponseEntity.status(HttpStatus.UNAUTHORIZED).build());
+        return userProcess.handleTime(name, time).thenReturn(ResponseEntity.noContent().build());
     }
 
     @GetMapping("/qo/download/getgametime")
-    public ResponseEntity<String> getTime(@RequestParam(name = "username") String username) {
-        return ri.GeneralHttpHeader(UserProcess.getTime(username).toString());
+    public Mono<ResponseEntity<String>> getTime(@RequestParam(name = "username") String username) {
+        return userProcess.getTime(username).map(timeJson -> ri.GeneralHttpHeader(timeJson.toString()));
     }
 
     @GetMapping("/qo/download/logingreeting")
-    public ResponseEntity<String> loginGreeting(@RequestParam(name = "username") String username) {
-        JsonObject greetJson = new JsonObject();
-        JsonArray onlines = new JsonArray();
-        greetJson.add("time", UserProcess.getTime(username));
-        status.getStatusMap().forEach((id, info) -> {
-            JsonArray singular_users = new JsonArray();
-            info.get("players").getAsJsonArray().forEach((elem) -> singular_users.add(elem.getAsJsonObject().get("name")));
-            JsonObject server_pair = new JsonObject();
-            server_pair.addProperty("id", id);
-            server_pair.add("players", singular_users);
-            onlines.add(server_pair);
+    public Mono<ResponseEntity<String>> loginGreeting(@RequestParam(name = "username") String username) {
+        return userProcess.getTime(username).map(timeJson -> {
+            JsonObject greetJson = new JsonObject();
+            JsonArray onlines = new JsonArray();
+            greetJson.add("time", timeJson);
+            status.getStatusMap().forEach((id, info) -> {
+                JsonArray singular_users = new JsonArray();
+                info.get("players").getAsJsonArray().forEach((elem) -> singular_users.add(elem.getAsJsonObject().get("name")));
+                JsonObject server_pair = new JsonObject();
+                server_pair.addProperty("id", id);
+                server_pair.add("players", singular_users);
+                onlines.add(server_pair);
+            });
+            greetJson.add("online", onlines);
+            return ri.GeneralHttpHeader(greetJson.toString());
         });
-        greetJson.add("online", onlines);
-
-        return ri.GeneralHttpHeader(greetJson.toString());
     }
 
     @RequestMapping("/app/latest")
@@ -229,15 +232,14 @@ public class ApiApplication {
     }
 
     @GetMapping("/qo/download/status")
-    public ResponseEntity<String> returnStatus(Integer id) {
+    public Mono<ResponseEntity<String>> returnStatus(Integer id) {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
 
         int statusId = (id == null) ? 1 : id;
 
-        String statusJson = status.download(statusId).toString();
-
-        return new ResponseEntity<>(statusJson, headers, HttpStatus.OK);
+        return status.downloadReactive(statusId)
+                .map(statusJson -> new ResponseEntity<>(statusJson.toString(), headers, HttpStatus.OK));
     }
 
     /**
@@ -253,21 +255,21 @@ public class ApiApplication {
      * @throws Exception If an error occurs during the processing of the user data.
      */
     @PostMapping(value = "/qo/upload/registry", consumes = MediaType.APPLICATION_JSON_VALUE)
-    public ResponseEntity<String> InsertData(@RequestBody RegisterRequest registration, ServerHttpRequest request) throws Exception {
+    public Mono<ResponseEntity<String>> InsertData(@RequestBody RegisterRequest registration, ServerHttpRequest request) {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
-        if (ua.isCLIToolRequest(request)) return new ResponseEntity<>("failed", headers, HttpStatus.BAD_REQUEST);
+        if (ua.isCLIToolRequest(request)) return Mono.just(new ResponseEntity<>("failed", headers, HttpStatus.BAD_REQUEST));
         RegistrationVerificationMethod verificationMethod =
                 RegistrationVerificationMethod.parse(registration.verificationMethod());
         if (verificationMethod == null) {
-            return ri.failed("invalid verification method");
+            return Mono.just(ri.failed("invalid verification method"));
         }
         if (verificationMethod == RegistrationVerificationMethod.MINECRAFT) {
             if (!chambersEnabled) {
                 JsonObject response = new JsonObject();
                 response.addProperty("code", "minecraft_verification_unavailable");
                 response.addProperty("message", "Chamber 世界测试暂未开放。");
-                return ri.GeneralHttpHeader(response.toString(), HttpStatus.SERVICE_UNAVAILABLE);
+                return Mono.just(ri.GeneralHttpHeader(response.toString(), HttpStatus.SERVICE_UNAVAILABLE));
             }
             boolean verified = minecraftRegistrationSessionService.consumePassed(
                     registration.verificationToken(),
@@ -278,9 +280,9 @@ public class ApiApplication {
                 JsonObject response = new JsonObject();
                 response.addProperty("code", "minecraft_verification_required");
                 response.addProperty("message", "Minecraft 世界测试未通过、已过期或已使用。");
-                return ri.GeneralHttpHeader(response.toString(), HttpStatus.FORBIDDEN);
+                return Mono.just(ri.GeneralHttpHeader(response.toString(), HttpStatus.FORBIDDEN));
             }
-            return regMinecraftUser(registration.name(), registration.uid(), request, registration.password(), 0);
+            return userProcess.regMinecraftUser(registration.name(), registration.uid(), request, registration.password(), 0);
         }
         RegistrationQuizProof proof = registrationQuizService.consumeProof(
                 registration.verificationToken(),
@@ -291,72 +293,82 @@ public class ApiApplication {
             JsonObject response = new JsonObject();
             response.addProperty("code", "quiz_verification_required");
             response.addProperty("message", "答题验证无效、已过期或已使用。");
-            return ri.GeneralHttpHeader(response.toString(), HttpStatus.FORBIDDEN);
+            return Mono.just(ri.GeneralHttpHeader(response.toString(), HttpStatus.FORBIDDEN));
         }
-        return regMinecraftUser(registration.name(), registration.uid(), request, registration.password(), proof.getScore());
+        return userProcess.regMinecraftUser(registration.name(), registration.uid(), request, registration.password(), proof.getScore());
     }
 
     public record RegisterRequest(String name, Long uid, String password, String verificationMethod, String verificationToken) {}
 
     @PostMapping(value = "/qo/upload/confirmation", consumes = MediaType.APPLICATION_JSON_VALUE)
-    public ResponseEntity<String> verifyReg(@RequestBody ConfirmationRequest confirmation,
+    public Mono<ResponseEntity<String>> verifyReg(@RequestBody ConfirmationRequest confirmation,
                                             @RequestHeader("Authorization") String authorization) {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
-        JsonObject statObj = new JsonObject();
-        if (nodes.getServerFromToken(authorization.replaceFirst("^Bearer ", "")) != 0) {
+        String nodeToken = AuthTokens.INSTANCE.resolve(null, authorization);
+        if (nodeToken == null || nodes.getServerFromToken(nodeToken) != 0) {
+            JsonObject statObj = new JsonObject();
             statObj.addProperty("result", false);
-            return new ResponseEntity<>(statObj.toString(), headers, HttpStatus.UNAUTHORIZED);
+            return Mono.just(new ResponseEntity<>(statObj.toString(), headers, HttpStatus.UNAUTHORIZED));
         }
         switch (confirmation.task()) {
             case 0:
-                statObj.addProperty("result", validateMinecraftUser(confirmation.token(), confirmation.uid()));
-                break;
+                return userProcess.validateMinecraftUser(confirmation.token(), confirmation.uid())
+                        .map(result -> {
+                            JsonObject statObj = new JsonObject();
+                            statObj.addProperty("result", result);
+                            return new ResponseEntity<>(statObj.toString(), headers, HttpStatus.OK);
+                        });
             case 1:
-                statObj.addProperty("result", validatePasswordUpdateRequest(confirmation.token(), confirmation.uid()));
-                break;
+                return userProcess.validatePasswordUpdateRequest(confirmation.token(), confirmation.uid())
+                        .map(result -> {
+                            JsonObject passwordResult = new JsonObject();
+                            passwordResult.addProperty("result", result);
+                            return new ResponseEntity<>(passwordResult.toString(), headers, HttpStatus.OK);
+                        });
             default:
-                statObj.addProperty("result", false);
-                break;
+                JsonObject defaultResult = new JsonObject();
+                defaultResult.addProperty("result", false);
+                return Mono.just(new ResponseEntity<>(defaultResult.toString(), headers, HttpStatus.OK));
         }
-        return new ResponseEntity<>(statObj.toString(), headers, HttpStatus.OK);
     }
 
     public record ConfirmationRequest(String token, Long uid, int task) {}
 
     @PostMapping(value = "/qo/upload/password", consumes = MediaType.APPLICATION_JSON_VALUE)
-    public ResponseEntity<String> requestUpdatePassword(@RequestBody PasswordResetRequest reset) throws ExecutionException, InterruptedException {
-        return updatePassword(reset.uid(), reset.password());
+    public Mono<ResponseEntity<String>> requestUpdatePassword(@RequestBody PasswordResetRequest reset) {
+        return userProcess.updatePassword(reset.uid(), reset.password());
     }
 
     public record PasswordResetRequest(Long uid, String password) {}
 
     @RequestMapping("/qo/download/avatar")
-    public ResponseEntity<String> avartarTrans(@RequestParam() String name) throws Exception {
+    public Mono<ResponseEntity<String>> avartarTrans(@RequestParam() String name) {
         if (name == null || name.isEmpty()) {
-            return ri.GeneralHttpHeader("no input");
+            return Mono.just(ri.GeneralHttpHeader("no input"));
         }
-        return ri.GeneralHttpHeader(userProcess.AvatarTrans(name));
+        return userProcess.avatarTrans(name).map(ri::GeneralHttpHeader);
     }
 
     @RequestMapping("/qo/download/registry")
-    public ResponseEntity<String> GetData(@RequestParam String name) {
-        return ri.GeneralHttpHeader(queryReg(name));
+    public Mono<ResponseEntity<String>> GetData(@RequestParam String name) {
+        return userProcess.queryReg(name).map(ri::GeneralHttpHeader);
     }
 
     @GetMapping("/qo/webmsg/download")
     public ResponseEntity<String> returnWeb(@RequestHeader("Authorization") String authorization) {
-        if (nodes.getServerFromToken(authorization.replaceFirst("^Bearer ", "")) < 0) {
+        String token = AuthTokens.INSTANCE.resolve(null, authorization);
+        if (token == null || nodes.getServerFromToken(token) < 0) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("{\"code\":401}");
         }
         return ri.GeneralHttpHeader(Msg.Companion.webGet());
     }
 
     @GetMapping("/qo/download/name")
-    public ResponseEntity<String> queryPlayerName(@RequestParam long qq) {
+    public Mono<ResponseEntity<String>> queryPlayerName(@RequestParam long qq) {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
-        return new ResponseEntity<>(queryReg(qq), headers, HttpStatus.OK);
+        return userProcess.queryReg(qq).map(body -> new ResponseEntity<>(body, headers, HttpStatus.OK));
     }
 
     @GetMapping("/qo/download/ip")
@@ -367,46 +379,50 @@ public class ApiApplication {
     }
 
     @GetMapping("/qo/download/ip/whitelisted")
-    public ResponseEntity<String> queryIpWhitelist(@RequestParam String ip) {
+    public Mono<ResponseEntity<String>> queryIpWhitelist(@RequestParam String ip) {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
-        return new ResponseEntity<>(ipWhitelistServices.whitelistedWrapper(ip), headers, HttpStatus.OK);
+        return ipWhitelistServices.whitelistedWrapperReactive(ip)
+                .map(body -> new ResponseEntity<>(body, headers, HttpStatus.OK));
     }
 
     @PostMapping(value = "/qo/game/login", consumes = MediaType.APPLICATION_JSON_VALUE)
-    public ResponseEntity<String> login(@RequestBody LoginRequest credentials, ServerHttpRequest request) throws NoSuchAlgorithmException {
+    public Mono<ResponseEntity<String>> login(@RequestBody LoginRequest credentials, ServerHttpRequest request) {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
-        if (ua.isCLIToolRequest(request)) return new ResponseEntity<>("failed", headers, HttpStatus.BAD_REQUEST);
+        if (ua.isCLIToolRequest(request)) return Mono.just(new ResponseEntity<>("failed", headers, HttpStatus.BAD_REQUEST));
         if (credentials.username() == null || credentials.password() == null || credentials.password().length() > 128) {
-            return new ResponseEntity<>("{\"result\":false}", headers, HttpStatus.BAD_REQUEST);
+            return Mono.just(new ResponseEntity<>("{\"result\":false}", headers, HttpStatus.BAD_REQUEST));
         }
-        JsonObject retObj = new JsonObject();
-        var result = performLogin(credentials.username(), credentials.password(), credentials.ip(), Boolean.TRUE.equals(credentials.web()));
-        if (result.getFirst() && !Boolean.TRUE.equals(credentials.web())) {
-            recentLoginService.recordSuccessfulLogin(credentials.username(), credentials.ip());
-        }
-        retObj.addProperty("result", result.getFirst());
-        retObj.addProperty("token", result.getSecond());
-        return new ResponseEntity<>(retObj.toString(), headers, HttpStatus.OK);
+        return userProcess.performLogin(credentials.username(), credentials.password(), credentials.ip(), Boolean.TRUE.equals(credentials.web()))
+                .map(result -> {
+                    if (result.getFirst() && !Boolean.TRUE.equals(credentials.web())) {
+                        recentLoginService.recordSuccessfulLogin(credentials.username(), credentials.ip());
+                    }
+                    JsonObject retObj = new JsonObject();
+                    retObj.addProperty("result", result.getFirst());
+                    retObj.addProperty("token", result.getSecond());
+                    return new ResponseEntity<>(retObj.toString(), headers, HttpStatus.OK);
+                });
     }
 
     public record LoginRequest(String username, String password, String ip, Boolean web) {}
 
     @PostMapping("/qo/upload/loginattempt")
-    public void handleLoginAttemptLogging(@RequestBody String data, @RequestParam(name = "auth", required = true) String auth) throws Exception {
+    public Mono<Void> handleLoginAttemptLogging(@RequestBody String data, @RequestParam(name = "auth", required = true) String auth) throws Exception {
         Funcs fc = new Funcs();
         if (fc.verify(auth, Funcs.Perms.FULL)) {
-            login.insertLoginLog(data);
+            return login.insertLoginLogReactive(data);
         }
+        return Mono.empty();
     }
 
     @PostMapping("/qo/upload/explevel")
-    public void handleExpLevelUpdate(@RequestParam String token, @RequestParam int lvl, @RequestParam String username) {
+    public Mono<Void> handleExpLevelUpdate(@RequestParam String token, @RequestParam int lvl, @RequestParam String username) {
         if (nodes.getServerFromToken(token) != 1) {
-            return;
+            return Mono.empty();
         }
 
-        userORM.updateLevelByUsername(username, lvl);
+        return userProcess.updateLevel(username, lvl);
     }
 }

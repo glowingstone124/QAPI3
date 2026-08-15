@@ -1,7 +1,5 @@
 package org.qo.services.leaveMessages
 
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import org.qo.orm.LeaveMessage
 import org.qo.orm.LeaveMessageORM
 import org.springframework.stereotype.Service
@@ -9,40 +7,37 @@ import org.springframework.stereotype.Service
 @Service
 class LeaveMessageService {
 	val leaveMessageORM = LeaveMessageORM()
+
 	suspend fun insert(from: String, to: String, message: String): LeaveMessageStatus {
-		val currentMessageList = leaveMessageORM.getDefinedSenderMessages(from);
-		if(currentMessageList.size > 5){
+		val currentMessageList = leaveMessageORM.getDefinedSenderMessages(from)
+		if (currentMessageList.size > 5) {
 			return LeaveMessageStatus.TOO_MANY_SEND
 		}
 		leaveMessageORM.insertMessage(from, to, message)
 		return LeaveMessageStatus.SUCCESS
 	}
-	suspend fun getTargetReceivers(receiver: String): List<LeaveMessage>{
+
+	suspend fun getTargetReceivers(receiver: String): List<LeaveMessage> {
 		val result = leaveMessageORM.getDefinedReceiverMessages(receiver)
-		withContext(Dispatchers.IO) {
-			result.forEach {
-				leaveMessageORM.deleteSpecifiedSenderMessages(it.from, it.to, it.message)
-			}
+		result.forEach {
+			leaveMessageORM.deleteSpecifiedSenderMessages(it.from, it.to, it.message)
 		}
 		return result
 	}
-
 }
+
 enum class LeaveMessageStatus(val code: Int) {
 	SUCCESS(0),
 	DISALLOWED(1),
 	TOO_MANY_SEND(2),
-	TOO_MANY_RECEIVED(3);
+	TOO_MANY_RECEIVED(3),
+	;
 
-
-	fun toInt(): Int {
-		return code
-	}
+	fun toInt(): Int = code
 
 	companion object {
-		fun fromInt(value: Int): LeaveMessageStatus {
-			return LeaveMessageStatus.entries.find { it.code == value }
+		fun fromInt(value: Int): LeaveMessageStatus =
+			LeaveMessageStatus.entries.find { it.code == value }
 				?: throw IllegalArgumentException("No LeaveMessageStatus with code $value")
-		}
 	}
 }

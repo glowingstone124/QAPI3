@@ -9,6 +9,9 @@ object AuthTokens {
             return null
         }
         val value = authorizationHeader.trim()
+        if (value.equals("Bearer", ignoreCase = true)) {
+            return null
+        }
         if (value.startsWith("Bearer ", ignoreCase = true)) {
             val token = value.substring(7).trim()
             return token.ifBlank { null }

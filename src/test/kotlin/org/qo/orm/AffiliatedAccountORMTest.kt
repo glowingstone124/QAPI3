@@ -1,56 +1,59 @@
 package org.qo.orm
 
-import org.junit.jupiter.api.AfterEach
+import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
-import org.junit.jupiter.api.io.TempDir
-import org.qo.datas.ConnectionPool
+import org.qo.TestApiApplication
+import org.qo.datas.R2dbcDatabaseConfiguration
+import org.qo.datas.ReactiveDatabase
 import org.qo.services.loginService.AffiliatedAccountServices
-import org.sqlite.SQLiteDataSource
-import java.nio.file.Path
+import org.qo.utils.SpringContextUtil
+import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.boot.test.context.SpringBootTest
 
+@SpringBootTest(
+	classes = [
+		TestApiApplication::class,
+		ReactiveDatabase::class,
+		R2dbcDatabaseConfiguration::class,
+		SpringContextUtil::class,
+		AffiliatedAccountORM::class,
+	],
+)
 class AffiliatedAccountORMTest {
-	@TempDir
-	lateinit var tempDir: Path
+	@Autowired
+	lateinit var database: ReactiveDatabase
 
-	private val orm = AffiliatedAccountORM()
+	@Autowired
+	lateinit var orm: AffiliatedAccountORM
 
 	@BeforeEach
 	fun setUp() {
-		ConnectionPool.ds = SQLiteDataSource().apply {
-			url = "jdbc:sqlite:${tempDir.resolve("affiliated-account.db")}"
-		}
-		ConnectionPool.getConnection().use { connection ->
-			connection.createStatement().use {
-				it.executeUpdate(
-					"CREATE TABLE affiliated_account (name TEXT PRIMARY KEY, host TEXT NOT NULL, password TEXT NOT NULL)"
-				)
-			}
+		runBlocking {
+		database.execute("DROP TABLE IF EXISTS affiliated_account")
+		database.execute(
+			"CREATE TABLE affiliated_account (name VARCHAR(255) PRIMARY KEY, host VARCHAR(255) NOT NULL, password VARCHAR(255) NOT NULL)"
+		)
 		}
 	}
 
-	@AfterEach
-	fun tearDown() {
-		ConnectionPool.ds = null
+	@Test
+	fun deleteByNameAndHost_doesNotDeleteAnotherHostsAccount() = runBlocking {
+		orm.createAsync(AffiliatedAccountServices.AffiliatedAccount("child", "host-a", "hash"))
+
+		assertFalse(orm.deleteByNameAndHostAsync("child", "host-b"))
+		assertTrue(orm.readAsync("child") != null)
 	}
 
 	@Test
-	fun deleteByNameAndHost_doesNotDeleteAnotherHostsAccount() {
-		orm.create(AffiliatedAccountServices.AffiliatedAccount("child", "host-a", "hash"))
+	fun deleteByNameAndHost_deletesOwnedAccount() = runBlocking {
+		orm.createAsync(AffiliatedAccountServices.AffiliatedAccount("child", "host-a", "hash"))
 
-		assertFalse(orm.deleteByNameAndHost("child", "host-b"))
-		assertTrue(orm.read("child") != null)
-	}
-
-	@Test
-	fun deleteByNameAndHost_deletesOwnedAccount() {
-		orm.create(AffiliatedAccountServices.AffiliatedAccount("child", "host-a", "hash"))
-
-		assertTrue(orm.deleteByNameAndHost("child", "host-a"))
-		assertTrue(orm.read("child") == null)
+		assertTrue(orm.deleteByNameAndHostAsync("child", "host-a"))
+		assertTrue(orm.readAsync("child") == null)
 	}
 
 	@Test

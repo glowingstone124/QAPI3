@@ -3,74 +3,64 @@ package org.qo.services.loginService
 import com.google.gson.Gson
 import com.google.gson.JsonArray
 import com.google.gson.JsonObject
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
-import org.qo.datas.ConnectionPool
 import org.qo.datas.Mapping
+import org.qo.datas.ReactiveDatabase
 import org.qo.orm.CardOrm
 import org.qo.orm.CardProfileOrm
 import org.qo.orm.UserORM
+import org.qo.orm.reactiveDatabase
+import org.qo.orm.unsupportedSyncApi
 import org.springframework.stereotype.Service
+import kotlinx.coroutines.reactor.mono
+import reactor.core.publisher.Mono
 
 @Service
 class PlayerCardCustomizationImpl(
 	private val cardOrm: CardOrm,
 	private val cardProfileOrm: CardProfileOrm,
 	private val login: Login,
-	private val authorityNeededServicesImpl: AuthorityNeededServicesImpl
+	private val authorityNeededServicesImpl: AuthorityNeededServicesImpl,
 ) {
+	private var databaseOverride: ReactiveDatabase? = null
 	private val statisticMapping = mapOf<Int, Pair<String, (Mapping.Users?) -> String>>(
 		0 to (">_<" to { "" }),
-		1 to ("Play time" to { it?.playtime?.toString() ?: "" })
+		1 to ("Play time" to { it?.playtime?.toString() ?: "" }),
 	)
 	val userORM = UserORM()
 
-	/**
-	 * Return a player's owned cards
-	 */
+	private val database: ReactiveDatabase
+		get() = reactiveDatabase(databaseOverride)
 
-	fun doesAvatarExist(avatarid: String): Boolean {
-		ConnectionPool.getConnection().use { connection ->
-			connection.prepareStatement("SELECT url FROM avatars WHERE id = ?").use { preparedStatement ->
-				preparedStatement.setString(1, avatarid)
-				preparedStatement.executeQuery().use { resultSet ->
-					return resultSet.next()
-				}
-			}
-		}
-	}
+	fun doesAvatarExist(avatarid: String): Boolean = unsupportedSyncApi("PlayerCardCustomizationImpl.doesAvatarExist")
 
-	fun getPlayerCardList(username: String): List<Int> {
-		return cardProfileOrm.read(userORM.getProfileWithUser(username))?.owned?.split(",")?.map { it.trim().toInt() }
-			?: listOf()
-	}
+	suspend fun doesAvatarExistAsync(avatarid: String): Boolean =
+		database.one("SELECT url FROM avatars WHERE id = ?", listOf(avatarid)) { true } != null
 
-	fun getPlayerCardListAsJson(username: String): JsonArray {
-		val rawList = cardProfileOrm.read(userORM.getProfileWithUser(username))?.owned?.split(",")?.map { it.trim().toInt() }
-			?: listOf()
+	fun getPlayerCardList(username: String): List<Int> = unsupportedSyncApi("PlayerCardCustomizationImpl.getPlayerCardList")
+
+	suspend fun getPlayerCardListAsync(username: String): List<Int> =
+		cardProfileOrm.readAsync(userORM.getProfileWithUserAsync(username))
+			?.owned
+			?.split(",")
+			?.mapNotNull { it.trim().toIntOrNull() }
+			?: emptyList()
+
+	fun getPlayerCardListAsJson(username: String): JsonArray =
+		unsupportedSyncApi("PlayerCardCustomizationImpl.getPlayerCardListAsJson")
+
+	suspend fun getPlayerCardListAsJsonAsync(username: String): JsonArray {
 		val jsonArr = JsonArray()
-		for (i in rawList) {
-			jsonArr.add(JsonObject().apply {
-				addProperty("cardId", i)
-			})
+		getPlayerCardListAsync(username).forEach {
+			jsonArr.add(JsonObject().apply { addProperty("cardId", it) })
 		}
 		return jsonArr
 	}
 
-	suspend fun getAllAvatars() : List<Mapping.Avatar> {
-		return withContext(Dispatchers.IO) {
-			val list = mutableListOf<Mapping.Avatar>()
-			ConnectionPool.getConnection().use { connection ->
-				connection.prepareStatement("SELECT * FROM avatars").use { preparedStatement ->
-					preparedStatement.executeQuery().use { resultSet ->
-						while (resultSet.next()) {
-							list.add(Mapping.Avatar(resultSet.getString("id"), resultSet.getString("url")))
-						}
-					}
-				}
-			}
-			list
-		}
+	suspend fun getAllAvatars(): List<Mapping.Avatar> = database.all("SELECT * FROM avatars") { row ->
+		Mapping.Avatar(
+			id = row.get("id", String::class.java).orEmpty(),
+			url = row.get("url", String::class.java).orEmpty(),
+		)
 	}
 
 	suspend fun updatePlayerAccountCardInfo(token: String, cardInfo: Mapping.CardProfile): Pair<Boolean, String> {
@@ -79,17 +69,17 @@ class PlayerCardCustomizationImpl(
 		if (precheckResult != null) {
 			return Pair(false, "User not exist!")
 		}
-		val profileDetailClazz = getProfileDetailWithGivenName(accountName!!)
+		val profileDetailClazz = getProfileDetailWithGivenNameAsync(accountName!!)
 
-		val modifiedCardId = cardInfo.cardId.let { cardId ->
-			getPlayerCardList(accountName).find { it.toLong() == cardId }
+		val modifiedCardId = cardInfo.cardId?.let { cardId ->
+			getPlayerCardListAsync(accountName).find { it.toLong() == cardId }
 		}?.toLong()
 
 		val st1 = cardInfo.statistic1?.takeIf { statisticMapping.containsKey(it) }
 		val st2 = cardInfo.statistic2?.takeIf { statisticMapping.containsKey(it) }
 		val st3 = cardInfo.statistic3?.takeIf { statisticMapping.containsKey(it) }
 
-		val avatar = if (doesAvatarExist(cardInfo.avatar ?: "")) cardInfo.avatar else null
+		val avatar = if (doesAvatarExistAsync(cardInfo.avatar ?: "")) cardInfo.avatar else null
 
 		val modifiedClazz = Mapping.CardProfile(
 			cardId = modifiedCardId,
@@ -100,27 +90,32 @@ class PlayerCardCustomizationImpl(
 			uuid = profileDetailClazz!!.uuid,
 			owned = profileDetailClazz.owned,
 		)
-		cardProfileOrm.update(modifiedClazz)
+		cardProfileOrm.updateAsync(modifiedClazz)
 		return Pair(true, "Updated Successfully")
 	}
-	/**
-	 * Query a card with its id, return 'null' when it doesn't exist.
-	 * @return Mapping.Cards?
-	 */
-	fun getCardInformation(id: Long): Mapping.Cards? {
-		return cardOrm.read(id)
+
+	fun getCardInformation(id: Long): Mapping.Cards? = unsupportedSyncApi("PlayerCardCustomizationImpl.getCardInformation")
+
+	suspend fun getCardInformationAsync(id: Long): Mapping.Cards? = cardOrm.readAsync(id)
+
+	fun getAllCards(): List<Mapping.Cards> = unsupportedSyncApi("PlayerCardCustomizationImpl.getAllCards")
+
+	suspend fun getAllCardsAsync(): List<Mapping.Cards> = cardOrm.readAllAsync()
+
+	fun getProfileDetailWithGivenName(name: String): Mapping.CardProfile? =
+		unsupportedSyncApi("PlayerCardCustomizationImpl.getProfileDetailWithGivenName")
+
+	suspend fun getProfileDetailWithGivenNameAsync(name: String): Mapping.CardProfile? {
+		val profileId = userORM.getProfileWithUserAsync(name)
+		return cardProfileOrm.readAsync(profileId)
 	}
 
-	fun getAllCards(): List<Mapping.Cards> {
-		return cardOrm.readAll()
-	}
+	fun getProfileDetailWithGivenNameReactive(name: String): Mono<Mapping.CardProfile> =
+		mono { getProfileDetailWithGivenNameAsync(name) }
 
-	fun getProfileDetailWithGivenName(name: String): Mapping.CardProfile? {
-		val profileId = userORM.getProfileWithUser(name)
-		return cardProfileOrm.read(profileId)
-	}
+	fun getProfileDetail(uuid: String): String? = unsupportedSyncApi("PlayerCardCustomizationImpl.getProfileDetail")
 
-	fun getProfileDetail(uuid: String): String? {
+	suspend fun getProfileDetailAsync(uuid: String): String? {
 		var card = Mapping.CardProfile(
 			uuid,
 			1,
@@ -128,48 +123,42 @@ class PlayerCardCustomizationImpl(
 			0,
 			0,
 			"default",
-			"1,2,3,4,5,6,7,8"
+			"1,2,3,4,5,6,7,8",
 		)
-		if (!userORM.userWithProfileIDExists(uuid)) {
+		if (!userORM.userWithProfileIDExistsAsync(uuid)) {
 			return null
 		}
-		if (cardProfileOrm.read(uuid) == null) {
-			cardProfileOrm.create(card)
+		if (cardProfileOrm.readAsync(uuid) == null) {
+			cardProfileOrm.createAsync(card)
 			return Gson().toJson(card)
 		}
-		card = cardProfileOrm.read(uuid)!!
+		card = cardProfileOrm.readAsync(uuid)!!
 		val jsonArray = JsonArray().apply {
 			add(JsonObject().apply {
-				addProperty(
-					getStatistic(card.statistic1!!, uuid).first,
-					getStatistic(card.statistic1, uuid).second
-				)
+				val statistic = getStatistic(card.statistic1 ?: 0, uuid)
+				addProperty(statistic.first, statistic.second)
 			})
 			add(JsonObject().apply {
-				addProperty(
-					getStatistic(card.statistic2!!, uuid).first,
-					getStatistic(card.statistic2, uuid).second
-				)
+				val statistic = getStatistic(card.statistic2 ?: 0, uuid)
+				addProperty(statistic.first, statistic.second)
 			})
 			add(JsonObject().apply {
-				addProperty(
-					getStatistic(card.statistic3!!, uuid).first,
-					getStatistic(card.statistic3, uuid).second
-				)
+				val statistic = getStatistic(card.statistic3 ?: 0, uuid)
+				addProperty(statistic.first, statistic.second)
 			})
 		}
-		val jsonObj = JsonObject().apply {
+		return JsonObject().apply {
 			addProperty("uuid", uuid)
 			addProperty("cardId", card.cardId)
 			add("statistic", jsonArray)
-		}
-		return jsonObj.toString()
+		}.toString()
 	}
 
-	private fun getStatistic(type: Int, token: String): Pair<String, String> {
-		val user = userORM.read(userORM.getUserWithProfile(token))
+	private suspend fun getStatistic(type: Int, token: String): Pair<String, String> {
+		val user = userORM.readAsync(userORM.getUserWithProfileAsync(token))
 		return mapStatisticType(type, user)
 	}
+
 	private fun mapStatisticType(type: Int, user: Mapping.Users?): Pair<String, String> {
 		val mapping = statisticMapping[type] ?: ("" to { _: Mapping.Users? -> "" })
 		val (name, extractor) = mapping

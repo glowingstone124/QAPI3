@@ -1,122 +1,127 @@
 package org.qo.services.loginService
 
-import org.junit.jupiter.api.AfterEach
+import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
-import org.junit.jupiter.api.io.TempDir
 import org.mockito.Mockito
-import org.qo.datas.ConnectionPool
-import org.sqlite.SQLiteDataSource
-import kotlinx.coroutines.runBlocking
-import java.nio.file.Path
+import org.qo.TestApiApplication
+import org.qo.datas.R2dbcDatabaseConfiguration
+import org.qo.datas.ReactiveDatabase
+import org.qo.utils.SpringContextUtil
+import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.boot.test.context.SpringBootTest
+import org.springframework.test.context.bean.override.mockito.MockitoBean
 import java.util.concurrent.Callable
 import java.util.concurrent.Executors
 
+@SpringBootTest(
+	classes = [
+		TestApiApplication::class,
+		ReactiveDatabase::class,
+		R2dbcDatabaseConfiguration::class,
+		SpringContextUtil::class,
+		IPWhitelistServices::class,
+	],
+)
 class IPWhitelistServicesTest {
-	@TempDir
-	lateinit var tempDir: Path
+	@Autowired
+	lateinit var database: ReactiveDatabase
 
-	private val login = Mockito.mock(Login::class.java)
-	private val authorityNeededServices = Mockito.mock(AuthorityNeededServicesImpl::class.java)
-	private val service = IPWhitelistServices(
-		login,
-		authorityNeededServices
-	)
+	@Autowired
+	lateinit var service: IPWhitelistServices
+
+	@MockitoBean
+	lateinit var login: Login
+
+	@MockitoBean
+	lateinit var authorityNeededServices: AuthorityNeededServicesImpl
 
 	@BeforeEach
 	fun setUp() {
-		ConnectionPool.ds = SQLiteDataSource().apply {
-			url = "jdbc:sqlite:${tempDir.resolve("ipwhitelist.db")}"
+		runBlocking {
+		database.execute("DROP TABLE IF EXISTS loginip")
+		database.execute("DROP TABLE IF EXISTS users")
+		database.execute(
+			"CREATE TABLE users (username VARCHAR(255) PRIMARY KEY, invite INT NOT NULL DEFAULT 0)"
+		)
+		database.execute(
+			"CREATE TABLE loginip (username VARCHAR(255) NOT NULL, ip VARCHAR(45) NOT NULL)"
+		)
+		database.execute("INSERT INTO users (username, invite) VALUES (?, ?)", listOf("alex", 0))
+		database.execute("INSERT INTO users (username, invite) VALUES (?, ?)", listOf("steve", 0))
 		}
-		ConnectionPool.getConnection().use { conn ->
-			conn.createStatement().use { stmt ->
-				stmt.executeUpdate(
-					"""
-					CREATE TABLE loginip (
-						username TEXT NOT NULL,
-						ip TEXT NOT NULL
-					)
-					""".trimIndent()
-				)
-			}
-		}
-	}
-
-	@AfterEach
-	fun tearDown() {
-		ConnectionPool.ds = null
 	}
 
 	@Test
-	fun removeFromWhitelist_deletesExistingEntry_returnsTrue() {
-		service.addIntoWhitelist("1.2.3.4", "alex")
+	fun removeFromWhitelist_deletesExistingEntry_returnsTrue() = runBlocking {
+		service.addIntoWhitelistAsync("1.2.3.4", "alex")
 
-		val result = service.removeFromWhitelist("1.2.3.4", "alex")
+		val result = service.removeFromWhitelistAsync("1.2.3.4", "alex")
 
 		assertTrue(result)
-		assertFalse(service.whitelisted("1.2.3.4"))
-		assertEquals(0, service.whitelistedIpCount("alex"))
+		assertFalse(service.whitelistedAsync("1.2.3.4"))
+		assertEquals(0, service.whitelistedIpCountAsync("alex"))
 	}
 
 	@Test
-	fun removeFromWhitelist_nonExistentEntry_returnsFalse() {
-		val result = service.removeFromWhitelist("9.9.9.9", "alex")
+	fun removeFromWhitelist_nonExistentEntry_returnsFalse() = runBlocking {
+		val result = service.removeFromWhitelistAsync("9.9.9.9", "alex")
 
 		assertFalse(result)
 	}
 
 	@Test
-	fun removeFromWhitelist_onlyRemovesMatchingUsername() {
-		service.addIntoWhitelist("1.2.3.4", "alex")
-		service.addIntoWhitelist("1.2.3.4", "steve")
+	fun removeFromWhitelist_onlyRemovesMatchingUsername() = runBlocking {
+		service.addIntoWhitelistAsync("1.2.3.4", "alex")
+		service.addIntoWhitelistAsync("1.2.3.4", "steve")
 
-		val result = service.removeFromWhitelist("1.2.3.4", "alex")
+		val result = service.removeFromWhitelistAsync("1.2.3.4", "alex")
 
 		assertTrue(result)
-		assertEquals(0, service.whitelistedIpCount("alex"))
-		assertEquals(1, service.whitelistedIpCount("steve"))
-		assertTrue(service.whitelisted("1.2.3.4"))
+		assertEquals(0, service.whitelistedIpCountAsync("alex"))
+		assertEquals(1, service.whitelistedIpCountAsync("steve"))
+		assertTrue(service.whitelistedAsync("1.2.3.4"))
 	}
 
 	@Test
 	fun leaveWhitelist_removesOnlyTheAuthenticatedUsersEntry() = runBlocking {
-		service.addIntoWhitelist("1.2.3.4", "alex")
-		service.addIntoWhitelist("1.2.3.4", "steve")
+		service.addIntoWhitelistAsync("1.2.3.4", "alex")
+		service.addIntoWhitelistAsync("1.2.3.4", "steve")
 		Mockito.`when`(login.validate("alex-token")).thenReturn(Pair("alex", 0))
 		Mockito.`when`(authorityNeededServices.doPrecheck("alex", 0)).thenReturn(null)
 
 		val result = service.leaveWhitelist("1.2.3.4", "alex-token")
 
 		assertEquals(IPWhitelistServices.WhitelistReasons.SUCCESS, result)
-		assertEquals(0, service.whitelistedIpCount("alex"))
-		assertEquals(1, service.whitelistedIpCount("steve"))
+		assertEquals(0, service.whitelistedIpCountAsync("alex"))
+		assertEquals(1, service.whitelistedIpCountAsync("steve"))
 	}
 
 	@Test
 	fun leaveWhitelist_rejectsInvalidToken() = runBlocking {
-		service.addIntoWhitelist("1.2.3.4", "alex")
+		service.addIntoWhitelistAsync("1.2.3.4", "alex")
 		Mockito.`when`(login.validate("bad-token")).thenReturn(Pair(null, 1))
 		Mockito.`when`(authorityNeededServices.doPrecheck(null, 1)).thenReturn("invalid")
 
 		val result = service.leaveWhitelist("1.2.3.4", "bad-token")
 
 		assertEquals(IPWhitelistServices.WhitelistReasons.TOKEN_INVALID, result)
-		assertEquals(1, service.whitelistedIpCount("alex"))
+		assertEquals(1, service.whitelistedIpCountAsync("alex"))
 	}
 
 	@Test
 	fun joinWhitelist_isIdempotentForTheSameUserAndIp() = runBlocking {
-		service.addIntoWhitelist("1.2.3.4", "alex")
+		service.addIntoWhitelistAsync("1.2.3.4", "alex")
 		Mockito.`when`(login.validate("alex-token")).thenReturn(Pair("alex", 0))
 		Mockito.`when`(authorityNeededServices.doPrecheck("alex", 0)).thenReturn(null)
 
 		val result = service.joinWhitelist("1.2.3.4", "alex-token")
 
 		assertEquals(IPWhitelistServices.WhitelistReasons.SUCCESS, result)
-		assertEquals(1, service.whitelistedIpCount("alex"))
+		assertEquals(1, service.whitelistedIpCountAsync("alex"))
 	}
 
 	@Test
@@ -135,7 +140,7 @@ class IPWhitelistServicesTest {
 			"1.2.3.256",
 			"1.2.03.4",
 			"2001:db8::1%eth0",
-			""
+			"",
 		).forEach { assertEquals(null, service.normalizeIp(it), it) }
 	}
 
@@ -144,7 +149,7 @@ class IPWhitelistServicesTest {
 		val result = service.joinWhitelist("example.com", "alex-token")
 
 		assertEquals(IPWhitelistServices.WhitelistReasons.INVALID_IP, result)
-		assertEquals(0, service.whitelistedIpCount("alex"))
+		assertEquals(0, service.whitelistedIpCountAsync("alex"))
 		Mockito.verifyNoInteractions(login, authorityNeededServices)
 	}
 
@@ -156,7 +161,7 @@ class IPWhitelistServicesTest {
 		val result = service.joinWhitelist("2001:db8::1", "alex-token")
 
 		assertEquals(IPWhitelistServices.WhitelistReasons.SUCCESS, result)
-		assertTrue(service.whitelisted("2001:db8::1", "alex"))
+		assertTrue(service.whitelistedAsync("2001:db8::1", "alex"))
 	}
 
 	@Test
@@ -166,14 +171,14 @@ class IPWhitelistServicesTest {
 		repeat(5) { index ->
 			assertEquals(
 				IPWhitelistServices.WhitelistReasons.SUCCESS,
-				service.joinWhitelist("198.51.100.${index + 1}", "alex-token")
+				service.joinWhitelist("198.51.100.${index + 1}", "alex-token"),
 			)
 		}
 
 		val result = service.joinWhitelist("198.51.100.6", "alex-token")
 
 		assertEquals(IPWhitelistServices.WhitelistReasons.IP_WHITELIST_FULL, result)
-		assertEquals(5, service.whitelistedIpCount("alex"))
+		assertEquals(5, service.whitelistedIpCountAsync("alex"))
 	}
 
 	@Test
@@ -189,12 +194,14 @@ class IPWhitelistServicesTest {
 					Callable {
 						runBlocking { service.joinWhitelist("203.0.113.$index", "alex-token") }
 					}
-				}
+				},
 			).map { it.get() }
 
 			assertEquals(5, results.count { it == IPWhitelistServices.WhitelistReasons.SUCCESS })
 			assertEquals(5, results.count { it == IPWhitelistServices.WhitelistReasons.IP_WHITELIST_FULL })
-			assertEquals(5, service.whitelistedIpCount("alex"))
+			runBlocking {
+				assertEquals(5, service.whitelistedIpCountAsync("alex"))
+			}
 		} finally {
 			executor.shutdownNow()
 		}

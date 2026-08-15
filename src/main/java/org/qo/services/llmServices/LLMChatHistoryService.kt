@@ -9,18 +9,18 @@ import java.security.MessageDigest
 
 @Service
 class LLMChatHistoryService(private val repository: LLMChatHistoryRepository) {
-	fun archiveRequest(groupId: Long, body: String): Int {
+	suspend fun archiveRequest(groupId: Long, body: String): Int {
 		val root = JsonParser.parseString(body).asJsonObject
 		val messages = root.getAsJsonArray("messages") ?: return 0
 		return archive(groupId, messages)
 	}
 
-	fun archiveGroupContext(groupId: Long?, messages: JsonArray?): Int {
+	suspend fun archiveGroupContext(groupId: Long?, messages: JsonArray?): Int {
 		if (groupId == null || messages == null) return 0
 		return archive(groupId, messages)
 	}
 
-	fun search(
+	suspend fun search(
 		groupId: Long,
 		query: String,
 		uid: Long? = null,
@@ -36,7 +36,7 @@ class LLMChatHistoryService(private val repository: LLMChatHistoryRepository) {
 		limit = limit.coerceIn(1, 30),
 	)
 
-	private fun archive(groupId: Long, messages: JsonArray): Int {
+	private suspend fun archive(groupId: Long, messages: JsonArray): Int {
 		val now = System.currentTimeMillis()
 		val records = messages.asSequence().mapNotNull { item ->
 			val obj = item.takeIf { it.isJsonObject }?.asJsonObject ?: return@mapNotNull null

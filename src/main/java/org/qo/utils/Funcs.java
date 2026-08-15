@@ -3,7 +3,6 @@ package org.qo.utils;
 
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
-import org.qo.datas.Database;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -49,9 +48,6 @@ public class Funcs {
                 .withZone(ZoneId.of("Asia/Shanghai"));
         version = formatter.format(instant);
         System.out.println("构建时间: " + formatter.format(instant));
-        if (!Database.SQLAvailable()) {
-            System.out.println("SQL Misconfigured!");
-        }
     }
     public boolean verify(String input, Perms perms) throws Exception {
         Gson gson = new Gson();

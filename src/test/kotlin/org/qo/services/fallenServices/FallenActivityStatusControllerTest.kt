@@ -1,20 +1,21 @@
 package org.qo.services.fallenServices
 
+import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Test
 import org.mockito.Mockito
 import org.qo.TestApiApplication
 import org.qo.datas.Nodes
 import org.qo.utils.ReturnInterface
-import org.springframework.http.CacheControl
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.autoconfigure.web.reactive.AutoConfigureWebTestClient
 import org.springframework.boot.test.context.SpringBootTest
+import org.springframework.http.CacheControl
 import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.web.reactive.server.WebTestClient
 
 @SpringBootTest(
 	classes = [TestApiApplication::class, FallenActivityStatusController::class, ReturnInterface::class],
-	webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT
+	webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
 )
 @AutoConfigureWebTestClient
 class FallenActivityStatusControllerTest {
@@ -31,7 +32,7 @@ class FallenActivityStatusControllerTest {
 	lateinit var nodes: Nodes
 
 	@Test
-	fun publicStatusDoesNotRequireAuthentication(): Unit = kotlinx.coroutines.runBlocking {
+	fun publicStatusDoesNotRequireAuthentication() = runTest {
 		Mockito.`when`(fallenTeamService.finalizedRoster()).thenReturn(emptyMap())
 		Mockito.`when`(statusService.statusJson(emptyMap())).thenReturn(com.google.gson.JsonObject().apply {
 			addProperty("active", true)

@@ -18,32 +18,39 @@ import io.ktor.http.isSuccess
 import io.ktor.utils.io.jvm.javaio.toInputStream
 import jakarta.annotation.PostConstruct
 import jakarta.annotation.PreDestroy
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
-import org.qo.datas.ConnectionPool
 import org.qo.datas.Mapping
 import org.qo.datas.Nodes
+import org.qo.datas.ReactiveDatabase
 import org.qo.orm.UserORM
 import org.qo.redis.DatabaseType
 import org.qo.redis.Redis
 import org.qo.services.loginService.AuthorityNeededServicesImpl
 import org.qo.services.messageServices.Message
 import org.qo.services.messageServices.Msg
+import org.springframework.boot.context.event.ApplicationReadyEvent
+import org.springframework.context.event.EventListener
 import org.springframework.stereotype.Service
 import java.net.URLDecoder
-import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.charset.StandardCharsets
 import java.time.LocalDate
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicBoolean
 
 @Service
 class LLMServices(
 	private val authorityNeededServicesImpl: AuthorityNeededServicesImpl,
 	private val nodes: Nodes,
+	private val database: ReactiveDatabase,
 	private val ragService: RAGService,
 	private val memoryService: LLMMemoryService,
 	private val conversationService: LLMConversationService,
@@ -54,11 +61,7 @@ class LLMServices(
 ) {
 	private val redis = Redis()
 	private val jsonParser = JsonParser()
-	private val upstreamUrl = System.getenv("LLM_API_URL") ?: "https://api.deepseek.com/v1/chat/completions"
-	private val responsesUpstreamUrl = System.getenv("LLM_RESPONSES_API_URL")
-		?: upstreamUrl.takeIf { it.endsWith("/chat/completions") }
-			?.removeSuffix("/chat/completions")?.plus("/responses")
-		?: "https://api.deepseek.com/v1/responses"
+	private val provider = LLMProvider.fromEnvironment()
 	private val webSearchEnabled = readBoolean("LLM_WEB_SEARCH_ENABLED", true)
 	private val debugPrompt = readBoolean("LLM_DEBUG_PROMPT", false)
 	private val debugPromptMaxChars = readInt("LLM_DEBUG_PROMPT_MAX_CHARS", 12000).coerceAtLeast(1000)
@@ -70,19 +73,25 @@ class LLMServices(
 		promptFile = System.getenv("LLM_SYSTEM_PROMPT_FILE")?.trim()?.takeIf { it.isNotBlank() }?.let(Path::of),
 		fallbackPrompt = builtInSystemPrompt(),
 	)
-	private val upstreamToken by lazy {
-		System.getenv("LLM_API_TOKEN")
-			?: runCatching { Files.readString(Path.of("LLMAPITOKEN")).trim() }.getOrDefault("")
-	}
+	private val upstreamToken: String
+		get() = provider.apiToken
 
-	enum class MODELS(val apiName: String) {
-		FAST("deepseek-v4-flash"),
-		THINKING("deepseek-v4-pro");
+	enum class MODELS(val alias: String, val apiName: String) {
+		FAST("fast", "deepseek-v4-flash"),
+		THINKING("thinking", "deepseek-v4-pro");
 
 		companion object {
 			fun fromRequest(value: String): MODELS? = entries.find {
-				it.name.equals(value, ignoreCase = true) || it.apiName == value
+				it.name.equals(value, ignoreCase = true) ||
+					it.alias.equals(value, ignoreCase = true) ||
+					it.apiName == value
 			}
+		}
+	}
+
+	fun modelFromRequest(value: String): MODELS? {
+		return MODELS.fromRequest(value) ?: MODELS.entries.firstOrNull {
+			provider.modelName(it) == value
 		}
 	}
 
@@ -94,43 +103,25 @@ class LLMServices(
 		}
 	}
 	private val userORM = UserORM()
+	private val initializationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+	private val accessRecordSchemaReady = CompletableDeferred<Unit>()
+	private val accessRecordSchemaInitializationStarted = AtomicBoolean(false)
 
 	@PostConstruct
 	fun init() {
 		systemPrompt.start()
-		runCatching {
-			ConnectionPool.getConnection().use { conn ->
-				conn.createStatement().use { stmt ->
-					stmt.executeUpdate(
-						"""
-						CREATE TABLE IF NOT EXISTS llm_access_records (
-							id BIGINT AUTO_INCREMENT PRIMARY KEY,
-							uid BIGINT NOT NULL,
-							username VARCHAR(128) NOT NULL,
-							request_id VARCHAR(80) NOT NULL,
-							model VARCHAR(128) NOT NULL,
-							stream BOOLEAN NOT NULL,
-							status VARCHAR(32) NOT NULL,
-							prompt_tokens INT NULL,
-							completion_tokens INT NULL,
-							total_tokens INT NULL,
-							error_message VARCHAR(512) NULL,
-							created_at BIGINT NOT NULL,
-							completed_at BIGINT NULL,
-							INDEX idx_llm_access_uid_created (uid, created_at)
-						)
-						""".trimIndent()
-					)
-				}
-			}
-		}.onFailure {
-			println("LLM access record table init failed: ${it.message}")
-		}
+	}
+
+	@EventListener(ApplicationReadyEvent::class)
+	fun initializeAccessRecordSchema() {
+		ensureAccessRecordSchemaInitialization()
 	}
 
 	@PreDestroy
 	fun shutdown() {
 		systemPrompt.close()
+		initializationScope.cancel()
+		client.close()
 	}
 
 	suspend fun authenticate(token: String): Mapping.Users? {
@@ -143,7 +134,7 @@ class LLMServices(
 
 	fun buildPromptRequest(prompt: String, stream: Boolean = true, model: MODELS): String {
 		return JsonObject().apply {
-			addProperty("model", model.apiName)
+			addProperty("model", provider.modelName(model))
 			addProperty("stream", stream)
 			add("messages", jsonParser.parse(
 				"""
@@ -207,7 +198,7 @@ class LLMServices(
 		}
 		val username = qqName?.takeIf { it.isNotBlank() }?.let { decodeHeader(it) } ?: "qq:$qqUid"
 		val requester = LLMRequester(qqUid, username, "qq", qqGroupId)
-		val model = MODELS.fromRequest(model)
+		val model = modelFromRequest(model)
 			?: return LLMNonStreamResult(400, errorJson("model_not_available", "请求的模型不可用"))
 		val request = normalizeRequest(body, false, requester, model)
 		val requestId = insertAccessRecord(qqUid, username, request.model, false)
@@ -234,7 +225,7 @@ class LLMServices(
 		}
 	}
 
-	fun archiveBotChatHistory(token: String, groupId: Long, body: String): LLMNonStreamResult {
+	suspend fun archiveBotChatHistory(token: String, groupId: Long, body: String): LLMNonStreamResult {
 		if (!authenticateServerToken(token)) {
 			return LLMNonStreamResult(401, errorJson("invalid_token", "Bot token 验证失败"))
 		}
@@ -299,7 +290,8 @@ class LLMServices(
 		requester: LLMRequester,
 		source: String,
 	): Pair<Int, String> {
-		if (webSearchEnabled && request.model == MODELS.FAST.apiName) {
+		val requestModel = MODELS.entries.firstOrNull { provider.modelName(it) == request.model } ?: MODELS.FAST
+		if (provider.supportsResponses(requestModel)) {
 			return completeWithResponsesApi(request, requester, source)
 		}
 		if (!toolService.enabled()) {
@@ -331,7 +323,7 @@ class LLMServices(
 				return latestStatus to sanitizeResponseBody(latestBody)
 			}
 			appendAssistantToolCallMessage(obj.getAsJsonArray("messages"), latestBody, toolCalls)
-			toolCalls.forEach { call ->
+			for (call in toolCalls) {
 				obj.getAsJsonArray("messages").add(JsonObject().apply {
 					addProperty("role", "tool")
 					addProperty("tool_call_id", call.id)
@@ -349,9 +341,13 @@ class LLMServices(
 		source: String,
 	): Pair<Int, String> {
 		val functionTools = if (toolService.enabled()) toolService.definitions() else JsonArray()
-		val body = LLMResponsesAdapter.fromChatRequest(request.body, functionTools, enableWebSearch = true)
+		val body = LLMResponsesAdapter.fromChatRequest(
+			request.body,
+			functionTools,
+			enableWebSearch = webSearchEnabled,
+		)
 		repeat(maxToolRounds) { round ->
-			val response = postUpstream("$source/responses-round-${round + 1}", body.toString(), responsesUpstreamUrl)
+			val response = postUpstream("$source/responses-round-${round + 1}", body.toString(), provider.responsesUrl)
 			val responseText = response.bodyAsText()
 			if (!response.status.isSuccess()) {
 				return response.status.value to responseText
@@ -360,15 +356,16 @@ class LLMServices(
 			if (functionCalls.isEmpty()) {
 				return response.status.value to sanitizeResponseBody(LLMResponsesAdapter.toChatCompletion(responseText))
 			}
-			val outputs = functionCalls.associate { call ->
-				call.callId to toolService.execute(call.name, call.arguments, requester.toolContext())
+			val outputs = linkedMapOf<String, String>()
+			for (call in functionCalls) {
+				outputs[call.callId] = toolService.execute(call.name, call.arguments, requester.toolContext())
 			}
 			LLMResponsesAdapter.appendToolOutputs(body, responseText, outputs)
 		}
 		return 502 to errorJson("tool_round_limit", "工具调用轮数超过限制，请调高 LLM_TOOL_MAX_ROUNDS")
 	}
 
-	private suspend fun postUpstream(source: String, body: String, url: String = upstreamUrl) = client.post(url) {
+	private suspend fun postUpstream(source: String, body: String, url: String = provider.chatCompletionsUrl) = client.post(url) {
 		header(HttpHeaders.Authorization, "Bearer $upstreamToken")
 		contentType(ContentType.Application.Json)
 		debugPrompt(source, body)
@@ -383,7 +380,7 @@ class LLMServices(
 
 	private fun streamFromUpstream(body: String, requestId: Long, source: String): Flow<String> = flow {
 		try {
-			val response = client.post(upstreamUrl) {
+			val response = client.post(provider.chatCompletionsUrl) {
 				header(HttpHeaders.Authorization, "Bearer $upstreamToken")
 				contentType(ContentType.Application.Json)
 				debugPrompt(source, body)
@@ -418,7 +415,7 @@ class LLMServices(
 
 	private suspend fun normalizeRequest(body: String, stream: Boolean, requester: LLMRequester? = null, model: MODELS): NormalizedRequest {
 		val obj = JsonParser.parseString(body).asJsonObject
-		obj.addProperty("model", model.apiName)
+		obj.addProperty("model", provider.modelName(model))
 		requester?.let {
 			obj.addProperty("user_id", it.conversationKey())
 		}
@@ -447,7 +444,7 @@ class LLMServices(
 		return NormalizedRequest(obj.get("model").asString, obj.toString(), latestUserQuestion(obj.getAsJsonArray("messages")))
 	}
 
-	private fun enrichMessages(
+	private suspend fun enrichMessages(
 		messages: JsonArray,
 		requester: LLMRequester?,
 		groupContext: String?,
@@ -521,7 +518,7 @@ class LLMServices(
 			"$prefix${entry.name}(${entry.uid}): ${entry.content}"
 		}
 		val request = JsonObject().apply {
-			addProperty("model", MODELS.FAST.apiName)
+			addProperty("model", provider.modelName(MODELS.FAST))
 			addProperty("stream", false)
 			addProperty("max_tokens", 1200)
 			add("thinking", JsonObject().apply { addProperty("type", "disabled") })
@@ -840,28 +837,68 @@ class LLMServices(
 	private fun readBoolean(name: String, defaultValue: Boolean): Boolean =
 		System.getenv(name)?.trim()?.lowercase()?.toBooleanStrictOrNull() ?: defaultValue
 
-	private suspend fun insertAccessRecord(uid: Long, username: String, model: String, stream: Boolean): Long = withContext(Dispatchers.IO) {
-		runCatching {
-			ConnectionPool.getConnection().use { conn ->
-				conn.prepareStatement(
+
+	private suspend fun awaitAccessRecordSchema() {
+		ensureAccessRecordSchemaInitialization()
+		accessRecordSchemaReady.await()
+	}
+
+	private fun ensureAccessRecordSchemaInitialization() {
+		if (!accessRecordSchemaInitializationStarted.compareAndSet(false, true)) {
+			return
+		}
+		initializationScope.launch {
+			try {
+				database.execute(
+					"""
+					CREATE TABLE IF NOT EXISTS llm_access_records (
+						id BIGINT AUTO_INCREMENT PRIMARY KEY,
+						uid BIGINT NOT NULL,
+						username VARCHAR(128) NOT NULL,
+						request_id VARCHAR(80) NOT NULL,
+						model VARCHAR(128) NOT NULL,
+						stream BOOLEAN NOT NULL,
+						status VARCHAR(32) NOT NULL,
+						prompt_tokens INT NULL,
+						completion_tokens INT NULL,
+						total_tokens INT NULL,
+						error_message VARCHAR(512) NULL,
+						created_at BIGINT NOT NULL,
+						completed_at BIGINT NULL,
+						INDEX idx_llm_access_uid_created (uid, created_at)
+					)
+					""".trimIndent()
+				)
+				accessRecordSchemaReady.complete(Unit)
+			} catch (error: Exception) {
+				accessRecordSchemaReady.completeExceptionally(error)
+				println("LLM access record table init failed: ${error.message}")
+			}
+		}
+	}
+
+	private suspend fun insertAccessRecord(uid: Long, username: String, model: String, stream: Boolean): Long {
+		val requestId = "chatcmpl-qo-${UUID.randomUUID()}"
+		return try {
+			awaitAccessRecordSchema()
+			database.inTransaction {
+				database.execute(
 					"""
 					INSERT INTO llm_access_records(uid, username, request_id, model, stream, status, created_at)
 					VALUES (?, ?, ?, ?, ?, ?, ?)
 					""".trimIndent(),
-					java.sql.Statement.RETURN_GENERATED_KEYS
-				).use { stmt ->
-					stmt.setLong(1, uid)
-					stmt.setString(2, username)
-					stmt.setString(3, "chatcmpl-qo-${UUID.randomUUID()}")
-					stmt.setString(4, model)
-					stmt.setBoolean(5, stream)
-					stmt.setString(6, "started")
-					stmt.setLong(7, System.currentTimeMillis())
-					stmt.executeUpdate()
-					stmt.generatedKeys.use { keys -> if (keys.next()) keys.getLong(1) else -1L }
-				}
+					listOf(uid, username.take(128), requestId, model.take(128), stream, "started", System.currentTimeMillis()),
+				)
+				database.one(
+					"SELECT id FROM llm_access_records WHERE request_id = ? ORDER BY id DESC LIMIT 1",
+					listOf(requestId),
+				) { row ->
+					row.get("id", java.lang.Long::class.java)!!.toLong()
+				} ?: -1L
 			}
-		}.getOrDefault(-1L)
+		} catch (_: Exception) {
+			-1L
+		}
 	}
 
 	private suspend fun updateAccessRecord(
@@ -869,27 +906,28 @@ class LLMServices(
 		status: String,
 		usage: Usage? = null,
 		errorMessage: String? = null,
-	) = withContext(Dispatchers.IO) {
-		if (id <= 0) return@withContext
-		runCatching {
-			ConnectionPool.getConnection().use { conn ->
-				conn.prepareStatement(
-					"""
-					UPDATE llm_access_records
-					SET status = ?, prompt_tokens = ?, completion_tokens = ?, total_tokens = ?, error_message = ?, completed_at = ?
-					WHERE id = ?
-					""".trimIndent()
-				).use { stmt ->
-					stmt.setString(1, status)
-					stmt.setObject(2, usage?.promptTokens)
-					stmt.setObject(3, usage?.completionTokens)
-					stmt.setObject(4, usage?.totalTokens)
-					stmt.setString(5, errorMessage?.take(512))
-					stmt.setLong(6, System.currentTimeMillis())
-					stmt.setLong(7, id)
-					stmt.executeUpdate()
-				}
-			}
+	) {
+		if (id <= 0) return
+		try {
+			awaitAccessRecordSchema()
+			database.execute(
+				"""
+				UPDATE llm_access_records
+				SET status = ?, prompt_tokens = ?, completion_tokens = ?, total_tokens = ?, error_message = ?, completed_at = ?
+				WHERE id = ?
+				""".trimIndent(),
+				listOf(
+					status,
+					usage?.promptTokens,
+					usage?.completionTokens,
+					usage?.totalTokens,
+					errorMessage?.take(512),
+					System.currentTimeMillis(),
+					id,
+				),
+			)
+		} catch (_: Exception) {
+			// Access-record persistence must not replace the upstream response with a database error.
 		}
 	}
 

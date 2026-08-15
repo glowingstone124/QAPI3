@@ -1,96 +1,73 @@
 package org.qo.orm
 
-import org.qo.datas.ConnectionPool
+import org.qo.datas.ReactiveDatabase
 import org.qo.services.loginService.AffiliatedAccountServices
 import org.springframework.stereotype.Service
 
 @Service
 class AffiliatedAccountORM : CrudDao<AffiliatedAccountServices.AffiliatedAccount> {
-	fun createUsingInvite(item: AffiliatedAccountServices.AffiliatedAccount): Boolean {
-		ConnectionPool.getConnection().use { connection ->
-			connection.autoCommit = false
-			try {
-				val inviteConsumed = connection.prepareStatement(
-					"UPDATE users SET invite = invite - 1 WHERE username = ? AND invite > 0"
-				).use { statement ->
-					statement.setString(1, item.host)
-					statement.executeUpdate() == 1
-				}
-				if (!inviteConsumed) {
-					connection.rollback()
-					return false
-				}
+	private var databaseOverride: ReactiveDatabase? = null
 
-				val accountCreated = connection.prepareStatement(
-					"INSERT INTO affiliated_account (name, host, password) VALUES (?, ?, ?)"
-				).use { statement ->
-					statement.setString(1, item.name)
-					statement.setString(2, item.host)
-					statement.setString(3, item.password)
-					statement.executeUpdate() == 1
-				}
-				if (!accountCreated) {
-					connection.rollback()
-					return false
-				}
+	constructor()
 
-				connection.commit()
-				return true
-			} catch (exception: Exception) {
-				connection.rollback()
-				throw exception
-			}
-		}
+	constructor(database: ReactiveDatabase) : this() {
+		this.databaseOverride = database
 	}
 
-	override fun create(item: AffiliatedAccountServices.AffiliatedAccount): Long {
-		ConnectionPool.getConnection().use { connection ->
-			connection.prepareStatement("INSERT INTO affiliated_account (name, host, password) VALUES (?, ?, ?)").use {
-				it.setString(1, item.name)
-				it.setString(2, item.host)
-				it.setString(3, item.password)
-				return it.executeUpdate().toLong()
+	private val database: ReactiveDatabase
+		get() = reactiveDatabase(databaseOverride)
+
+	private class RollbackSignal : RuntimeException()
+
+	suspend fun createUsingInviteAsync(item: AffiliatedAccountServices.AffiliatedAccount): Boolean = try {
+		database.inTransaction {
+			val inviteConsumed = database.execute(
+				"UPDATE users SET invite = invite - 1 WHERE username = ? AND invite > 0",
+				listOf(item.host),
+			) == 1L
+			if (!inviteConsumed) {
+				throw RollbackSignal()
 			}
+
+			val accountCreated = database.execute(
+				"INSERT INTO affiliated_account (name, host, password) VALUES (?, ?, ?)",
+				listOf(item.name, item.host, item.password),
+			) == 1L
+			if (!accountCreated) {
+				throw RollbackSignal()
+			}
+
+			true
 		}
+	} catch (_: RollbackSignal) {
+		false
 	}
 
-	override fun read(input: Any): AffiliatedAccountServices.AffiliatedAccount? {
-		ConnectionPool.getConnection().use { connection ->
-			connection.prepareStatement("SELECT * FROM affiliated_account WHERE name = ?").use {
-				it.setString(1, input as String)
-				val rs = it.executeQuery()
-				return if (rs.next()) {
-					AffiliatedAccountServices.AffiliatedAccount(
-						rs.getString("name"),
-						rs.getString("host"),
-						rs.getString("password")
-					)
-				} else {
-					null
-				}
-			}
-		}
-	}
+	override fun create(item: AffiliatedAccountServices.AffiliatedAccount): Long =
+		unsupportedSyncApi("AffiliatedAccountORM.create")
 
-	fun readByHost(host: String): List<AffiliatedAccountServices.AffiliatedAccount> {
-		ConnectionPool.getConnection().use { connection ->
-			connection.prepareStatement("SELECT * FROM affiliated_account WHERE host = ?").use {
-				it.setString(1, host)
-				val rs = it.executeQuery()
-				val result = mutableListOf<AffiliatedAccountServices.AffiliatedAccount>()
-				while (rs.next()) {
-					result.add(
-						AffiliatedAccountServices.AffiliatedAccount(
-							rs.getString("name"),
-							rs.getString("host"),
-							rs.getString("password")
-						)
-					)
-				}
-				return result
-			}
-		}
-	}
+	suspend fun createAsync(item: AffiliatedAccountServices.AffiliatedAccount): Long =
+		if (
+			database.execute(
+				"INSERT INTO affiliated_account (name, host, password) VALUES (?, ?, ?)",
+				listOf(item.name, item.host, item.password),
+			) == 1L
+		) 1L else 0L
+
+	override fun read(input: Any): AffiliatedAccountServices.AffiliatedAccount? =
+		unsupportedSyncApi("AffiliatedAccountORM.read")
+
+	suspend fun readAsync(name: String): AffiliatedAccountServices.AffiliatedAccount? = database.one(
+		"SELECT name, host, password FROM affiliated_account WHERE name = ?",
+		listOf(name),
+		::mapRow,
+	)
+
+	suspend fun readByHostAsync(host: String): List<AffiliatedAccountServices.AffiliatedAccount> = database.all(
+		"SELECT name, host, password FROM affiliated_account WHERE host = ?",
+		listOf(host),
+		::mapRow,
+	)
 
 	override fun update(item: AffiliatedAccountServices.AffiliatedAccount): Boolean {
 		throw UnsupportedOperationException("Affiliated accounts cannot be modified")
@@ -100,14 +77,19 @@ class AffiliatedAccountORM : CrudDao<AffiliatedAccountServices.AffiliatedAccount
 		throw UnsupportedOperationException("Affiliated account deletion requires its host")
 	}
 
-	fun deleteByNameAndHost(name: String, host: String): Boolean {
-		ConnectionPool.getConnection().use { connection ->
-			connection.prepareStatement("DELETE FROM affiliated_account WHERE name = ? AND host = ?").use {
-				it.setString(1, name)
-				it.setString(2, host)
-				return it.executeUpdate() > 0
-			}
-		}
-	}
+	suspend fun deleteByNameAndHostAsync(name: String, host: String): Boolean =
+		database.execute(
+			"DELETE FROM affiliated_account WHERE name = ? AND host = ?",
+			listOf(name, host),
+		) > 0
 
+	fun deleteByNameAndHost(name: String, host: String): Boolean =
+		unsupportedSyncApi("AffiliatedAccountORM.deleteByNameAndHost")
+
+	private fun mapRow(row: io.r2dbc.spi.Row): AffiliatedAccountServices.AffiliatedAccount =
+		AffiliatedAccountServices.AffiliatedAccount(
+			name = row.get("name", String::class.java).orEmpty(),
+			host = row.get("host", String::class.java).orEmpty(),
+			password = row.get("password", String::class.java).orEmpty(),
+		)
 }

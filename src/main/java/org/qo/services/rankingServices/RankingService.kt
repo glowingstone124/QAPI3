@@ -8,15 +8,15 @@ import org.springframework.stereotype.Service
 
 @Service
 class RankingService(
-	private val store: RankingStore
+	private val store: RankingStore,
 ) {
 	private val gson = Gson()
 
-	fun download(kind: RankingKind, limit: Int = DEFAULT_LIMIT): String {
+	suspend fun download(kind: RankingKind, limit: Int = DEFAULT_LIMIT): String {
 		return gson.toJson(store.read(kind, normalizeLimit(limit)))
 	}
 
-	fun leaderboards(limit: Int = DEFAULT_LIMIT): JsonObject {
+	suspend fun leaderboards(limit: Int = DEFAULT_LIMIT): JsonObject {
 		val normalizedLimit = normalizeLimit(limit)
 		return JsonObject().apply {
 			addProperty("generatedAt", System.currentTimeMillis())
@@ -37,10 +37,9 @@ class RankingService(
 		}
 	}
 
-	fun upload(kind: RankingKind, body: String): JsonObject {
+	suspend fun upload(kind: RankingKind, body: String): JsonObject {
 		val delta = parseBody(body)
 		val updated = store.increment(kind, delta)
-
 		return JsonObject().apply {
 			addProperty("code", 0)
 			addProperty("updated", updated)
@@ -68,12 +67,12 @@ class RankingService(
 }
 
 interface RankingStore {
-	fun read(kind: RankingKind, limit: Int): Map<String, Long>
-	fun increment(kind: RankingKind, delta: Map<String, Long>): Int
+	suspend fun read(kind: RankingKind, limit: Int): Map<String, Long>
+	suspend fun increment(kind: RankingKind, delta: Map<String, Long>): Int
 }
 
 enum class RankingKind(val id: String, val columnName: String, val unit: String) {
 	PLACE("place", "place", "blocks"),
 	DESTROY("destroy", "destroy", "blocks"),
-	PLAYTIME("playtime", "playtime", "minutes")
+	PLAYTIME("playtime", "playtime", "minutes"),
 }

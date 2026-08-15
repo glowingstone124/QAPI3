@@ -10,13 +10,18 @@ import org.springframework.web.bind.annotation.RequestHeader
 import org.springframework.web.bind.annotation.RestController
 
 @RestController
-class MetroServiceController(private val serviceImpl: MetroServiceImpl, private val ri: ReturnInterface, private val nodes: Nodes) {
+class MetroServiceController(
+	private val serviceImpl: MetroServiceImpl,
+	private val ri: ReturnInterface,
+	private val nodes: Nodes,
+) {
 	@GetMapping("/qo/metro/download")
-	fun downloadMetro(): ResponseEntity<String> {
+	suspend fun downloadMetro(): ResponseEntity<String> {
 		return ri.GeneralHttpHeader(serviceImpl.getMetroJson())
 	}
+
 	@PostMapping("/qo/metro/upload")
-	fun uploadMetro(@RequestBody data: String, @RequestHeader("Token") token: String): ResponseEntity<String> {
+	suspend fun uploadMetro(@RequestBody data: String, @RequestHeader("Token") token: String): ResponseEntity<String> {
 		return ri.GeneralHttpHeader(serviceImpl.preInsertCheck(data, token))
 	}
 }

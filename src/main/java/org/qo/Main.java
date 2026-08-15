@@ -1,7 +1,6 @@
 package org.qo;
 import jakarta.annotation.PreDestroy;
 import jakarta.annotation.Resource;
-import org.qo.datas.ConnectionPool;
 import org.qo.redis.Redis;
 import org.qo.services.mmdb.Init;
 import org.qo.redis.Configuration;
@@ -39,8 +38,6 @@ public class Main {
     public static void main(String[] args) throws Exception {
         if (args.length != 0) {
         }
-        ConnectionPool.init(); //EVERY thing using SQL should init after this!
-        Msg.Companion.init();
         org.qo.redis.Configuration.INSTANCE.init();
         Funcs.Start();
         Init.INSTANCE.init();

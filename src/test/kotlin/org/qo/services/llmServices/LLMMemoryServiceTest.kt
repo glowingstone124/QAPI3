@@ -1,6 +1,7 @@
 package org.qo.services.llmServices
 
 import org.junit.jupiter.api.io.TempDir
+import kotlinx.coroutines.runBlocking
 import org.springframework.context.annotation.AnnotationConfigApplicationContext
 import java.nio.file.Files
 import java.nio.file.Path
@@ -26,7 +27,7 @@ class LLMMemoryServiceTest {
 	}
 
 	@Test
-	fun `upserts memory by group category and subject`() {
+	fun `upserts memory by group category and subject`() = runBlocking {
 		val service = service(FakeMemoryRepository())
 		val created = service.upsertMemory(100, "Alice", "favorite_drink", "喜欢红茶", "preference", "42", "Alice")
 		val updated = service.upsertMemory(100, "Alice", "favorite_drink", "现在喜欢咖啡", "preference", "42", "Alice")
@@ -40,7 +41,7 @@ class LLMMemoryServiceTest {
 	}
 
 	@Test
-	fun `keeps different keys for the same subject`() {
+	fun `keeps different keys for the same subject`() = runBlocking {
 		val service = service(FakeMemoryRepository())
 		service.upsertMemory(100, "Alice", "favorite_drink", "喜欢红茶", "preference")
 		service.upsertMemory(100, "Alice", "favorite_color", "喜欢蓝色", "preference")
@@ -49,7 +50,7 @@ class LLMMemoryServiceTest {
 	}
 
 	@Test
-	fun `scopes memories by group and ignores expired records`() {
+	fun `scopes memories by group and ignores expired records`() = runBlocking {
 		val service = service(FakeMemoryRepository())
 		service.upsertMemory(100, "活动", "event_time", "周六建筑比赛", "schedule")
 		service.upsertMemory(200, "活动", "event_time", "周日钓鱼比赛", "schedule")
@@ -61,7 +62,7 @@ class LLMMemoryServiceTest {
 	}
 
 	@Test
-	fun `forgets structured memory by id`() {
+	fun `forgets structured memory by id`() = runBlocking {
 		val service = service(FakeMemoryRepository())
 		val memory = service.upsertMemory(100, "Alice", "favorite_drink", "喜欢红茶", "preference")!!.record
 
@@ -72,7 +73,7 @@ class LLMMemoryServiceTest {
 	}
 
 	@Test
-	fun `migrates legacy memory only once`() {
+	fun `migrates legacy memory only once`() = runBlocking {
 		val repository = FakeMemoryRepository()
 		val legacy = tempDir.resolve("rag/100/memory.txt")
 		Files.createDirectories(legacy.parent)
@@ -100,29 +101,29 @@ class LLMMemoryServiceTest {
 		private val records = linkedMapOf<String, LLMMemoryRecord>()
 		private val migrations = mutableSetOf<String>()
 
-		override fun findByGroup(groupId: Long): List<LLMMemoryRecord> =
+		override suspend fun findByGroup(groupId: Long): List<LLMMemoryRecord> =
 			records.values.filter { it.groupId == groupId }
 
-		override fun findByIdentity(groupId: Long, subject: String, memoryKey: String): LLMMemoryRecord? =
+		override suspend fun findByIdentity(groupId: Long, subject: String, memoryKey: String): LLMMemoryRecord? =
 			records.values.firstOrNull { it.groupId == groupId && it.subject == subject && it.memoryKey == memoryKey }
 
-		override fun insert(record: LLMMemoryRecord): Boolean {
+		override suspend fun insert(record: LLMMemoryRecord): Boolean {
 			if (findByIdentity(record.groupId, record.subject, record.memoryKey) != null) return false
 			records[record.id] = record
 			return true
 		}
 
-		override fun update(record: LLMMemoryRecord) {
+		override suspend fun update(record: LLMMemoryRecord) {
 			records[record.id] = record
 		}
 
-		override fun delete(groupId: Long, ids: List<String>) {
+		override suspend fun delete(groupId: Long, ids: List<String>) {
 			ids.forEach { id -> records[id]?.takeIf { it.groupId == groupId }?.let { records.remove(id) } }
 		}
 
-		override fun isMigrationComplete(key: String): Boolean = key in migrations
+		override suspend fun isMigrationComplete(key: String): Boolean = key in migrations
 
-		override fun markMigrationComplete(key: String) {
+		override suspend fun markMigrationComplete(key: String) {
 			migrations.add(key)
 		}
 	}

@@ -1,5 +1,6 @@
 package org.qo.services.metroServices
 
+import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Test
 import org.mockito.Mockito
 import org.qo.TestApiApplication
@@ -13,7 +14,7 @@ import org.springframework.test.web.reactive.server.WebTestClient
 
 @SpringBootTest(
 	classes = [TestApiApplication::class, MetroServiceController::class, ReturnInterface::class],
-	webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT
+	webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
 )
 @AutoConfigureWebTestClient
 class MetroServiceControllerTest {
@@ -27,7 +28,7 @@ class MetroServiceControllerTest {
 	lateinit var nodes: Nodes
 
 	@Test
-	fun downloadMetro_returnsJson() {
+	fun downloadMetro_returnsJson() = runTest {
 		Mockito.`when`(serviceImpl.getMetroJson()).thenReturn("{\"lines\":[]}")
 
 		webTestClient.get()
@@ -39,7 +40,7 @@ class MetroServiceControllerTest {
 	}
 
 	@Test
-	fun uploadMetro_returnsServiceResult() {
+	fun uploadMetro_returnsServiceResult() = runTest {
 		Mockito.`when`(serviceImpl.preInsertCheck(Mockito.anyString(), Mockito.anyString()))
 			.thenReturn("OK")
 

@@ -195,7 +195,7 @@ class LLMToolService(
 		})
 	}
 
-	fun execute(name: String, rawArguments: String?, context: LLMToolContext): String {
+	suspend fun execute(name: String, rawArguments: String?, context: LLMToolContext): String {
 		val args = parseArguments(rawArguments)
 		return runCatching {
 			when (name) {
@@ -212,12 +212,12 @@ class LLMToolService(
 		}.getOrElse { errorResult("tool_error", it.message ?: "工具执行失败") }
 	}
 
-	private fun getPlayerRankings(args: JsonObject): String {
+	private suspend fun getPlayerRankings(args: JsonObject): String {
 		val limit = args.get("limit")?.takeIf { !it.isJsonNull }?.asInt ?: 10
 		return rankingService.leaderboards(limit.coerceIn(1, 20)).toString()
 	}
 
-	private fun searchChatHistory(args: JsonObject, requesterGroupId: Long?): String {
+	private suspend fun searchChatHistory(args: JsonObject, requesterGroupId: Long?): String {
 		val groupId = requesterGroupId ?: return errorResult("missing_group", "缺少群上下文，无法查询聊天历史")
 		val query = args.get("query")?.takeIf { !it.isJsonNull }?.asString?.trim().orEmpty()
 		if (query.isBlank()) return errorResult("bad_arguments", "query 不能为空")
@@ -237,7 +237,7 @@ class LLMToolService(
 
 	private fun normalizeTimestamp(value: Long?): Long? = value?.let { if (it in 1..9_999_999_999L) it * 1000 else it }
 
-	private fun addMemory(args: JsonObject, context: LLMToolContext): String {
+	private suspend fun addMemory(args: JsonObject, context: LLMToolContext): String {
 		val groupId = context.groupId ?: return errorResult("missing_group", "缺少群上下文，无法保存记忆")
 		val fact = (args.get("fact") ?: args.get("data"))?.takeIf { !it.isJsonNull }?.asString?.trim().orEmpty()
 		val subject = args.get("subject")?.takeIf { !it.isJsonNull }?.asString?.trim().orEmpty()
@@ -267,7 +267,7 @@ class LLMToolService(
 		})
 	}
 
-	private fun searchMemory(args: JsonObject, requesterGroupId: Long?): String {
+	private suspend fun searchMemory(args: JsonObject, requesterGroupId: Long?): String {
 		val groupId = requesterGroupId ?: return errorResult("missing_group", "缺少群上下文，无法查询记忆")
 		val query = args.get("query")?.takeIf { !it.isJsonNull }?.asString?.trim().orEmpty()
 		if (query.isBlank()) return errorResult("bad_arguments", "query 不能为空")
@@ -280,7 +280,7 @@ class LLMToolService(
 		})
 	}
 
-	private fun forgetMemory(args: JsonObject, requesterGroupId: Long?): String {
+	private suspend fun forgetMemory(args: JsonObject, requesterGroupId: Long?): String {
 		val groupId = requesterGroupId ?: return errorResult("missing_group", "缺少群上下文，无法删除记忆")
 		val memoryId = args.get("memory_id")?.takeIf { !it.isJsonNull }?.asString?.trim()
 		val query = args.get("query")?.takeIf { !it.isJsonNull }?.asString?.trim()
@@ -296,11 +296,11 @@ class LLMToolService(
 		})
 	}
 
-	private fun getServerStatus(args: JsonObject): String {
+	private suspend fun getServerStatus(args: JsonObject): String {
 		val serverId = args.get("server_id")?.takeIf { !it.isJsonNull }?.asInt
 			?: serverIdFromName(args.get("server_name")?.takeIf { !it.isJsonNull }?.asString)
 			?: 1
-		val data = status.download(serverId)
+		val data = status.downloadAsync(serverId)
 		return gson.toJson(JsonObject().apply {
 			addProperty("tool", "get_server_status")
 			addProperty("server_id", serverId)
@@ -317,7 +317,7 @@ class LLMToolService(
 		}
 	}
 
-	private fun queryMetroLines(args: JsonObject): String {
+	private suspend fun queryMetroLines(args: JsonObject): String {
 		val from = args.get("from")?.takeIf { !it.isJsonNull }?.asString?.trim().orEmpty()
 		val to = args.get("to")?.takeIf { !it.isJsonNull }?.asString?.trim().orEmpty()
 		val constraints = parseRouteConstraints(args)
@@ -366,7 +366,7 @@ class LLMToolService(
 		})
 	}
 
-	private fun calculateTransportationRoute(from: String, to: String, constraints: RouteConstraints): String {
+	private suspend fun calculateTransportationRoute(from: String, to: String, constraints: RouteConstraints): String {
 		val fromCandidates = findStations(from)
 		val toCandidates = findStations(to)
 		if (fromCandidates.isEmpty() || toCandidates.isEmpty()) {
@@ -493,7 +493,7 @@ class LLMToolService(
 			.uppercase(Locale.ROOT)
 	}
 
-	private fun queryTransportation(query: String, lineId: Int?): String? = runCatching {
+	private suspend fun queryTransportation(query: String, lineId: Int?): String? = runCatching {
 		val stations = if (query.isBlank()) {
 			transportationService.listStations().take(maxMetroResults)
 		} else {
@@ -519,7 +519,7 @@ class LLMToolService(
 		})
 	}.getOrNull()
 
-	private fun findStations(query: String): List<Station> {
+	private suspend fun findStations(query: String): List<Station> {
 		val normalized = normalizeSearch(query)
 		if (normalized.isBlank()) {
 			return emptyList()
@@ -575,7 +575,7 @@ class LLMToolService(
 			.lowercase(Locale.ROOT)
 			.replace("\\s+".toRegex(), "")
 
-	private fun searchMinecraftKnowledge(args: JsonObject, groupId: Long?): String {
+	private suspend fun searchMinecraftKnowledge(args: JsonObject, groupId: Long?): String {
 		val query = args.get("query")?.takeIf { !it.isJsonNull }?.asString?.trim().orEmpty()
 		if (query.isBlank()) {
 			return errorResult("bad_arguments", "query 不能为空")

@@ -1,26 +1,38 @@
 package org.qo.services.llmServices
 
-import jakarta.annotation.PostConstruct
-import org.qo.datas.ConnectionPool
+import jakarta.annotation.PreDestroy
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
+import org.qo.datas.ReactiveDatabase
+import org.springframework.boot.context.event.ApplicationReadyEvent
+import org.springframework.context.event.EventListener
 import org.springframework.stereotype.Repository
 
 interface LLMMemoryRepository {
-	fun findByGroup(groupId: Long): List<LLMMemoryRecord>
-	fun findByIdentity(groupId: Long, subject: String, memoryKey: String): LLMMemoryRecord?
-	fun insert(record: LLMMemoryRecord): Boolean
-	fun update(record: LLMMemoryRecord)
-	fun delete(groupId: Long, ids: List<String>)
-	fun isMigrationComplete(key: String): Boolean
-	fun markMigrationComplete(key: String)
+	suspend fun findByGroup(groupId: Long): List<LLMMemoryRecord>
+	suspend fun findByIdentity(groupId: Long, subject: String, memoryKey: String): LLMMemoryRecord?
+	suspend fun insert(record: LLMMemoryRecord): Boolean
+	suspend fun update(record: LLMMemoryRecord)
+	suspend fun delete(groupId: Long, ids: List<String>)
+	suspend fun isMigrationComplete(key: String): Boolean
+	suspend fun markMigrationComplete(key: String)
 }
 
 @Repository
-class JdbcLLMMemoryRepository : LLMMemoryRepository {
-	@PostConstruct
-	fun init() {
-		ConnectionPool.getConnection().use { connection ->
-			connection.createStatement().use { statement ->
-				statement.executeUpdate(
+class R2dbcLLMMemoryRepository(
+	private val database: ReactiveDatabase,
+) : LLMMemoryRepository {
+	private val initializationScope = CoroutineScope(SupervisorJob())
+	private val schemaReady = CompletableDeferred<Unit>()
+
+	@EventListener(ApplicationReadyEvent::class)
+	fun initializeSchema() {
+		initializationScope.launch {
+			try {
+				database.execute(
 					"""
 					CREATE TABLE IF NOT EXISTS llm_memories (
 						id VARCHAR(36) PRIMARY KEY,
@@ -40,7 +52,7 @@ class JdbcLLMMemoryRepository : LLMMemoryRepository {
 					)
 					""".trimIndent()
 				)
-				statement.executeUpdate(
+				database.execute(
 					"""
 					CREATE TABLE IF NOT EXISTS llm_memory_migrations (
 						migration_key VARCHAR(128) PRIMARY KEY,
@@ -48,128 +60,133 @@ class JdbcLLMMemoryRepository : LLMMemoryRepository {
 					)
 					""".trimIndent()
 				)
+				schemaReady.complete(Unit)
+			} catch (error: Exception) {
+				schemaReady.completeExceptionally(error)
+				println("LLM memory table init failed: ${error.message}")
 			}
 		}
 	}
 
-	override fun findByGroup(groupId: Long): List<LLMMemoryRecord> =
-		ConnectionPool.getConnection().use { connection ->
-			connection.prepareStatement(
-				"SELECT * FROM llm_memories WHERE group_id = ? ORDER BY updated_at DESC"
-			).use { statement ->
-				statement.setLong(1, groupId)
-				statement.executeQuery().use { result ->
-					buildList {
-						while (result.next()) add(result.toMemoryRecord())
-					}
-				}
-			}
-		}
-
-	override fun findByIdentity(groupId: Long, subject: String, memoryKey: String): LLMMemoryRecord? =
-		ConnectionPool.getConnection().use { connection ->
-			connection.prepareStatement(
-				"SELECT * FROM llm_memories WHERE group_id = ? AND subject = ? AND memory_key = ? LIMIT 1"
-			).use { statement ->
-				statement.setLong(1, groupId)
-				statement.setString(2, subject)
-				statement.setString(3, memoryKey)
-				statement.executeQuery().use { result -> if (result.next()) result.toMemoryRecord() else null }
-			}
-		}
-
-	override fun insert(record: LLMMemoryRecord): Boolean =
-		ConnectionPool.getConnection().use { connection ->
-			connection.prepareStatement(
-				"""
-				INSERT IGNORE INTO llm_memories
-				(id, group_id, subject, memory_key, fact, category, source_uid, source_name, created_at, updated_at, expires_at)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-				""".trimIndent()
-			).use { statement ->
-				statement.bind(record)
-				statement.executeUpdate() == 1
-			}
-		}
-
-	override fun update(record: LLMMemoryRecord) {
-		ConnectionPool.getConnection().use { connection ->
-			connection.prepareStatement(
-				"""
-				UPDATE llm_memories SET fact = ?, category = ?, source_uid = ?, source_name = ?, updated_at = ?, expires_at = ?
-				WHERE id = ? AND group_id = ?
-				""".trimIndent()
-			).use { statement ->
-				statement.setString(1, record.fact)
-				statement.setString(2, record.category)
-				statement.setString(3, record.sourceUid)
-				statement.setString(4, record.sourceName)
-				statement.setLong(5, record.updatedAt)
-				statement.setObject(6, record.expiresAt)
-				statement.setString(7, record.id)
-				statement.setLong(8, record.groupId)
-				statement.executeUpdate()
-			}
-		}
+	@PreDestroy
+	fun shutdown() {
+		initializationScope.cancel()
 	}
 
-	override fun delete(groupId: Long, ids: List<String>) {
+	override suspend fun findByGroup(groupId: Long): List<LLMMemoryRecord> {
+		schemaReady.await()
+		return database.all(
+			"""
+			SELECT id, group_id, subject, memory_key, fact, category, source_uid, source_name, created_at, updated_at, expires_at
+			FROM llm_memories
+			WHERE group_id = ?
+			ORDER BY updated_at DESC
+			""".trimIndent(),
+			listOf(groupId),
+			::toMemoryRecord,
+		)
+	}
+
+	override suspend fun findByIdentity(groupId: Long, subject: String, memoryKey: String): LLMMemoryRecord? {
+		schemaReady.await()
+		return database.one(
+			"""
+			SELECT id, group_id, subject, memory_key, fact, category, source_uid, source_name, created_at, updated_at, expires_at
+			FROM llm_memories
+			WHERE group_id = ? AND subject = ? AND memory_key = ?
+			LIMIT 1
+			""".trimIndent(),
+			listOf(groupId, subject, memoryKey),
+			::toMemoryRecord,
+		)
+	}
+
+	override suspend fun insert(record: LLMMemoryRecord): Boolean {
+		schemaReady.await()
+		return database.execute(
+			"""
+			INSERT IGNORE INTO llm_memories
+			(id, group_id, subject, memory_key, fact, category, source_uid, source_name, created_at, updated_at, expires_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			""".trimIndent(),
+			record.bindings(),
+		) == 1L
+	}
+
+	override suspend fun update(record: LLMMemoryRecord) {
+		schemaReady.await()
+		database.execute(
+			"""
+			UPDATE llm_memories
+			SET fact = ?, category = ?, source_uid = ?, source_name = ?, updated_at = ?, expires_at = ?
+			WHERE id = ? AND group_id = ?
+			""".trimIndent(),
+			listOf(
+				record.fact,
+				record.category,
+				record.sourceUid,
+				record.sourceName,
+				record.updatedAt,
+				record.expiresAt,
+				record.id,
+				record.groupId,
+			),
+		)
+	}
+
+	override suspend fun delete(groupId: Long, ids: List<String>) {
 		if (ids.isEmpty()) return
-		ConnectionPool.getConnection().use { connection ->
-			val placeholders = ids.joinToString(",") { "?" }
-			connection.prepareStatement("DELETE FROM llm_memories WHERE group_id = ? AND id IN ($placeholders)").use { statement ->
-				statement.setLong(1, groupId)
-				ids.forEachIndexed { index, id -> statement.setString(index + 2, id) }
-				statement.executeUpdate()
-			}
+		schemaReady.await()
+		ids.distinct().chunked(200).forEach { batch ->
+			if (batch.isEmpty()) return@forEach
+			database.execute(
+				"DELETE FROM llm_memories WHERE group_id = ? AND id IN (${batch.joinToString(", ") { "?" }})",
+				listOf(groupId) + batch,
+			)
 		}
 	}
 
-	override fun isMigrationComplete(key: String): Boolean =
-		ConnectionPool.getConnection().use { connection ->
-			connection.prepareStatement("SELECT 1 FROM llm_memory_migrations WHERE migration_key = ?").use { statement ->
-				statement.setString(1, key)
-				statement.executeQuery().use { it.next() }
-			}
-		}
-
-	override fun markMigrationComplete(key: String) {
-		ConnectionPool.getConnection().use { connection ->
-			connection.prepareStatement(
-				"INSERT IGNORE INTO llm_memory_migrations(migration_key, completed_at) VALUES (?, ?)"
-			).use { statement ->
-				statement.setString(1, key)
-				statement.setLong(2, System.currentTimeMillis())
-				statement.executeUpdate()
-			}
-		}
+	override suspend fun isMigrationComplete(key: String): Boolean {
+		schemaReady.await()
+		return database.one(
+			"SELECT 1 FROM llm_memory_migrations WHERE migration_key = ?",
+			listOf(key),
+		) { true } != null
 	}
 
-	private fun java.sql.PreparedStatement.bind(record: LLMMemoryRecord) {
-		setString(1, record.id)
-		setLong(2, record.groupId)
-		setString(3, record.subject)
-		setString(4, record.memoryKey)
-		setString(5, record.fact)
-		setString(6, record.category)
-		setString(7, record.sourceUid)
-		setString(8, record.sourceName)
-		setLong(9, record.createdAt)
-		setLong(10, record.updatedAt)
-		setObject(11, record.expiresAt)
+	override suspend fun markMigrationComplete(key: String) {
+		schemaReady.await()
+		database.execute(
+			"INSERT IGNORE INTO llm_memory_migrations(migration_key, completed_at) VALUES (?, ?)",
+			listOf(key, System.currentTimeMillis()),
+		)
 	}
 
-	private fun java.sql.ResultSet.toMemoryRecord(): LLMMemoryRecord = LLMMemoryRecord(
-		id = getString("id"),
-		groupId = getLong("group_id"),
-		subject = getString("subject"),
-		memoryKey = getString("memory_key"),
-		fact = getString("fact"),
-		category = getString("category"),
-		sourceUid = getString("source_uid"),
-		sourceName = getString("source_name"),
-		createdAt = getLong("created_at"),
-		updatedAt = getLong("updated_at"),
-		expiresAt = getLong("expires_at").takeUnless { wasNull() },
+	private fun LLMMemoryRecord.bindings(): List<Any?> = listOf(
+		id,
+		groupId,
+		subject,
+		memoryKey,
+		fact,
+		category,
+		sourceUid,
+		sourceName,
+		createdAt,
+		updatedAt,
+		expiresAt,
+	)
+
+	private fun toMemoryRecord(row: io.r2dbc.spi.Row): LLMMemoryRecord = LLMMemoryRecord(
+		id = row.get("id", String::class.java)!!,
+		groupId = row.get("group_id", java.lang.Long::class.java)!!.toLong(),
+		subject = row.get("subject", String::class.java)!!,
+		memoryKey = row.get("memory_key", String::class.java)!!,
+		fact = row.get("fact", String::class.java)!!,
+		category = row.get("category", String::class.java)!!,
+		sourceUid = row.get("source_uid", String::class.java),
+		sourceName = row.get("source_name", String::class.java),
+		createdAt = row.get("created_at", java.lang.Long::class.java)!!.toLong(),
+		updatedAt = row.get("updated_at", java.lang.Long::class.java)!!.toLong(),
+		expiresAt = row.get("expires_at", java.lang.Long::class.java)?.toLong(),
 	)
 }

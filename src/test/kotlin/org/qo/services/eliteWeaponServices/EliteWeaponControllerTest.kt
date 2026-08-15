@@ -1,5 +1,6 @@
 package org.qo.services.eliteWeaponServices
 
+import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Test
 import org.mockito.Mockito
 import org.qo.TestApiApplication
@@ -13,7 +14,7 @@ import org.springframework.test.web.reactive.server.WebTestClient
 
 @SpringBootTest(
 	classes = [TestApiApplication::class, EliteWeaponController::class, ReturnInterface::class],
-	webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT
+	webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
 )
 @AutoConfigureWebTestClient
 class EliteWeaponControllerTest {
@@ -31,7 +32,7 @@ class EliteWeaponControllerTest {
 	}
 
 	@Test
-	fun download_returnsPayload() {
+	fun download_returnsPayload() = runTest {
 		Mockito.`when`(impl.getEliteWeaponsFromUsername("neo")).thenReturn("[]")
 
 		webTestClient.get()
@@ -43,11 +44,9 @@ class EliteWeaponControllerTest {
 	}
 
 	@Test
-	fun create_returnsUuidOnSuccess() {
+	fun create_returnsUuidOnSuccess() = runTest {
 		authorize()
-		Mockito.`when`(
-			impl.handleEliteWeaponRequest("owner", "type", "desc", "name")
-		).thenReturn("uuid-1")
+		Mockito.`when`(impl.handleEliteWeaponRequest("owner", "type", "desc", "name")).thenReturn("uuid-1")
 
 		webTestClient.post()
 			.uri("/qo/elite/create?owner=owner&type=type&description=desc&name=name")
@@ -60,11 +59,9 @@ class EliteWeaponControllerTest {
 	}
 
 	@Test
-	fun create_returnsFalseWhenRejected() {
+	fun create_returnsFalseWhenRejected() = runTest {
 		authorize()
-		Mockito.`when`(
-			impl.handleEliteWeaponRequest("owner", "type", "desc", "name")
-		).thenReturn(null)
+		Mockito.`when`(impl.handleEliteWeaponRequest("owner", "type", "desc", "name")).thenReturn(null)
 
 		webTestClient.post()
 			.uri("/qo/elite/create?owner=owner&type=type&description=desc&name=name")
@@ -76,7 +73,7 @@ class EliteWeaponControllerTest {
 	}
 
 	@Test
-	fun batch_delegatesToService() {
+	fun batch_delegatesToService() = runTest {
 		authorize()
 		Mockito.`when`(impl.addEliteWeaponStats("uuid", "req", 30L, 2L)).thenReturn("ok")
 
@@ -90,7 +87,7 @@ class EliteWeaponControllerTest {
 	}
 
 	@Test
-	fun batch_rejectsEmptyStats() {
+	fun batch_rejectsEmptyStats() = runTest {
 		authorize()
 		webTestClient.post()
 			.uri("/qo/elite/batch?requester=req&uuid=uuid&damage=0&kills=0")
@@ -102,7 +99,7 @@ class EliteWeaponControllerTest {
 	}
 
 	@Test
-	fun batch_rejectsMissingToken() {
+	fun batch_rejectsMissingToken() = runTest {
 		webTestClient.post().uri("/qo/elite/batch?requester=req&uuid=uuid&damage=3&kills=0")
 			.exchange().expectStatus().isBadRequest
 		Mockito.verifyNoInteractions(impl)

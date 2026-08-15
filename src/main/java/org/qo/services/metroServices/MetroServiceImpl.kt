@@ -4,127 +4,101 @@ import com.google.gson.Gson
 import com.google.gson.GsonBuilder
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
-import org.qo.datas.ConnectionPool
 import org.qo.datas.Nodes
+import org.qo.datas.ReactiveDatabase
 import org.springframework.stereotype.Service
 
 @Service
-class MetroServiceImpl(private val nodes:Nodes) {
-	val gson: Gson = GsonBuilder().setPrettyPrinting().create()
+class MetroServiceImpl(
+	private val nodes: Nodes,
+	private val database: ReactiveDatabase,
+) {
+	private val gson: Gson = GsonBuilder().setPrettyPrinting().create()
+
 	data class Signal(
 		val world: String,
 		val x: Int,
 		val y: Int,
-		val z: Int
+		val z: Int,
 	)
 
 	data class Section(
 		val lid: Int,
 		val station: Boolean,
 		val dummy: String,
-		val signal: List<JsonObject>
+		val signal: List<JsonObject>,
 	)
+
 	data class SectionWithId(
 		val id: String,
 		val lid: Int,
 		val station: Boolean,
 		val dummy: String,
 		val signal: List<JsonObject>,
-		val author: Long
+		val author: Long,
 	)
 
-
-	fun getMetroJson(): String {
-
-		val sectionMap = mutableMapOf<String, Section>()
-		ConnectionPool.getConnection().use { connection ->
-			connection.createStatement().use { stmt ->
-				stmt.executeQuery("SELECT * FROM sections").use { resultSet ->
-					while (resultSet.next()) {
-						val id = resultSet.getString("id")
-						val lid = resultSet.getInt("lid")
-						val station = resultSet.getBoolean("station")
-						val dummy = resultSet.getString("dummy")
-						val sigList: MutableList<JsonObject> = mutableListOf()
-						val upStr: String? = resultSet.getString("signal_up")
-						val downStr: String? = resultSet.getString("signal_down")
-
-						upStr?.let {
-							sigList.add(JsonParser.parseString(upStr) as JsonObject)
-						}
-						downStr?.let {
-							sigList.add(JsonParser.parseString(downStr) as JsonObject)
-						}
-
-						val section = Section(
-							lid = lid,
-							station = station,
-							dummy = dummy,
-							signal = sigList
-						)
-
-						sectionMap[id] = section
-					}
+	suspend fun getMetroJson(): String {
+		val sectionMap = linkedMapOf<String, Section>()
+		database.all("SELECT * FROM sections") { row ->
+			val signal = buildList {
+				row.get("signal_up", String::class.java)?.takeIf { it.isNotBlank() }?.let {
+					add(JsonParser.parseString(it).asJsonObject)
+				}
+				row.get("signal_down", String::class.java)?.takeIf { it.isNotBlank() }?.let {
+					add(JsonParser.parseString(it).asJsonObject)
 				}
 			}
-		}
-
+			row.get("id", String::class.java)!! to Section(
+				lid = row.get("lid", java.lang.Integer::class.java)!!.toInt(),
+				station = row.get("station", java.lang.Boolean::class.java) == true,
+				dummy = row.get("dummy", String::class.java).orEmpty(),
+				signal = signal,
+			)
+		}.forEach { (id, section) -> sectionMap[id] = section }
 		return gson.toJson(sectionMap)
 	}
 
-
-	fun preInsertCheck(body: String, token: String): String {
-		if (nodes.getServerFromToken(token) < 0){
+	suspend fun preInsertCheck(body: String, token: String): String {
+		if (nodes.getServerFromToken(token) < 0) {
 			return "Err: Not legal token"
 		}
 		val section = gson.fromJson(body, SectionWithId::class.java)
-
 		val signalUp = section.signal.getOrNull(0)
 		val signalDown = section.signal.getOrNull(1)
-
-		val result = insertSection(
-			id = section.id,
-			lid = section.lid,
-			station = section.station,
-			dummy = section.dummy,
-			signalUp = signalUp,
-			signalDown = signalDown,
-			author = section.author
-		)
-		if (result){
-			return "OK"
+		return if (
+			insertSection(
+				id = section.id,
+				lid = section.lid,
+				station = section.station,
+				dummy = section.dummy,
+				signalUp = signalUp,
+				signalDown = signalDown,
+				author = section.author,
+			)
+		) {
+			"OK"
+		} else {
+			"Err: Not valid json"
 		}
-		return "Err: Not valid json"
 	}
-	/**
-	 * @param id 十六进制id
-	 * @param lid 线路编号
-	 * @param station 站点编号
-	 * @param dummy 名字
-	 * @param signalUp 上行地标位置
-	 * @param signalDown 下行地标位置
-	 * @param author 来源
-	 */
-	fun insertSection(id: String, lid: Int, station: Boolean, dummy: String, signalUp: JsonObject?, signalDown: JsonObject?, author: Long): Boolean {
 
-		val connection = ConnectionPool.getConnection()
+	suspend fun insertSection(
+		id: String,
+		lid: Int,
+		station: Boolean,
+		dummy: String,
+		signalUp: JsonObject?,
+		signalDown: JsonObject?,
+		author: Long,
+	): Boolean {
 		val sql = """
-		INSERT INTO sections (id, lid, station, dummy, signal_up, signal_down, author)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
-	""".trimIndent()
-
-		connection.use { conn ->
-			conn.prepareStatement(sql).use { stmt ->
-				stmt.setString(1, id)
-				stmt.setInt(2, lid)
-				stmt.setBoolean(3, station)
-				stmt.setString(4, dummy)
-				stmt.setString(5, signalUp?.toString())
-				stmt.setString(6, signalDown?.toString())
-				stmt.setString(7, author.toString())
-				return stmt.executeUpdate() > 0
-			}
-		}
+			INSERT INTO sections (id, lid, station, dummy, signal_up, signal_down, author)
+			VALUES (?, ?, ?, ?, ?, ?, ?)
+		""".trimIndent()
+		return database.execute(
+			sql,
+			listOf(id, lid, station, dummy, signalUp?.toString(), signalDown?.toString(), author.toString()),
+		) > 0
 	}
-
 }

@@ -1,6 +1,6 @@
 package org.qo.services.fallenServices
 
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Test
 import org.mockito.Mockito
 import org.qo.TestApiApplication
@@ -14,7 +14,7 @@ import org.springframework.test.web.reactive.server.WebTestClient
 
 @SpringBootTest(
 	classes = [TestApiApplication::class, FallenTeamController::class, ReturnInterface::class],
-	webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT
+	webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
 )
 @AutoConfigureWebTestClient
 class FallenTeamControllerTest {
@@ -28,10 +28,9 @@ class FallenTeamControllerTest {
 	lateinit var nodes: Nodes
 
 	@Test
-	fun currentSelection_returnsLockedTeamForAuthenticatedUser(): Unit = runBlocking {
+	fun currentSelection_returnsLockedTeamForAuthenticatedUser() = runTest {
 		val selection = FallenTeamSelection("alex", FallenTeam.B, 1234L)
-		Mockito.`when`(fallenTeamService.selectionForToken("login-token"))
-			.thenReturn("alex" to selection)
+		Mockito.`when`(fallenTeamService.selectionForToken("login-token")).thenReturn("alex" to selection)
 
 		webTestClient.get()
 			.uri("/qo/authorization/fallen/team")
@@ -45,10 +44,11 @@ class FallenTeamControllerTest {
 	}
 
 	@Test
-	fun selectTeam_rejectsASecondSelectionAndReturnsOriginalTeam(): Unit = runBlocking {
+	fun selectTeam_rejectsASecondSelectionAndReturnsOriginalTeam() = runTest {
 		val selection = FallenTeamSelection("alex", FallenTeam.A, 1234L)
-		Mockito.`when`(fallenTeamService.select("login-token", "{\"team\":\"C\"}"))
-			.thenReturn("alex" to FallenSelectionResult.AlreadySelected(selection))
+		Mockito.`when`(fallenTeamService.select("login-token", "{\"team\":\"C\"}")).thenReturn(
+			"alex" to FallenSelectionResult.AlreadySelected(selection),
+		)
 
 		webTestClient.post()
 			.uri("/qo/authorization/fallen/team")
@@ -73,7 +73,7 @@ class FallenTeamControllerTest {
 	}
 
 	@Test
-	fun serverSelection_assignsAJoiningPlayerThroughTheJoinSpecificServiceMethod(): Unit = runBlocking {
+	fun serverSelection_assignsAJoiningPlayerThroughTheJoinSpecificServiceMethod() = runTest {
 		val selection = FallenTeamSelection("alex", FallenTeam.C, 1234L, FallenTeam.C, 1234L)
 		Mockito.`when`(nodes.getServerFromToken("server-token")).thenReturn(1)
 		Mockito.`when`(fallenTeamService.selectionForJoiningPlayer("alex")).thenReturn(selection)

@@ -16,46 +16,40 @@ import java.util.Locale
 @RestController
 @RequestMapping("/qo/transportation")
 class TransportationServiceController(
-	private val service: TransportationServiceImpl
+	private val service: TransportationServiceImpl,
 ) {
-	val gson = Gson()
+	private val gson = Gson()
 
 	@GetMapping("/station/id")
-	fun getStationById(@RequestParam id: String): ResponseEntity<String> {
+	suspend fun getStationById(@RequestParam id: String): ResponseEntity<String> {
 		val result = service.getStationById(id) ?: return notFound()
 		return ReturnInterface().GeneralHttpHeader(toStationJson(result))
 	}
 
 	@GetMapping("/station/all")
-	fun getAllStations(): ResponseEntity<String> {
+	suspend fun getAllStations(): ResponseEntity<String> {
 		return ReturnInterface().GeneralHttpHeader(gson.toJson(service.listStations()))
 	}
 
 	@GetMapping("/station/name")
-	fun getStationByName(@RequestParam name: String): ResponseEntity<String> {
-		return ReturnInterface().GeneralHttpHeader(
-			gson.toJson(service.queryStationsByName(name))
-		)
+	suspend fun getStationByName(@RequestParam name: String): ResponseEntity<String> {
+		return ReturnInterface().GeneralHttpHeader(gson.toJson(service.queryStationsByName(name)))
 	}
 
 	@GetMapping("/line/id")
-	fun getLineStationsById(@RequestParam id: Int): ResponseEntity<String> {
-		return ReturnInterface().GeneralHttpHeader(
-			gson.toJson(service.queryStationsByLineId(id))
-		)
+	suspend fun getLineStationsById(@RequestParam id: Int): ResponseEntity<String> {
+		return ReturnInterface().GeneralHttpHeader(gson.toJson(service.queryStationsByLineId(id)))
 	}
 
 	@GetMapping("/line/detail")
-	fun getLineDetailById(@RequestParam id: Int): ResponseEntity<String> {
+	suspend fun getLineDetailById(@RequestParam id: Int): ResponseEntity<String> {
 		val result = service.queryLineDetailById(id) ?: return notFound()
 		return ReturnInterface().GeneralHttpHeader(gson.toJson(result))
 	}
 
 	@GetMapping("/line/name")
-	fun getLineStationsByName(@RequestParam name: String): ResponseEntity<String> {
-		return ReturnInterface().GeneralHttpHeader(
-			gson.toJson(service.queryStationsByLineName(name))
-		)
+	suspend fun getLineStationsByName(@RequestParam name: String): ResponseEntity<String> {
+		return ReturnInterface().GeneralHttpHeader(gson.toJson(service.queryStationsByLineName(name)))
 	}
 
 	@GetMapping("/dimension/all")
@@ -63,16 +57,6 @@ class TransportationServiceController(
 		return ReturnInterface().GeneralHttpHeader(gson.toJson(Dimension.entries.map { it.name }))
 	}
 
-	/*
-	* {
-	*   start: 1,
-	*   end: 2,
-	*   banned_dims: ["NETHER","THE_END"],
-	*   banned_types: ["WALK","AIRPLANE"],
-	*   exclude_dims: ["OVERWORLD"],
-	*   exclude_types: ["boat"]
-	* }
-	* */
 	data class CalcReq(
 		val start: String,
 		val end: String,
@@ -83,7 +67,7 @@ class TransportationServiceController(
 	)
 
 	@PostMapping("/calculate", consumes = ["application/json"])
-	fun calculateRoute(@RequestBody req: CalcReq): ResponseEntity<String> {
+	suspend fun calculateRoute(@RequestBody req: CalcReq): ResponseEntity<String> {
 		val excludedDims = mergeFilters(req.banned_dims, req.exclude_dims)
 		val excludedTypes = mergeFilters(req.banned_types, req.exclude_types)
 		val result = service.calculateRoute(
@@ -91,14 +75,14 @@ class TransportationServiceController(
 			req.end,
 			RouteConstraints(
 				convertToDimSet(excludedDims),
-				convertToLineTypeSet(excludedTypes)
-			)
+				convertToLineTypeSet(excludedTypes),
+			),
 		) ?: return notFound()
 
 		return ReturnInterface().GeneralHttpHeader(gson.toJson(result))
 	}
 
-	fun notFound(): ResponseEntity<String> {
+	private fun notFound(): ResponseEntity<String> {
 		return ReturnInterface().GeneralHttpHeader(JsonObject().apply {
 			addProperty("result", "-1")
 		}.toString())

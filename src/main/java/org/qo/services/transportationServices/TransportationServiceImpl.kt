@@ -10,15 +10,15 @@ import com.google.gson.JsonParseException
 import com.google.gson.JsonPrimitive
 import com.google.gson.JsonSerializationContext
 import com.google.gson.JsonSerializer
-import com.google.gson.annotations.SerializedName
 import com.google.gson.annotations.JsonAdapter
-import org.qo.datas.ConnectionPool
+import com.google.gson.annotations.SerializedName
+import io.r2dbc.spi.Row
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import org.qo.datas.ReactiveDatabase
 import org.springframework.stereotype.Service
-import java.sql.ResultSet
-import java.sql.Statement
 import java.util.Locale
 import java.util.PriorityQueue
-
 
 data class Station(
 	@SerializedName("name") val NAME: String,
@@ -179,8 +179,8 @@ class LocationAdapter : JsonSerializer<Location>, JsonDeserializer<Location> {
 	}
 }
 
-enum class LineType(private val lineType: Int, name:String) {
-	METRO(0,"METRO"),
+enum class LineType(private val lineType: Int, name: String) {
+	METRO(0, "METRO"),
 	RAPID(1, "RAPID"),
 	BLUEICE(2, "BLUEICE"),
 	CITYMETRO(3, "CITYMETRO"),
@@ -261,19 +261,25 @@ data class RouteResult(
 )
 
 @Service
-class TransportationServiceImpl {
+class TransportationServiceImpl(
+	private val database: ReactiveDatabase,
+) {
 	private val gson = Gson()
-	private val TRANSFER_TIME_SECONDS = 15
+	private val transferTimeSeconds = 15
+	private val schemaMutex = Mutex()
+	@Volatile
+	private var schemaReady = false
 
-	private val CREATE_STATIONS_TABLE_SQL = """
+	private val createStationsTableSql = """
 		CREATE TABLE IF NOT EXISTS transportation_stations (
 			id VARCHAR(64) PRIMARY KEY,
 			name VARCHAR(255) NOT NULL,
+			name_en VARCHAR(255) NOT NULL,
 			screen_location LONGTEXT NOT NULL
 		)
 	""".trimIndent()
 
-	private val CREATE_LINES_TABLE_SQL = """
+	private val createLinesTableSql = """
 		CREATE TABLE IF NOT EXISTS transportation_lines (
 			id INT AUTO_INCREMENT PRIMARY KEY,
 			name VARCHAR(255) NOT NULL,
@@ -286,302 +292,184 @@ class TransportationServiceImpl {
 		)
 	""".trimIndent()
 
-
-	fun ensureTables() {
-		ConnectionPool.getConnection().use { conn ->
-			conn.createStatement().use { stmt ->
-				stmt.executeUpdate(CREATE_STATIONS_TABLE_SQL)
-				stmt.executeUpdate(CREATE_LINES_TABLE_SQL)
-			}
+	suspend fun ensureTables() {
+		if (schemaReady) return
+		schemaMutex.withLock {
+			if (schemaReady) return
+			database.execute(createStationsTableSql)
+			database.execute(createLinesTableSql)
+			database.execute("ALTER TABLE transportation_stations ADD COLUMN IF NOT EXISTS name_en VARCHAR(255) NOT NULL DEFAULT ''")
+			database.execute("ALTER TABLE transportation_lines ADD COLUMN IF NOT EXISTS name_en VARCHAR(255) NOT NULL DEFAULT ''")
+			database.execute("ALTER TABLE transportation_lines ADD COLUMN IF NOT EXISTS dimension VARCHAR(32) NOT NULL DEFAULT 'OVERWORLD'")
+			schemaReady = true
 		}
 	}
 
-	fun addStation(station: Station): Boolean {
+	suspend fun addStation(station: Station): Boolean {
+		ensureTables()
 		val sql = """
-			INSERT INTO transportation_stations (id, name, screen_location)
-			VALUES (?, ?, ?)
+			INSERT INTO transportation_stations (id, name, name_en, screen_location)
+			VALUES (?, ?, ?, ?)
 		""".trimIndent()
-		ConnectionPool.getConnection().use { conn ->
-			conn.prepareStatement(sql).use { stmt ->
-				stmt.setString(1, station.ID)
-				stmt.setString(2, station.NAME)
-				stmt.setString(3, gson.toJson(station.SCREEN_LOCATION))
-				return stmt.executeUpdate() > 0
-			}
-		}
+		return database.execute(sql, listOf(station.ID, station.NAME, station.NAME_EN, gson.toJson(station.SCREEN_LOCATION))) > 0
 	}
 
-	fun editStation(station: Station): Boolean {
+	suspend fun editStation(station: Station): Boolean {
+		ensureTables()
 		val sql = """
 			UPDATE transportation_stations
-			SET name = ?, screen_location = ?
+			SET name = ?, name_en = ?, screen_location = ?
 			WHERE id = ?
 		""".trimIndent()
-		ConnectionPool.getConnection().use { conn ->
-			conn.prepareStatement(sql).use { stmt ->
-				stmt.setString(1, station.NAME)
-				stmt.setString(2, gson.toJson(station.SCREEN_LOCATION))
-				stmt.setString(3, station.ID)
-				return stmt.executeUpdate() > 0
-			}
-		}
+		return database.execute(sql, listOf(station.NAME, station.NAME_EN, gson.toJson(station.SCREEN_LOCATION), station.ID)) > 0
 	}
 
-	fun removeStation(id: String): Boolean {
-		val sql = "DELETE FROM transportation_stations WHERE id = ?"
-		ConnectionPool.getConnection().use { conn ->
-			conn.prepareStatement(sql).use { stmt ->
-				stmt.setString(1, id)
-				return stmt.executeUpdate() > 0
-			}
-		}
+	suspend fun removeStation(id: String): Boolean {
+		ensureTables()
+		return database.execute("DELETE FROM transportation_stations WHERE id = ?", listOf(id)) > 0
 	}
 
-	fun listStations(): List<Station> {
-		val sql = "SELECT * FROM transportation_stations"
-		val stations = mutableListOf<Station>()
-		ConnectionPool.getConnection().use { conn ->
-			conn.prepareStatement(sql).use { stmt ->
-				stmt.executeQuery().use { rs ->
-					while (rs.next()) {
-						stations.add(
-							Station(
-								NAME = rs.getString("name"),
-								ID = rs.getString("id"),
-								SCREEN_LOCATION = parseLocations(rs.getString("screen_location")),
-								NAME_EN = rs.getString("name_en"),
-							)
-						)
-					}
-				}
-			}
-		}
-		return stations
+	suspend fun listStations(): List<Station> {
+		ensureTables()
+		return database.all("SELECT * FROM transportation_stations", mapper = ::toStation)
 	}
 
-	fun getStationById(id: String): Station? {
-		val sql = "SELECT * FROM transportation_stations WHERE id = ? LIMIT 1"
-		ConnectionPool.getConnection().use { conn ->
-			conn.prepareStatement(sql).use { stmt ->
-				stmt.setString(1, id)
-				stmt.executeQuery().use { rs ->
-					if (rs.next()) {
-						return Station(
-							NAME = rs.getString("name"),
-							ID = rs.getString("id"),
-							SCREEN_LOCATION = parseLocations(rs.getString("screen_location")),
-							NAME_EN = rs.getString("name_en"),
-						)
-					}
-				}
-			}
-		}
-		return null
+	suspend fun getStationById(id: String): Station? {
+		ensureTables()
+		return database.one(
+			"SELECT * FROM transportation_stations WHERE id = ? LIMIT 1",
+			listOf(id),
+			::toStation,
+		)
 	}
 
-	fun queryStationsByName(name: String, fuzzy: Boolean = true): List<Station> {
+	suspend fun queryStationsByName(name: String, fuzzy: Boolean = true): List<Station> {
+		ensureTables()
 		val sql = if (fuzzy) {
-			"SELECT * FROM transportation_stations WHERE name LIKE ?"
+			"SELECT * FROM transportation_stations WHERE name LIKE ? OR name_en LIKE ?"
 		} else {
-			"SELECT * FROM transportation_stations WHERE name = ?"
+			"SELECT * FROM transportation_stations WHERE name = ? OR name_en = ?"
 		}
-		val stations = mutableListOf<Station>()
-		ConnectionPool.getConnection().use { conn ->
-			conn.prepareStatement(sql).use { stmt ->
-				stmt.setString(1, if (fuzzy) "%$name%" else name)
-				stmt.executeQuery().use { rs ->
-					while (rs.next()) {
-						stations.add(
-							Station(
-								NAME = rs.getString("name"),
-								ID = rs.getString("id"),
-								SCREEN_LOCATION = parseLocations(rs.getString("screen_location")),
-								NAME_EN = rs.getString("name_en"),
-							)
-						)
-					}
-				}
-			}
-		}
-		return stations
+		val value = if (fuzzy) "%$name%" else name
+		return database.all(sql, listOf(value, value), ::toStation)
 	}
 
-	fun addLine(line: Line): Int? {
+	suspend fun addLine(line: Line): Int? {
+		ensureTables()
 		validateLineOrThrow(line)
-		val sql = """
-			INSERT INTO transportation_lines (name, name_en, color, line_type, dimension, station_ids, station_times)
-			VALUES (?, ?, ?, ?, ?, ?, ?)
-		""".trimIndent()
-		ConnectionPool.getConnection().use { conn ->
-			conn.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS).use { stmt ->
-				stmt.setString(1, line.name)
-				stmt.setString(2, line.nameEn)
-				stmt.setString(3, line.color)
-				stmt.setString(4, line.lineType.name)
-				stmt.setString(5, line.dimension.name)
-				stmt.setString(6, gson.toJson(line.stationIds))
-				stmt.setString(7, gson.toJson(line.stationTimes))
-				val affected = stmt.executeUpdate()
-				if (affected == 0) return null
-				stmt.generatedKeys.use { rs ->
-					if (rs.next()) {
-						return rs.getInt(1)
-					}
-				}
-			}
+		return database.inTransaction {
+			val sql = """
+				INSERT INTO transportation_lines (name, name_en, color, line_type, dimension, station_ids, station_times)
+				VALUES (?, ?, ?, ?, ?, ?, ?)
+			""".trimIndent()
+			val affected = database.execute(
+				sql,
+				listOf(
+					line.name,
+					line.nameEn,
+					line.color,
+					line.lineType.name,
+					line.dimension.name,
+					gson.toJson(line.stationIds),
+					gson.toJson(line.stationTimes),
+				),
+			)
+			if (affected == 0L) return@inTransaction null
+			runCatching {
+				database.one("SELECT LAST_INSERT_ID() AS id") { row -> numberValue(row, "id").toInt() }
+			}.getOrNull() ?: database.one(
+				"""
+				SELECT id FROM transportation_lines
+				WHERE name = ? AND name_en = ? AND color = ? AND line_type = ? AND dimension = ?
+				ORDER BY id DESC
+				LIMIT 1
+				""".trimIndent(),
+				listOf(line.name, line.nameEn, line.color, line.lineType.name, line.dimension.name),
+			) { row -> numberValue(row, "id").toInt() }
 		}
-		return null
 	}
 
-	fun editLine(lineId: Int, line: Line): Boolean {
+	suspend fun editLine(lineId: Int, line: Line): Boolean {
+		ensureTables()
 		validateLineOrThrow(line)
 		val sql = """
 			UPDATE transportation_lines
 			SET name = ?, name_en = ?, color = ?, line_type = ?, dimension = ?, station_ids = ?, station_times = ?
 			WHERE id = ?
 		""".trimIndent()
-		ConnectionPool.getConnection().use { conn ->
-			conn.prepareStatement(sql).use { stmt ->
-				stmt.setString(1, line.name)
-				stmt.setString(2, line.nameEn)
-				stmt.setString(3, line.color)
-				stmt.setString(4, line.lineType.name)
-				stmt.setString(5, line.dimension.name)
-				stmt.setString(6, gson.toJson(line.stationIds))
-				stmt.setString(7, gson.toJson(line.stationTimes))
-				stmt.setInt(8, lineId)
-				return stmt.executeUpdate() > 0
-			}
-		}
+		return database.execute(
+			sql,
+			listOf(
+				line.name,
+				line.nameEn,
+				line.color,
+				line.lineType.name,
+				line.dimension.name,
+				gson.toJson(line.stationIds),
+				gson.toJson(line.stationTimes),
+				lineId,
+			),
+		) > 0
 	}
 
-	fun removeLine(lineId: Int): Boolean {
-		val sql = "DELETE FROM transportation_lines WHERE id = ?"
-		ConnectionPool.getConnection().use { conn ->
-			conn.prepareStatement(sql).use { stmt ->
-				stmt.setInt(1, lineId)
-				return stmt.executeUpdate() > 0
-			}
-		}
+	suspend fun removeLine(lineId: Int): Boolean {
+		ensureTables()
+		return database.execute("DELETE FROM transportation_lines WHERE id = ?", listOf(lineId)) > 0
 	}
 
-	fun listLines(): List<LineRecord> {
-		val sql = "SELECT * FROM transportation_lines"
-		val lines = mutableListOf<LineRecord>()
-		ConnectionPool.getConnection().use { conn ->
-			conn.prepareStatement(sql).use { stmt ->
-				stmt.executeQuery().use { rs ->
-					while (rs.next()) {
-						val lineType = parseLineType(rs.getString("line_type")) ?: continue
-						lines.add(
-							LineRecord(
-								id = rs.getInt("id"),
-								stationIds = parseStringArray(rs.getString("station_ids")),
-								stationTimes = parseIntArray(rs.getString("station_times")),
-								lineType = lineType,
-								dimension = readLineDimension(rs),
-								name = rs.getString("name"),
-								color = rs.getString("color"),
-								name_en = rs.getString("name_en"),
-							)
-						)
-					}
-				}
-			}
-		}
-		return lines
+	suspend fun listLines(): List<LineRecord> {
+		ensureTables()
+		return database.all("SELECT * FROM transportation_lines") { row -> toLineRecordOrNull(row) }.mapNotNull { it }
 	}
 
-	fun getLineById(lineId: Int): LineRecord? {
-		val sql = "SELECT * FROM transportation_lines WHERE id = ? LIMIT 1"
-		ConnectionPool.getConnection().use { conn ->
-			conn.prepareStatement(sql).use { stmt ->
-				stmt.setInt(1, lineId)
-				stmt.executeQuery().use { rs ->
-					if (rs.next()) {
-						val lineType = parseLineType(rs.getString("line_type")) ?: return null
-							return LineRecord(
-								id = rs.getInt("id"),
-								stationIds = parseStringArray(rs.getString("station_ids")),
-								stationTimes = parseIntArray(rs.getString("station_times")),
-								lineType = lineType,
-								dimension = readLineDimension(rs),
-								name = rs.getString("name"),
-								color = rs.getString("color"),
-								name_en = rs.getString("name_en"),
-							)
-					}
-				}
-			}
-		}
-		return null
+	suspend fun getLineById(lineId: Int): LineRecord? {
+		ensureTables()
+		return database.one(
+			"SELECT * FROM transportation_lines WHERE id = ? LIMIT 1",
+			listOf(lineId),
+		) { row -> toLineRecordOrNull(row) }
 	}
 
-	fun queryLinesByName(name: String, fuzzy: Boolean = true): List<LineRecord> {
+	suspend fun queryLinesByName(name: String, fuzzy: Boolean = true): List<LineRecord> {
+		ensureTables()
 		val sql = if (fuzzy) {
-			"SELECT * FROM transportation_lines WHERE name LIKE ?"
+			"SELECT * FROM transportation_lines WHERE name LIKE ? OR name_en LIKE ?"
 		} else {
-			"SELECT * FROM transportation_lines WHERE name = ?"
+			"SELECT * FROM transportation_lines WHERE name = ? OR name_en = ?"
 		}
-		val lines = mutableListOf<LineRecord>()
-		ConnectionPool.getConnection().use { conn ->
-			conn.prepareStatement(sql).use { stmt ->
-				stmt.setString(1, if (fuzzy) "%$name%" else name)
-				stmt.executeQuery().use { rs ->
-					while (rs.next()) {
-						val lineType = parseLineType(rs.getString("line_type")) ?: continue
-						lines.add(
-							LineRecord(
-								id = rs.getInt("id"),
-								stationIds = parseStringArray(rs.getString("station_ids")),
-								stationTimes = parseIntArray(rs.getString("station_times")),
-								lineType = lineType,
-								dimension = readLineDimension(rs),
-								name = rs.getString("name"),
-								color = rs.getString("color"),
-								name_en = rs.getString("name_en"),
-							)
-						)
-					}
-				}
-			}
-		}
-		return lines
+		val value = if (fuzzy) "%$name%" else name
+		return database.all(sql, listOf(value, value)) { row -> toLineRecordOrNull(row) }.mapNotNull { it }
 	}
 
-	fun queryStationsByLineId(lineId: Int): List<Station> {
+	suspend fun queryStationsByLineId(lineId: Int): List<Station> {
 		val line = getLineById(lineId) ?: return emptyList()
 		val stationMap = fetchStationsByIds(line.stationIds.toList())
 		return line.stationIds.mapNotNull { stationMap[it] }
 	}
 
-	fun queryStationsByLineName(name: String, fuzzy: Boolean = true): List<LineStations> {
+	suspend fun queryStationsByLineName(name: String, fuzzy: Boolean = true): List<LineStations> {
 		return queryLinesByName(name, fuzzy).map { line ->
 			val stationMap = fetchStationsByIds(line.stationIds.toList())
 			LineStations(
 				line = line,
-				stations = line.stationIds.mapNotNull { stationMap[it] }
+				stations = line.stationIds.mapNotNull { stationMap[it] },
 			)
 		}
 	}
 
-	fun queryLineDetailById(lineId: Int): LineDetail? {
+	suspend fun queryLineDetailById(lineId: Int): LineDetail? {
 		val line = getLineById(lineId) ?: return null
 		val stationMap = fetchStationsByIds(line.stationIds.toList())
 		val transferLinesByStation = listLines()
 			.asSequence()
 			.filter { it.id != line.id }
-			.flatMap { transferLine ->
-				transferLine.stationIds.asSequence().map { stationId -> stationId to transferLine }
-			}
+			.flatMap { transferLine -> transferLine.stationIds.asSequence().map { stationId -> stationId to transferLine } }
 			.groupBy(
 				keySelector = { it.first },
-				valueTransform = { it.second.toTransferLineInfo() }
+				valueTransform = { it.second.toTransferLineInfo() },
 			)
 			.mapValues { (_, transferLines) ->
-				transferLines
-					.distinctBy { it.id }
-					.sortedBy { it.id }
+				transferLines.distinctBy { it.id }.sortedBy { it.id }
 			}
 
 		return LineDetail(
@@ -592,17 +480,17 @@ class TransportationServiceImpl {
 						id = station.ID,
 						name = station.NAME,
 						nameEn = station.NAME_EN,
-						transferLines = transferLinesByStation[station.ID].orEmpty()
+						transferLines = transferLinesByStation[station.ID].orEmpty(),
 					)
 				}
-			}
+			},
 		)
 	}
 
-	fun calculateRoute(
+	suspend fun calculateRoute(
 		startStationId: String,
 		endStationId: String,
-		constraints: RouteConstraints = RouteConstraints()
+		constraints: RouteConstraints = RouteConstraints(),
 	): RouteResult? {
 		val stationMap = listStations().associateBy { it.ID }
 		if (!stationMap.containsKey(startStationId) || !stationMap.containsKey(endStationId)) return null
@@ -612,14 +500,15 @@ class TransportationServiceImpl {
 		for (line in listLines()) {
 			if (constraints.bannedLineTypes.contains(line.lineType)) continue
 			if (constraints.bannedDimensions.contains(line.dimension)) continue
-			if (line.stationIds.size < 2 || line.stationTimes.size != line.stationIds.size - 1) continue
+			if (line.stationIds.size < 2 || line.stationTimes.size < line.stationIds.size - 1) continue
 			lineTypeById[line.id] = line.lineType
 			for (i in 0 until line.stationIds.size - 1) {
 				val from = line.stationIds[i]
 				val to = line.stationIds[i + 1]
 				val time = line.stationTimes[i].coerceAtLeast(0)
 				if (!stationMap.containsKey(from) || !stationMap.containsKey(to)) continue
-					val edge = Edge(
+				adjacency.getOrPut(from) { mutableListOf() }.add(
+					Edge(
 						to = to,
 						time = time,
 						lineId = line.id,
@@ -627,14 +516,12 @@ class TransportationServiceImpl {
 						lineNameEn = line.name_en,
 						lineType = line.lineType,
 						dimension = line.dimension,
-						color = line.color
-					)
-				adjacency.getOrPut(from) { mutableListOf() }.add(edge)
+						color = line.color,
+					),
+				)
 			}
 		}
-		adjacency.forEach { string, edges ->
-			println("$string $edges")
-		}
+
 		val dist = mutableMapOf<State, Int>()
 		val prev = mutableMapOf<State, PrevEdge>()
 		val pq = PriorityQueue<Node>(compareBy { it.dist })
@@ -649,7 +536,7 @@ class TransportationServiceImpl {
 			for (edge in edges) {
 				val transferCost = if (current.state.lineId != null && current.state.lineId != edge.lineId) {
 					val fromType = lineTypeById[current.state.lineId]
-					if (fromType == LineType.WALK || edge.lineType == LineType.WALK) 0 else TRANSFER_TIME_SECONDS
+					if (fromType == LineType.WALK || edge.lineType == LineType.WALK) 0 else transferTimeSeconds
 				} else {
 					0
 				}
@@ -693,14 +580,13 @@ class TransportationServiceImpl {
 			var currentDimension = edgePath[0].dimension
 			var currentColor = edgePath[0].color
 			var segmentTime = 0
-			var segmentStations = mutableListOf<String>()
-			segmentStations.add(stationPath[0])
+			var segmentStations = mutableListOf(stationPath[0])
 			for (i in edgePath.indices) {
 				val edge = edgePath[i]
 				if (edge.lineId != currentLineId) {
 					if (currentLineType != LineType.WALK && edge.lineType != LineType.WALK) {
-						segmentTime += TRANSFER_TIME_SECONDS
-						transferTimeTotal += TRANSFER_TIME_SECONDS
+						segmentTime += transferTimeSeconds
+						transferTimeTotal += transferTimeSeconds
 					}
 					segments.add(
 						RouteSegment(
@@ -711,16 +597,16 @@ class TransportationServiceImpl {
 							dimension = currentDimension,
 							color = currentColor,
 							stationIds = segmentStations.toList(),
-							time = segmentTime
-						)
+							time = segmentTime,
+						),
 					)
 					val transferStationId = stationPath[i]
 					transfers.add(
 						TransferPoint(
 							stationId = transferStationId,
 							fromLineId = currentLineId,
-							toLineId = edge.lineId
-						)
+							toLineId = edge.lineId,
+						),
 					)
 					currentLineId = edge.lineId
 					currentLineName = edge.lineName
@@ -729,62 +615,75 @@ class TransportationServiceImpl {
 					currentDimension = edge.dimension
 					currentColor = edge.color
 					segmentTime = 0
-					segmentStations = mutableListOf()
-					segmentStations.add(transferStationId)
+					segmentStations = mutableListOf(transferStationId)
 				}
 				segmentTime += edge.time
 				segmentStations.add(edge.to)
 			}
 			segments.add(
 				RouteSegment(
-						lineId = currentLineId,
-						lineName = currentLineName,
-						lineNameEn = currentLineNameEn,
-						lineType = currentLineType,
-						dimension = currentDimension,
-						color = currentColor,
-						stationIds = segmentStations.toList(),
-						time = segmentTime
-					)
-				)
+					lineId = currentLineId,
+					lineName = currentLineName,
+					lineNameEn = currentLineNameEn,
+					lineType = currentLineType,
+					dimension = currentDimension,
+					color = currentColor,
+					stationIds = segmentStations.toList(),
+					time = segmentTime,
+				),
+			)
 		}
 
-		val totalTime = edgePath.sumOf { it.time } + transferTimeTotal
-		val lineIds = segments.map { it.lineId }
-		val totalStops = edgePath.count { it.lineType != LineType.WALK }
 		return RouteResult(
 			stationIds = stationPath,
 			stations = stationPath.mapNotNull { stationMap[it] },
-			lineIds = lineIds,
+			lineIds = segments.map { it.lineId },
 			segments = segments,
 			transfers = transfers,
-			totalTime = totalTime,
-			totalStops = totalStops
+			totalTime = edgePath.sumOf { it.time } + transferTimeTotal,
+			totalStops = edgePath.count { it.lineType != LineType.WALK },
 		)
 	}
 
-	private fun fetchStationsByIds(ids: List<String>): Map<String, Station> {
+	private suspend fun fetchStationsByIds(ids: List<String>): Map<String, Station> {
+		ensureTables()
 		if (ids.isEmpty()) return emptyMap()
 		val placeholders = ids.joinToString(",") { "?" }
-		val sql = "SELECT * FROM transportation_stations WHERE id IN ($placeholders)"
-		val result = mutableMapOf<String, Station>()
-		ConnectionPool.getConnection().use { conn ->
-			conn.prepareStatement(sql).use { stmt ->
-				ids.forEachIndexed { index, id -> stmt.setString(index + 1, id) }
-				stmt.executeQuery().use { rs ->
-					while (rs.next()) {
-						val station = Station(
-							NAME = rs.getString("name"),
-							ID = rs.getString("id"),
-							SCREEN_LOCATION = parseLocations(rs.getString("screen_location")),
-							NAME_EN = rs.getString("name_en"),
-						)
-						result[station.ID] = station
-					}
-				}
-			}
+		return database.all(
+			"SELECT * FROM transportation_stations WHERE id IN ($placeholders)",
+			ids,
+			::toStation,
+		).associateBy { it.ID }
+	}
+
+	private fun toStation(row: Row): Station = Station(
+		NAME = row.get("name", String::class.java).orEmpty(),
+		ID = row.get("id", String::class.java)!!,
+		SCREEN_LOCATION = parseLocations(row.get("screen_location", String::class.java)),
+		NAME_EN = row.get("name_en", String::class.java).orEmpty(),
+	)
+
+	private fun toLineRecordOrNull(row: Row): LineRecord? {
+		val lineType = parseLineType(row.get("line_type", String::class.java)) ?: return null
+		return LineRecord(
+			id = numberValue(row, "id").toInt(),
+			stationIds = parseStringArray(row.get("station_ids", String::class.java)),
+			stationTimes = parseIntArray(row.get("station_times", String::class.java)),
+			lineType = lineType,
+			dimension = parseDimension(row.get("dimension", String::class.java)) ?: Dimension.OVERWORLD,
+			name = row.get("name", String::class.java).orEmpty(),
+			color = row.get("color", String::class.java).orEmpty(),
+			name_en = row.get("name_en", String::class.java).orEmpty(),
+		)
+	}
+
+
+	private fun numberValue(row: Row, column: String): Long {
+		val value = row.get(column) ?: error("Column $column is null")
+		return when (value) {
+			is Number -> value.toLong()
+			else -> error("Column $column is not numeric: ${value::class.java.name}")
 		}
-		return result
 	}
 
 	private fun parseLocations(value: String?): Array<Location> {
@@ -829,11 +728,6 @@ class TransportationServiceImpl {
 		}
 	}
 
-	private fun readLineDimension(rs: ResultSet): Dimension {
-		val raw = runCatching { rs.getString("dimension") }.getOrNull()
-		return parseDimension(raw) ?: Dimension.OVERWORLD
-	}
-
 	private fun validateLineOrThrow(line: Line) {
 		require(line.stationIds.size >= 2) { "stationIds must have at least 2 stations" }
 		require(line.stationTimes.size == line.stationIds.size - 1) { "stationTimes length must be stationIds.size - 1" }
@@ -846,10 +740,9 @@ class TransportationServiceImpl {
 			dimension = dimension,
 			name = name,
 			nameEn = name_en,
-			color = color
+			color = color,
 		)
 	}
-
 
 	private data class Edge(
 		val to: String,

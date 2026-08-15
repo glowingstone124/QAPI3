@@ -6,13 +6,10 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import jakarta.annotation.Resource;
 import kotlin.Pair;
-import kotlinx.coroutines.Dispatchers;
-import org.qo.datas.ConnectionPool;
 import org.qo.orm.AffiliatedAccountORM;
 import org.qo.services.loginService.AffiliatedAccountServices;
 import org.qo.services.loginService.AvatarRelatedImpl;
 import org.qo.services.loginService.Login;
-import org.qo.orm.UserORM;
 import org.qo.datas.Mapping.*;
 import org.qo.services.loginService.PlayerCardCustomizationImpl;
 import org.qo.redis.DatabaseType;
@@ -20,7 +17,6 @@ import org.qo.redis.Redis;
 import org.qo.server.AvatarCache;
 import org.qo.services.messageServices.Msg;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.context.ApplicationContext;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.server.reactive.ServerHttpRequest;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
@@ -33,9 +29,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.sql.*;
 import java.util.*;
 import java.util.concurrent.*;
+import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 
 import static org.qo.utils.Logger.LogLevel.*;
 
@@ -53,16 +50,16 @@ public class UserProcess {
 
     public static Request request = new Request();
     private static final ReturnInterface ri = new ReturnInterface();
-    private static final Login login = new Login();
     private static final BCryptPasswordEncoder passwordEncoder = new BCryptPasswordEncoder(12);
     private static final long VERIFICATION_TTL_MILLIS = TimeUnit.HOURS.toMillis(2);
-    public static UserORM userORM = new UserORM();
-    private static CoroutineAdapter ca;
     private static final Redis redis = new Redis();
+    private final UserProcessReactiveStore reactiveStore;
+    private final Login login;
 
     @Autowired
-    public UserProcess(CoroutineAdapter ca) {
-        UserProcess.ca = ca;
+    public UserProcess(Login login, UserProcessReactiveStore reactiveStore) {
+        this.login = login;
+        this.reactiveStore = reactiveStore;
     }
 
     public static String getServerStats() throws IOException {
@@ -88,61 +85,25 @@ public class UserProcess {
         return statusArray.toString();
     }
 
-    public static void handleTime(String name, int time) {
+    public Mono<Void> handleTime(String name, int time) {
         if (time <= 0) {
-            return;
+            return Mono.empty();
         }
-        ca.push(() -> {
-            try (Connection connection = ConnectionPool.getConnection()) {
-                String checkQuery = "SELECT playtime FROM users WHERE username=?";
-                try (PreparedStatement checkStatement = connection.prepareStatement(checkQuery)) {
-                    checkStatement.setString(1, name);
-                    try (ResultSet resultSet = checkStatement.executeQuery()) {
-                        if (resultSet.next()) {
-                            int existingTime = resultSet.getInt("playtime");
-                            int updatedTime = existingTime + time;
-                            String updateQuery = "UPDATE users SET playtime=? WHERE username=?";
-                            try (PreparedStatement updateStatement = connection.prepareStatement(updateQuery)) {
-                                updateStatement.setInt(1, updatedTime);
-                                updateStatement.setString(2, name);
-                                updateStatement.executeUpdate();
-                            }
-                        }
-                    }
-                }
-            } catch (SQLException e) {
-                Logger.log("experienced SQL exception while doing handleTime(): " + e.getMessage(), ERROR);
-            }
-        }, Dispatchers.getIO());
+        return reactiveStore.incrementPlaytime(name, time)
+                .doOnError(error -> Logger.log("experienced SQL exception while doing handleTime(): " + error.getMessage(), ERROR))
+                .onErrorResume(error -> Mono.empty());
     }
 
-    public static JsonObject getTime(String username) {
-        JsonObject result = null;
-        try (Connection connection = ConnectionPool.getConnection()) {
-            result = new JsonObject();
-            String query = "SELECT playtime FROM users WHERE username = ?";
-            try (PreparedStatement preparedStatement = connection.prepareStatement(query)) {
-                preparedStatement.setString(1, username);
-                try (ResultSet resultSet = preparedStatement.executeQuery()) {
-                    if (resultSet.next()) {
-                        int time = resultSet.getInt("playtime");
-                        result.addProperty("name", username);
-                        result.addProperty("time", time);
-                    } else {
-                        result.addProperty("error", -1);
-                    }
-                }
-            }
-        } catch (SQLException e) {
-            e.printStackTrace();
-            assert result != null;
-            result.addProperty("error", e.getMessage());
-        }
-
-        return result;
+    public Mono<JsonObject> getTime(String username) {
+        return reactiveStore.getTime(username)
+                .onErrorResume(error -> {
+                    JsonObject result = new JsonObject();
+                    result.addProperty("error", error.getMessage());
+                    return Mono.just(result);
+                });
     }
 
-    public static String queryReg(String name) {
+    public Mono<String> queryReg(String name) {
         JsonObject responseJson = new JsonObject();
 
         String redisKey = "users:" + name;
@@ -152,91 +113,82 @@ public class UserProcess {
             String redisData = redis.get(name, regDb).ignoreException();
             JsonObject retObj = JsonParser.parseString(Objects.requireNonNull(redisData)).getAsJsonObject();
             retObj.addProperty("code", 0);
-            return retObj.toString();
+            return Mono.just(retObj.toString());
         }
 
-        Users result = userORM.read(name);
-        var service = SpringContextUtil.Companion.getCtx().getBean(AffiliatedAccountServices.class);
-        if (result != null) {
-            boolean temp = result.getTemp();
-            Long uid = result.getUid();
-            Boolean frozen = result.getFrozen();
-            int eco = result.getEconomy();
-            long playtime = result.getPlaytime();
+        return reactiveStore.readUser(name)
+                .map(result -> {
+                    boolean temp = result.getTemp();
+                    Long uid = result.getUid();
+                    Boolean frozen = result.getFrozen();
+                    int eco = result.getEconomy();
+                    long playtime = result.getPlaytime();
 
-            responseJson.addProperty("frozen", frozen);
-            responseJson.addProperty("qq", uid);
-            responseJson.addProperty("economy", eco);
-            responseJson.addProperty("online", redis.exists("online" + name, DatabaseType.QO_ONLINE_DATABASE.getValue()).ignoreException());
-            responseJson.addProperty("playtime", playtime);
-            responseJson.addProperty("temp", temp);
-            responseJson.addProperty("profile_id", result.getProfile_id());
-            responseJson.addProperty("exp_level", result.getExp_level());
-            responseJson.addProperty("score", result.getScore());
-            responseJson.addProperty("affiliated", false);
-            redis.insert("user:" + name, responseJson.toString(), regDb).ignoreException();
+                    responseJson.addProperty("frozen", frozen);
+                    responseJson.addProperty("qq", uid);
+                    responseJson.addProperty("economy", eco);
+                    responseJson.addProperty("online", redis.exists("online" + name, DatabaseType.QO_ONLINE_DATABASE.getValue()).ignoreException());
+                    responseJson.addProperty("playtime", playtime);
+                    responseJson.addProperty("temp", temp);
+                    responseJson.addProperty("profile_id", result.getProfile_id());
+                    responseJson.addProperty("exp_level", result.getExp_level());
+                    responseJson.addProperty("score", result.getScore());
+                    responseJson.addProperty("affiliated", false);
+                    redis.insert("user:" + name, responseJson.toString(), regDb).ignoreException();
 
-            responseJson.addProperty("code", temp ? 2 : 0);
-            return responseJson.toString();
-        } else if (service.validateAffiliatedAccount(name).getFirst()) {
-            responseJson.addProperty("affiliated", true);
-            responseJson.addProperty("host", service.validateAffiliatedAccount(name).getSecond().getHost());
-        } else {
-            responseJson.addProperty("code", 1);
-            responseJson.addProperty("qq", -1);
-        }
-        return responseJson.toString();
+                    responseJson.addProperty("code", temp ? 2 : 0);
+                    return responseJson.toString();
+                })
+                .switchIfEmpty(affiliatedAccountServices.validateAffiliatedAccountReactive(name)
+                        .map(result -> {
+                            if (result.getFirst() && result.getSecond() != null) {
+                                responseJson.addProperty("affiliated", true);
+                                responseJson.addProperty("host", result.getSecond().getHost());
+                            } else {
+                                responseJson.addProperty("code", 1);
+                                responseJson.addProperty("qq", -1);
+                            }
+                            return responseJson.toString();
+                        }));
     }
 
-    public static String queryReg(long qq) {
-        UserORM userORM = new UserORM();
-        Users user = userORM.read(qq);
-        JsonObject responseJson = new JsonObject();
-
-        if (user != null) {
-            String username = user.getUsername();
-            Boolean frozen = user.getFrozen();
-            int eco = Objects.requireNonNull(user.getEconomy());
-            long playtime = Objects.requireNonNull(user.getPlaytime());
-
-            responseJson.addProperty("code", 0);
-            responseJson.addProperty("frozen", frozen);
-            responseJson.addProperty("username", username);
-            responseJson.addProperty("economy", eco);
-            responseJson.addProperty("playtime", playtime);
-            responseJson.addProperty("profile_id", user.getProfile_id());
-        } else {
-            responseJson.addProperty("code", 1);
-            responseJson.addProperty("username", -1);
-        }
-
-        return responseJson.toString();
+    public Mono<String> queryReg(long qq) {
+        return reactiveStore.readUser(qq)
+                .map(user -> {
+                    JsonObject responseJson = new JsonObject();
+                    responseJson.addProperty("code", 0);
+                    responseJson.addProperty("frozen", user.getFrozen());
+                    responseJson.addProperty("username", user.getUsername());
+                    responseJson.addProperty("economy", user.getEconomy());
+                    responseJson.addProperty("playtime", user.getPlaytime());
+                    responseJson.addProperty("profile_id", user.getProfile_id());
+                    return responseJson.toString();
+                })
+                .defaultIfEmpty("{\"code\":1,\"username\":-1}");
     }
 
-    public static ResponseEntity<String> regMinecraftUser(String name, Long uid, ServerHttpRequest request, String password, int score) throws ExecutionException, InterruptedException {
+    public Mono<ResponseEntity<String>> regMinecraftUser(String name, Long uid, ServerHttpRequest request, String password, int score) {
         if (name == null || !name.matches("^[A-Za-z0-9_]{3,16}$") || uid == null || uid <= 0
                 || password == null || password.length() < 8 || password.length() > 128) {
-            return ri.failed("invalid registration data");
+            return Mono.just(ri.failed("invalid registration data"));
         }
-        CompletableFuture<ResponseEntity<String>> future = ca.run(() -> {
-            if (userORM.read(name) != null) {
-                return ri.failed("username already exist");
-            }
-            if (userORM.read(uid) != null) {
-                return ri.failed("qq already exist");
-            }
-            if (Objects.equals(userORM.read(uid), null) && name != null && uid != null) {
-                try {
-                    userORM.create(new Users(name, uid, true, 3, 0, false, 0, false, 3, computePassword(password, true), UUID.randomUUID().toString(),0, score, 0L, 0L));
+        return hashPassword(password)
+                .flatMap(encryptedPassword -> {
+                    Users user = new Users(name, uid, true, 3, 0, false, 0, false, 3, encryptedPassword,
+                            UUID.randomUUID().toString(), 0, score, 0L, 0L);
+                    return reactiveStore.registerUser(user);
+                })
+                .publishOn(Schedulers.boundedElastic())
+                .flatMap(result -> {
+                    if ("username_exists".equals(result)) return Mono.just(ri.failed("username already exist"));
+                    if ("uid_exists".equals(result)) return Mono.just(ri.failed("qq already exist"));
+                    if (!"created".equals(result)) return Mono.just(ri.failed("FAILED"));
+
                     String token = login.generateToken(32);
                     verify_list.removeIf(item -> Objects.equals(item.uid, uid));
                     verify_list.add(new registry_verify_class(name, digestToken(token), uid, System.currentTimeMillis()));
                     Msg.Companion.putSys("用户 " + uid + " 注册了账号 " + name
                             + "，请本人在 QQ 中于 2 小时内发送 .approve-register " + token);
-                } catch (NoSuchAlgorithmException e) {
-                    throw new RuntimeException(e);
-                }
-                ca.push(() -> {
                     JsonObject playerJson = new JsonObject();
                     playerJson.addProperty("qq", uid);
                     playerJson.addProperty("code", 0);
@@ -245,163 +197,141 @@ public class UserProcess {
                     playerJson.addProperty("playtime", 0);
                     playerJson.addProperty("score", score);
                     redis.insert("user:" + name, playerJson.toString(), DatabaseType.QO_REG_DATABASE.getValue()).ignoreException();
-                }, Dispatchers.getIO());
-                Logger.log(name + " registered from " + IPUtil.getIpAddr(request), INFO);
-                return ri.success("Success!");
-            } else {
-                return ri.failed("FAILED");
-            }
-        }, Dispatchers.getIO());
-        return future.get();
+                    Logger.log(name + " registered from " + IPUtil.getIpAddr(request), INFO);
+                    return Mono.just(ri.success("Success!"));
+                });
     }
 
-    public static ResponseEntity<String> updatePassword(Long uid, String newPassword) throws ExecutionException, InterruptedException {
+    public Mono<ResponseEntity<String>> updatePassword(Long uid, String newPassword) {
         if (uid == null || uid <= 0 || newPassword == null || newPassword.length() < 8 || newPassword.length() > 128) {
-            return ri.failed("invalid password");
+            return Mono.just(ri.failed("invalid password"));
         }
-        CompletableFuture<ResponseEntity<String>> future = ca.run(() -> {
-            Users user = userORM.read(uid);
-            if (Objects.nonNull(user)) {
-                String token = login.generateToken(32);
-                pwdupd_list.removeIf(item -> Objects.equals(item.uid, uid));
-                pwdupd_list.add(new password_verify_class(computePassword(newPassword, true), digestToken(token), uid, System.currentTimeMillis()));
-                Msg.Companion.putSys("用户 " + uid + " 请求更改账号 " + user.getUsername()
-                        + " 的密码，请本人在 QQ 中于 2 小时内发送 .update-password " + token);
-                return ri.success("请求已提交。");
-            } else {
-                return ri.failed("用户不存在！");
-            }
-        }, Dispatchers.getIO());
-        return future.get();
+        return reactiveStore.readUser(uid)
+                .flatMap(user -> hashPassword(newPassword)
+                        .map(encryptedPassword -> {
+                            String token = login.generateToken(32);
+                            pwdupd_list.removeIf(item -> Objects.equals(item.uid, uid));
+                            pwdupd_list.add(new password_verify_class(encryptedPassword, digestToken(token), uid, System.currentTimeMillis()));
+                            Msg.Companion.putSys("用户 " + uid + " 请求更改账号 " + user.getUsername()
+                                    + " 的密码，请本人在 QQ 中于 2 小时内发送 .update-password " + token);
+                            return ri.success("请求已提交。");
+                        }))
+                .defaultIfEmpty(ri.failed("用户不存在！"));
     }
 
-    private static void doUpdatePassword(Long uid, String encryptedPassword) {
-        userORM.updatePassword(uid, encryptedPassword);
-    }
-
-    public static boolean validatePasswordUpdateRequest(String token, Long uid) {
+    public Mono<Boolean> validatePasswordUpdateRequest(String token, Long uid) {
         pwdupd_list.removeIf(item -> System.currentTimeMillis() - item.createdAt >= VERIFICATION_TTL_MILLIS);
+        if (uid == null || token == null) return Mono.just(false);
         for (password_verify_class classObj : pwdupd_list) {
             if (tokenMatches(classObj.tokenHash, token) && Objects.equals(classObj.uid, uid)
                     && pwdupd_list.remove(classObj)) {
-                doUpdatePassword(uid, classObj.passwordHash);
-                return true;
+                return reactiveStore.updatePassword(uid, classObj.passwordHash)
+                        .onErrorReturn(false);
             }
         }
-        return false;
+        return Mono.just(false);
     }
 
-    public static boolean validateMinecraftUser(String token, Long uid) {
+    public Mono<Void> updateLevel(String username, int level) {
+        return reactiveStore.updateLevel(username, level)
+                .doOnError(error -> Logger.log("failed to update exp_level for " + username + ": " + error.getMessage(), ERROR))
+                .onErrorReturn(false)
+                .then();
+    }
+
+    public Mono<Boolean> validateMinecraftUser(String token, Long uid) {
         Iterator<registry_verify_class> iterator = verify_list.iterator();
         while (iterator.hasNext()) {
             registry_verify_class item = iterator.next();
             if (tokenMatches(item.tokenHash, token) && Objects.equals(item.uid, uid)
                     && System.currentTimeMillis() - item.createdAt < VERIFICATION_TTL_MILLIS && verify_list.remove(item)) {
-                ca.push(() -> {
-                    String sql = "UPDATE users SET frozen = false WHERE uid = ?";
-                    try (Connection connection = ConnectionPool.getConnection(); PreparedStatement statement = connection.prepareStatement(sql)) {
-                        statement.setLong(1, uid);
-                        statement.executeUpdate();
-                    } catch (SQLException e) {
-                        e.printStackTrace();
-                    }
-                }, Dispatchers.getIO());
-                return true;
+                return reactiveStore.unfreezeUser(uid)
+                        .onErrorResume(error -> {
+                            error.printStackTrace();
+                            return Mono.just(false);
+                        });
             } else if (System.currentTimeMillis() - item.createdAt >= VERIFICATION_TTL_MILLIS) {
                 iterator.remove();
             }
         }
-        return false;
+        return Mono.just(false);
     }
 
-    public String AvatarTrans(String name) throws Exception {
-        CardProfile profileDetailWithGivenName = playerCardCustomizationImpl.getProfileDetailWithGivenName(name);
-        JsonObject returnObject = new JsonObject();
-        //Previous Logic: get corresponding avatar from mojang
-        if (profileDetailWithGivenName == null || profileDetailWithGivenName.getAvatar().equals("default")) {
-            String apiURL = "https://api.mojang.com/users/profiles/minecraft/" + name;
-            String avatarURL = "https://playerdb.co/api/player/minecraft/";
-
-
-            if (!AvatarCache.has(name)) {
-                try {
-                    String mojangJson = request.sendGetRequest(apiURL).get();
-                    JsonObject uuidObj = JsonParser.parseString(mojangJson).getAsJsonObject();
-                    String uuid = uuidObj.get("id").getAsString();
-
-                    String playerDbJson = request.sendGetRequest(avatarURL + uuid)
-                            .exceptionally(ex -> {
-                                return null;
-                            }).get();
-
-                    if (playerDbJson == null) {
-                        returnObject.addProperty("url", "https://crafthead.net/avatar/8667ba71b85a4004af54457a9734eed7");
-                        returnObject.addProperty("name", name);
-                        return returnObject.toString();
+    public Mono<String> avatarTrans(String name) {
+        return playerCardCustomizationImpl.getProfileDetailWithGivenNameReactive(name)
+                .flatMap(profile -> {
+                    if (profile.getAvatar() == null || "default".equals(profile.getAvatar())) {
+                        return fetchMinecraftAvatar(name);
                     }
+                    return avatarRelatedImpl.getAvatarUrlReactive(profile.getAvatar())
+                            .map(url -> {
+                                JsonObject result = new JsonObject();
+                                result.addProperty("url", url);
+                                result.addProperty("special", true);
+                                result.addProperty("name", name);
+                                return result.toString();
+                            })
+                            .switchIfEmpty(Mono.just(avatarJson(null, name, true)));
+                })
+                .switchIfEmpty(fetchMinecraftAvatar(name))
+                .onErrorResume(error -> Mono.just(defaultAvatarJson(name)));
+    }
 
-                    JsonObject playerUUIDobj = JsonParser.parseString(playerDbJson).getAsJsonObject();
-
-                    if (playerUUIDobj.get("success").getAsBoolean()) {
-                        JsonObject player = playerUUIDobj
-                                .getAsJsonObject("data")
-                                .getAsJsonObject("player");
-
-                        String avatar = player.get("avatar").getAsString();
-                        String username = player.get("username").getAsString();
-
-                        returnObject.addProperty("url", avatar);
-                        returnObject.addProperty("name", username);
-                        returnObject.addProperty("special", false);
-                        AvatarCache.cache(avatar, username);
-                        return returnObject.toString();
-                    } else {
-                        returnObject.addProperty("url", "https://crafthead.net/avatar/8667ba71b85a4004af54457a9734eed7");
-                        returnObject.addProperty("name", name);
-                        returnObject.addProperty("special", false);
-                        return returnObject.toString();
-                    }
-
-                } catch (Exception e) {
-                    returnObject.addProperty("url", "https://crafthead.net/avatar/8667ba71b85a4004af54457a9734eed7");
-                    returnObject.addProperty("name", name);
-                    returnObject.addProperty("special", false);
-                    return returnObject.toString();
-                }
-            }
-
-            returnObject.addProperty("url", "https://crafthead.net/avatar/8667ba71b85a4004af54457a9734eed7");
-            returnObject.addProperty("name", name);
-            returnObject.addProperty("special", false);
-            return returnObject.toString();
-        } else {
-            //New: get user-defined avatar from QO server
-            var url = avatarRelatedImpl.getAvatarUrl(profileDetailWithGivenName.getAvatar());
-            returnObject.addProperty("url", url);
-            returnObject.addProperty("special", true);
-            returnObject.addProperty("name", name);
-            return returnObject.toString();
+    private Mono<String> fetchMinecraftAvatar(String name) {
+        if (AvatarCache.has(name)) {
+            return Mono.just(defaultAvatarJson(name));
         }
+        String apiURL = "https://api.mojang.com/users/profiles/minecraft/" + name;
+        return Mono.fromFuture(request.sendGetRequest(apiURL))
+                .map(JsonParser::parseString)
+                .map(json -> json.getAsJsonObject().get("id").getAsString())
+                .flatMap(uuid -> Mono.fromFuture(request.sendGetRequest("https://playerdb.co/api/player/minecraft/" + uuid))
+                        .map(JsonParser::parseString)
+                        .filter(JsonElement::isJsonObject)
+                        .map(JsonElement::getAsJsonObject))
+                .map(playerDb -> {
+                    if (!playerDb.get("success").getAsBoolean()) {
+                        return defaultAvatarJson(name);
+                    }
+                    JsonObject player = playerDb.getAsJsonObject("data").getAsJsonObject("player");
+                    String avatar = player.get("avatar").getAsString();
+                    String username = player.get("username").getAsString();
+                    try {
+                        AvatarCache.cache(avatar, username);
+                    } catch (Exception ignored) {
+                        Logger.log("failed to cache avatar for " + username + ": " + ignored.getMessage(), ERROR);
+                    }
+                    JsonObject result = new JsonObject();
+                    result.addProperty("url", avatar);
+                    result.addProperty("name", username);
+                    result.addProperty("special", false);
+                    return result.toString();
+                })
+                .onErrorResume(error -> Mono.just(defaultAvatarJson(name)));
+    }
 
+    private String defaultAvatarJson(String name) {
+        return avatarJson("https://crafthead.net/avatar/8667ba71b85a4004af54457a9734eed7", name, false);
+    }
+
+    private String avatarJson(String url, String name, boolean special) {
+        JsonObject result = new JsonObject();
+        result.addProperty("url", url);
+        result.addProperty("name", name);
+        result.addProperty("special", special);
+        return result.toString();
     }
 
     /**
      * @param username 查询用户名
      */
     @Deprecated
-    public static String getLatestLoginIP(String username) {
-        String query = "SELECT ip FROM loginip WHERE username = ?";
-        try (Connection connection = ConnectionPool.getConnection(); PreparedStatement preparedStatement = connection.prepareStatement(query)) {
-            preparedStatement.setString(1, username);
-            try (ResultSet resultSet = preparedStatement.executeQuery()) {
-                if (resultSet.next()) {
-                    return resultSet.getString("ip");
-                }
-            }
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-        return "error";
+    public Mono<String> getLatestLoginIP(String username) {
+        return reactiveStore.getLatestLoginIP(username)
+                .onErrorResume(error -> {
+                    error.printStackTrace();
+                    return Mono.just("error");
+                });
     }
 
     public enum opEco {
@@ -444,53 +374,47 @@ public class UserProcess {
         }
     }
 
-    public static Pair<Boolean, String> performLogin(String username, String password, String ip, boolean web) throws NoSuchAlgorithmException {
-        Users user = userORM.read(username);
-        boolean tempFlag = false;
-        Pair<Boolean, AffiliatedAccountServices.AffiliatedAccount> tempResult = null;
-        if (user == null) {
-            ApplicationContext ctx = SpringContextUtil.Companion.getCtx();
-            AffiliatedAccountServices service = ctx.getBean(AffiliatedAccountServices.class);
-            tempResult = service.validateAffiliatedAccount(username);
-            if (!tempResult.getFirst()) {
-                System.out.println("[DEBUG@performLogin,ORM]User " + username + " not found");
-                return new Pair<>(false, null);
-            } else {
-                tempFlag = true;
-            }
-        }
-        if (!tempFlag) {
-            if (passwordMatches(password, user.getPassword())) {
-                String token = login.generateToken(64);
-                login.insertInto(token, username);
-                if (user.getPassword().startsWith("$SHA$")) {
-                    userORM.updatePassword(user.getUid(), computePassword(password, true));
-                }
-                updateLastLoginAsync(username);
-                return new Pair<>(true, token);
-            }
-            return new Pair<>(false, null);
-        } else {
-            if (passwordMatches(password, tempResult.getSecond().getPassword())) {
-                return new Pair<>(true, "");
-            }
-        }
-        return new Pair<>(false, null);
+    public Mono<Pair<Boolean, String>> performLogin(String username, String password, String ip, boolean web) {
+        return reactiveStore.readUser(username)
+                .flatMap(user -> {
+                    return passwordMatchesReactive(password, user.getPassword()).flatMap(matches -> {
+                        if (!matches) {
+                            return Mono.just(new Pair<Boolean, String>(false, null));
+                        }
+                        String token = login.generateToken(64);
+                        Mono<Boolean> passwordUpgrade = user.getPassword().startsWith("$SHA$")
+                                ? hashPassword(password).flatMap(hash -> reactiveStore.updatePassword(user.getUid(), hash))
+                                : Mono.just(true);
+                        return login.insertIntoReactive(token, username)
+                                .then(passwordUpgrade
+                                        .doOnError(error -> Logger.log("failed to upgrade password for " + username + ": " + error.getMessage(), ERROR))
+                                        .onErrorReturn(false))
+                                .then(reactiveStore.updateLastLogin(username, System.currentTimeMillis())
+                                        .doOnError(error -> Logger.log("failed to update last_login for " + username + ": " + error.getMessage(), ERROR))
+                                        .onErrorReturn(false))
+                                .thenReturn(new Pair<>(true, token));
+                    });
+                })
+                .switchIfEmpty(affiliatedAccountServices.validateAffiliatedAccountReactive(username)
+                        .flatMap(result -> {
+                            if (!result.getFirst() || result.getSecond() == null) {
+                                return Mono.just(new Pair<Boolean, String>(false, null));
+                            }
+                            return passwordMatchesReactive(password, result.getSecond().getPassword())
+                                    .map(matches -> matches
+                                        ? new Pair<Boolean, String>(true, "")
+                                        : new Pair<Boolean, String>(false, null));
+                        }));
     }
 
-    private static void updateLastLoginAsync(String username) {
-        Runnable updateTask = () -> {
-            try {
-                userORM.updateLastLoginByUsername(username, System.currentTimeMillis());
-            } catch (Exception e) {
-                Logger.log("failed to update last_login for " + username + ": " + e.getMessage(), ERROR);
-            }
-        };
-        if (ca != null) {
-            ca.push(updateTask, Dispatchers.getIO());
-        } else {
-            CompletableFuture.runAsync(updateTask);
-        }
+    private Mono<String> hashPassword(String password) {
+        return Mono.fromCallable(() -> computePassword(password, true))
+                .subscribeOn(Schedulers.boundedElastic());
+    }
+
+    private Mono<Boolean> passwordMatchesReactive(String password, String encodedPassword) {
+        return Mono.fromCallable(() -> passwordMatches(password, encodedPassword))
+                .subscribeOn(Schedulers.boundedElastic());
     }
 
 

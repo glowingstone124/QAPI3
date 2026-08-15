@@ -2,11 +2,10 @@ package org.qo.services.loginService
 
 import com.google.gson.Gson
 import com.google.gson.JsonObject
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
-import org.qo.datas.ConnectionPool
 import org.qo.datas.Mapping
 import org.qo.datas.Nodes
+import org.qo.datas.ReactiveDatabase
+import org.qo.orm.UserORM
 import org.qo.services.messageServices.Msg
 import org.qo.utils.ReturnInterface
 import org.qo.utils.SerializeUtils.convertToJsonArray
@@ -20,8 +19,11 @@ class AuthorityNeededServicesImpl(
 	private val ri: ReturnInterface,
 	private val ft: FortuneTools,
 	private val nodes: Nodes,
+	private val database: ReactiveDatabase,
 ) {
 	val gson = Gson()
+	private val userORM = UserORM()
+
 	data class WebChatWrapper(
 		val message: String,
 		val timestamp: Long,
@@ -37,16 +39,14 @@ class AuthorityNeededServicesImpl(
 		}.onFailure {
 			return Pair(20, getErrorMessage(20))
 		}
-		Msg.putWebchat(resultJson.getOrNull()?.message ?: "",username!!)
+		Msg.putWebchat(resultJson.getOrNull()?.message ?: "", username!!)
 		return Pair(0, "ok")
 	}
 
-	suspend fun frozenQOAccount(authorization: String, uid:Long): Boolean {
-
+	suspend fun frozenQOAccount(authorization: String, uid: Long): Boolean {
 		if (nodes.getServerFromToken(authorization) != 0) {
 			return false
 		}
-
 		return userORM.updateFrozenByUidAsync(uid, true)
 	}
 
@@ -84,28 +84,14 @@ class AuthorityNeededServicesImpl(
 		if (precheckResult != null) {
 			return precheckResult
 		}
-		return withContext(Dispatchers.IO) {
-			val connection = ConnectionPool.getConnection()
-			connection.use { conn ->
-				val ips = mutableListOf<String>()
-				conn.prepareStatement("SELECT * FROM loginip WHERE username = ?").use { preparedStatement ->
-					preparedStatement.setString(1, accountName)
-					preparedStatement.executeQuery().use { resultSet ->
-						while (resultSet.next()) {
-							val ip = resultSet.getString("ip") ?: "Unknown IP"
-							ips.add(ip)
-						}
-					}
-				}
-				ips.convertToJsonArray().toString()
-			}
-		}
+		return database.all(
+			"SELECT ip FROM loginip WHERE username = ?",
+			listOf(accountName),
+		) { row -> row.get("ip", String::class.java) ?: "Unknown IP" }
+			.convertToJsonArray()
+			.toString()
 	}
 
-	/**
-	 * precheck a username is presented in database.
-	 * @return null if everything is ok, or reason
-	 */
 	suspend fun doPrecheck(accountName: String?, errorCode: Int): String? {
 		if (accountName == null) {
 			val errorMessage = getErrorMessage(errorCode)
@@ -128,22 +114,20 @@ class AuthorityNeededServicesImpl(
 		return null
 	}
 
-	fun getErrorMessage(errorCode: Int): String {
-		return when (errorCode) {
-			1 -> "Invalid token found."
-			3 -> "Token expired."
-			20 -> "Format error."
-			else -> "Unknown error."
-		}
+	fun getErrorMessage(errorCode: Int): String = when (errorCode) {
+		1 -> "Invalid token found."
+		3 -> "Token expired."
+		20 -> "Format error."
+		else -> "Unknown error."
 	}
 
-	suspend fun internalAuthorityCheck(token: String): Pair<Mapping.Users?, Boolean>{
+	suspend fun internalAuthorityCheck(token: String): Pair<Mapping.Users?, Boolean> {
 		val (accountName, errorCode) = login.validate(token)
 		val precheckResult = doPrecheck(accountName, errorCode)
 		if (precheckResult != null) {
 			return Pair(null, false)
 		}
-		return Pair(userORM.readAsync(accountName!!),true)
+		return Pair(userORM.readAsync(accountName!!), true)
 	}
 }
 
@@ -156,12 +140,12 @@ class FortuneTools {
 		val day: String,
 		val love: Luck,
 		val career: Luck,
-		val wealth: Luck
+		val wealth: Luck,
 	)
 
 	data class Luck(
 		val amount: Int,
-		val comment: String
+		val comment: String,
 	)
 
 	fun getBazi(): String {
@@ -207,8 +191,7 @@ class FortuneTools {
 			day = bazi,
 			love = luckLevel(loveLuck),
 			career = luckLevel(careerLuck),
-			wealth = luckLevel(wealthLuck)
+			wealth = luckLevel(wealthLuck),
 		)
 	}
-
 }
