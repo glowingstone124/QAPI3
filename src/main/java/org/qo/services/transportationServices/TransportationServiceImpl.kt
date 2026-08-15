@@ -298,10 +298,27 @@ class TransportationServiceImpl(
 			if (schemaReady) return
 			database.execute(createStationsTableSql)
 			database.execute(createLinesTableSql)
-			database.execute("ALTER TABLE transportation_stations ADD COLUMN IF NOT EXISTS name_en VARCHAR(255) NOT NULL DEFAULT ''")
-			database.execute("ALTER TABLE transportation_lines ADD COLUMN IF NOT EXISTS name_en VARCHAR(255) NOT NULL DEFAULT ''")
-			database.execute("ALTER TABLE transportation_lines ADD COLUMN IF NOT EXISTS dimension VARCHAR(32) NOT NULL DEFAULT 'OVERWORLD'")
+			addColumnIfMissing("transportation_stations", "name_en", "VARCHAR(255) NOT NULL DEFAULT ''")
+			addColumnIfMissing("transportation_lines", "name_en", "VARCHAR(255) NOT NULL DEFAULT ''")
+			addColumnIfMissing("transportation_lines", "dimension", "VARCHAR(32) NOT NULL DEFAULT 'OVERWORLD'")
 			schemaReady = true
+		}
+	}
+
+	private suspend fun addColumnIfMissing(table: String, column: String, definition: String) {
+		val exists = database.one(
+			"""
+			SELECT 1
+			FROM information_schema.columns
+			WHERE (table_schema = DATABASE() OR table_catalog = DATABASE())
+			  AND LOWER(table_name) = LOWER(?)
+			  AND LOWER(column_name) = LOWER(?)
+			LIMIT 1
+			""".trimIndent(),
+			listOf(table, column),
+		) { true } != null
+		if (!exists) {
+			database.execute("ALTER TABLE $table ADD COLUMN $column $definition")
 		}
 	}
 

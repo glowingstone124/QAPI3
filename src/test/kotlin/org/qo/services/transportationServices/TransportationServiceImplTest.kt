@@ -41,6 +41,25 @@ class TransportationServiceImplTest {
 		assertEquals(0, route.transfers.size)
 	}
 
+	@Test
+	fun ensureTables_addsLegacyColumnsAndRemainsIdempotentAfterRestart() = runTest {
+		database.execute("DROP TABLE transportation_lines")
+		database.execute("DROP TABLE transportation_stations")
+		createLegacySchema()
+		database.execute(
+			"INSERT INTO transportation_stations (id, name, screen_location) VALUES (?, ?, ?)",
+			listOf("S1", "Central", "[]"),
+		)
+
+		service.ensureTables()
+		TransportationServiceImpl(database).ensureTables()
+
+		val station = requireNotNull(service.getStationById("S1"))
+		assertEquals("Central", station.NAME)
+		assertEquals("", station.NAME_EN)
+		assertEquals(0, station.SCREEN_LOCATION.size)
+	}
+
 	private suspend fun createSchema() {
 		database.execute(
 			"""
@@ -61,6 +80,30 @@ class TransportationServiceImplTest {
 				color VARCHAR(32) NOT NULL,
 				line_type VARCHAR(32) NOT NULL,
 				dimension VARCHAR(32) NOT NULL,
+				station_ids TEXT NOT NULL,
+				station_times TEXT NOT NULL
+			)
+			""".trimIndent(),
+		)
+	}
+
+	private suspend fun createLegacySchema() {
+		database.execute(
+			"""
+			CREATE TABLE transportation_stations (
+				id VARCHAR(64) PRIMARY KEY,
+				name VARCHAR(255) NOT NULL,
+				screen_location TEXT NOT NULL
+			)
+			""".trimIndent(),
+		)
+		database.execute(
+			"""
+			CREATE TABLE transportation_lines (
+				id INT PRIMARY KEY,
+				name VARCHAR(255) NOT NULL,
+				color VARCHAR(32) NOT NULL,
+				line_type VARCHAR(32) NOT NULL,
 				station_ids TEXT NOT NULL,
 				station_times TEXT NOT NULL
 			)
