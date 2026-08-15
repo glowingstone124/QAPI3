@@ -53,6 +53,18 @@ class ReactiveDatabaseTransactionTest {
 		runBlocking { assertEquals(null, readValue()) }
 	}
 
+	@Test
+	fun `one returns the first row when a legacy query matches multiple rows`() = runBlocking {
+		database.execute("INSERT INTO reactive_transaction_test (id, amount) VALUES (?, ?)", listOf(1, 10))
+		database.execute("INSERT INTO reactive_transaction_test (id, amount) VALUES (?, ?)", listOf(2, 20))
+
+		val result = database.one(
+			"SELECT amount FROM reactive_transaction_test ORDER BY id",
+		) { row -> row.get("amount", java.lang.Integer::class.java)?.toInt() }
+
+		assertEquals(10, result)
+	}
+
 	private suspend fun readValue(): Int? = database.one(
 		"SELECT amount FROM reactive_transaction_test WHERE id = 1",
 	) { row -> row.get("amount", java.lang.Integer::class.java)?.toInt() }

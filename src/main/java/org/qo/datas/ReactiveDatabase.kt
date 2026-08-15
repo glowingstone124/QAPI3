@@ -22,7 +22,7 @@ class ReactiveDatabase(
 		mapper: (Row) -> T,
 	): T? = bind(client.sql(sql), bindings)
 		.map { row, _ -> mapper(row) }
-		.one()
+		.first()
 		.awaitSingleOrNull()
 
 	suspend fun <T> all(
