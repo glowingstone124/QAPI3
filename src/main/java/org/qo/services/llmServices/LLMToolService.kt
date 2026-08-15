@@ -115,7 +115,7 @@ class LLMToolService(
 		))
 		add(functionTool(
 			name = "add_memory",
-			description = "新增或更新一条结构化群长期记忆。只有用户明确要求记住、保存、以后记得某条信息时才使用；不要主动保存普通聊天。相同 subject 和 memory_key 会更新原记录。",
+			description = "新增或更新一条结构化群长期记忆。你可以选择记住许多信息。相同 subject 和 memory_key 会更新原记录。",
 			properties = linkedMapOf(
 				"subject" to property(
 					type = "string",
@@ -150,7 +150,7 @@ class LLMToolService(
 		))
 		add(functionTool(
 			name = "forget_memory",
-			description = "删除当前群的一条结构化长期记忆。只有用户明确要求忘记或删除记忆时才使用。优先使用 memory_id 精确删除；关键词只删除最佳匹配的一条。",
+			description = "删除当前群的一条结构化长期记忆。用户明确要求忘记或删除记忆时使用。优先使用 memory_id 精确删除；关键词只删除最佳匹配的一条。",
 			properties = linkedMapOf(
 				"memory_id" to property(type = "string", description = "search_memory 返回的记忆 ID。"),
 				"query" to property(type = "string", description = "没有 ID 时用于匹配待删除记忆的关键词。")
