@@ -29,10 +29,9 @@ data class LLMProvider(
 			val explicitlySelected = System.getenv("LLM_PROVIDER")?.trim()?.takeIf { it.isNotBlank() }
 			val selectedName = explicitlySelected
 				?: root?.get("defaultProvider")?.asString?.takeIf { it.isNotBlank() }
-				?: providers?.keySet()?.firstOrNull()
-				?: "default"
+				?: providers?.keySet()?.firstOrNull() ?: throw Exception("provider not found")
 			val configured = providers?.get(selectedName)?.takeIf { it.isJsonObject }?.asJsonObject
-			if ((explicitlySelected != null || root != null) && configured == null) {
+			if (configured == null) {
 				error("LLM provider '$selectedName' is not defined in $configPath")
 			}
 			val legacyToken = System.getenv("LLM_API_TOKEN")
@@ -45,19 +44,11 @@ data class LLMProvider(
 
 			return LLMProvider(
 				name = selectedName,
-				chatCompletionsUrl = configured?.get("chatCompletionsUrl")?.asString
-					?: System.getenv("LLM_API_URL")
-					?: "https://api.deepseek.com/v1/chat/completions",
-				responsesUrl = configured?.get("responsesUrl")?.asString
-					?: System.getenv("LLM_RESPONSES_API_URL")
-					?: "https://api.deepseek.com/v1/responses",
+				chatCompletionsUrl = configured.get("chatCompletionsUrl")?.asString ?: throw Exception("chatCompletionsUrl not defined in $configPath"),
+				responsesUrl = configured.get("responsesUrl")?.asString ?: throw Exception("responsesUrl not defined in $configPath"),
 				apiToken = token,
-				fastModel = configured?.getAsJsonObject("models")?.get("fast")?.asString
-					?: System.getenv("LLM_MODEL_FAST")
-					?: "deepseek-v4-flash",
-				thinkingModel = configured?.getAsJsonObject("models")?.get("thinking")?.asString
-					?: System.getenv("LLM_MODEL_THINKING")
-					?: "deepseek-v4-pro",
+				fastModel = configured.getAsJsonObject("models")?.get("fast")?.asString ?: throw Exception("fastModel not defined in $configPath"),
+				thinkingModel = configured.getAsJsonObject("models")?.get("thinking")?.asString ?: throw Exception("thinkingModel not defined in $configPath"),
 				responsesModels = readResponsesModels(configured),
 			)
 		}
