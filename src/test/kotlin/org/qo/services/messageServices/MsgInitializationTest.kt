@@ -61,6 +61,30 @@ class MsgInitializationTest {
 		assertEquals(listOf("history", "live"), Msg.msgQueue.map { it.message })
 	}
 
+	@Test
+	fun `loading history adds images column to legacy table`() = runBlocking {
+		database.execute("DROP TABLE messages")
+		database.execute(
+			"""
+				CREATE TABLE messages (
+					message VARCHAR(255) NOT NULL,
+					from_user INT NOT NULL,
+					sender VARCHAR(255) NOT NULL,
+					time BIGINT NOT NULL
+				)
+			""".trimIndent(),
+		)
+		database.execute(
+			"INSERT INTO messages (message, from_user, sender, time) VALUES (?, ?, ?, ?)",
+			listOf("legacy", 1, "server", 1L),
+		)
+
+		service.loadMessagesFromDatabase()
+
+		assertEquals(listOf("legacy"), Msg.msgQueue.map { it.message })
+		assertEquals(emptyList<String>(), Msg.msgQueue.single().images)
+	}
+
 	private fun clearQueues() {
 		Msg.msgQueue.clear()
 		Msg.tempQueue.clear()

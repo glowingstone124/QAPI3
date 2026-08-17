@@ -10,6 +10,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import org.qo.datas.ReactiveDatabase
 import org.qo.services.loginService.Login
 import org.qo.utils.Logger
@@ -28,6 +30,7 @@ class Msg(
 ) {
 	private val scope = CoroutineScope(SupervisorJob())
 	private val flushing = AtomicBoolean(false)
+	private val schemaMigrationMutex = Mutex()
 
 	companion object {
 		const val MAX_QUEUE_SIZE = 300
@@ -154,7 +157,14 @@ class Msg(
 	}
 
 	private suspend fun ensureImagesColumn() {
-		database.execute("ALTER TABLE messages ADD COLUMN IF NOT EXISTS images LONGTEXT NULL")
+		schemaMigrationMutex.withLock {
+			val columnExists = runCatching {
+				database.all("SELECT images FROM messages WHERE 1 = 0") { Unit }
+			}.isSuccess
+			if (!columnExists) {
+				database.execute("ALTER TABLE messages ADD COLUMN images LONGTEXT NULL")
+			}
+		}
 	}
 
 	@Scheduled(fixedRate = 10000)
