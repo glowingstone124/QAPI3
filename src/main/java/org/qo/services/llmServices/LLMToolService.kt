@@ -18,6 +18,7 @@ import java.util.Locale
 
 @Service
 class LLMToolService(
+	private val llmServices: LLMServices,
 	private val status: Status,
 	private val metroService: MetroServiceImpl,
 	private val transportationService: TransportationServiceImpl,
@@ -32,130 +33,157 @@ class LLMToolService(
 	fun enabled(): Boolean = readBoolean("LLM_TOOLS_ENABLED", true)
 
 	fun definitions(): JsonArray = JsonArray().apply {
-		add(functionTool(
-			name = "get_server_status",
-			description = "查询 QO Minecraft 服务器当前状态、在线人数、总注册人数和 MSPT。用户询问服务器人数、在线人数、服务器状态时使用。",
-			properties = linkedMapOf(
-				"server_id" to property(
-					type = "integer",
-					description = "服务器编号。默认 1；survival/生存为 1，creative/创造为 4。"
-				),
-				"server_name" to property(
-					type = "string",
-					description = "服务器名称，可选 survival、生存、creative、创造。"
-				),
+		add(
+			functionTool(
+				name = "get_server_status",
+				description = "查询 QO Minecraft 服务器当前状态、在线人数、总注册人数和 MSPT。用户询问服务器人数、在线人数、服务器状态时使用。",
+				properties = linkedMapOf(
+					"server_id" to property(
+						type = "integer",
+						description = "服务器编号。默认 1；survival/生存为 1，creative/创造为 4。"
+					),
+					"server_name" to property(
+						type = "string",
+						description = "服务器名称，可选 survival、生存、creative、创造。"
+					),
+				)
 			)
-		))
-		add(functionTool(
-			name = "get_player_rankings",
-			description = "查询 QO 玩家挖掘方块、放置方块和累计在线时长榜单。用户询问榜单、排行、谁挖得最多、谁在线最久时使用。",
-			properties = linkedMapOf(
-				"limit" to property(
-					type = "integer",
-					description = "每个榜单返回的人数，默认 10，最大 20。"
-				),
+		)
+		add(
+			functionTool(
+				name = "get_player_rankings",
+				description = "查询 QO 玩家挖掘方块、放置方块和累计在线时长榜单。用户询问榜单、排行、谁挖得最多、谁在线最久时使用。",
+				properties = linkedMapOf(
+					"limit" to property(
+						type = "integer",
+						description = "每个榜单返回的人数，默认 10，最大 20。"
+					),
+				)
 			)
-		))
-		add(functionTool(
-			name = "query_metro_lines",
-			description = "查询 QO 地铁线路、站点、区间或计算路线。用户询问地铁、线路、站点、坐标、方向、从 A 到 B 怎么走、以及继续追问上一条路线是否可以步行/避开某类交通时使用。多轮追问时应从聊天历史继承上一条路线的 from/to，并按用户新要求设置 exclude_dims 或 exclude_types。",
-			properties = linkedMapOf(
-				"from" to property(
-					type = "string",
-					description = "路线起点站名或站点 ID。用户问从 A 到 B 怎么坐时填写。"
-				),
-				"to" to property(
-					type = "string",
-					description = "路线终点站名或站点 ID。用户问从 A 到 B 怎么坐时填写。"
-				),
-				"query" to property(
-					type = "string",
-					description = "站点名、区间名、线路名或关键词。不问路线时使用。"
-				),
-				"line_id" to property(
-					type = "integer",
-					description = "线路编号 lid。"
-				),
-				"station_only" to property(
-					type = "boolean",
-					description = "是否只返回站点。"
-				),
-				"exclude_dims" to arrayProperty(
-					itemType = "string",
-					description = "路线计算时排除的维度。可选 overworld、nether、the_end。用户说不要走下界/只走主世界时使用；只走主世界等价于排除 nether 和 the_end。"
-				),
-				"exclude_types" to arrayProperty(
-					itemType = "string",
-					description = "路线计算时排除的交通类型。可选 metro、rapid、blueice、citymetro、nether、pearl、airplane、boat、walk。用户问能不能步行时，不要在服务端推断，只由模型显式设置需要排除或保留的交通类型。"
-				),
+		)
+		add(
+			functionTool(
+				name = "query_metro_lines",
+				description = "查询 QO 地铁线路、站点、区间或计算路线。用户询问地铁、线路、站点、坐标、方向、从 A 到 B 怎么走、以及继续追问上一条路线是否可以步行/避开某类交通时使用。多轮追问时应从聊天历史继承上一条路线的 from/to，并按用户新要求设置 exclude_dims 或 exclude_types。",
+				properties = linkedMapOf(
+					"from" to property(
+						type = "string",
+						description = "路线起点站名或站点 ID。用户问从 A 到 B 怎么坐时填写。"
+					),
+					"to" to property(
+						type = "string",
+						description = "路线终点站名或站点 ID。用户问从 A 到 B 怎么坐时填写。"
+					),
+					"query" to property(
+						type = "string",
+						description = "站点名、区间名、线路名或关键词。不问路线时使用。"
+					),
+					"line_id" to property(
+						type = "integer",
+						description = "线路编号 lid。"
+					),
+					"station_only" to property(
+						type = "boolean",
+						description = "是否只返回站点。"
+					),
+					"exclude_dims" to arrayProperty(
+						itemType = "string",
+						description = "路线计算时排除的维度。可选 overworld、nether、the_end。用户说不要走下界/只走主世界时使用；只走主世界等价于排除 nether 和 the_end。"
+					),
+					"exclude_types" to arrayProperty(
+						itemType = "string",
+						description = "路线计算时排除的交通类型。可选 metro、rapid、blueice、citymetro、nether、pearl、airplane、boat、walk。用户问能不能步行时，不要在服务端推断，只由模型显式设置需要排除或保留的交通类型。"
+					),
+				)
 			)
-		))
-		add(functionTool(
-			name = "search_minecraft_knowledge",
-			description = "检索 Minecraft、QO 服务器玩法、指令、规则和知识库资料。用户询问 Minecraft 知识或服务器资料时使用。",
-			properties = linkedMapOf(
-				"query" to property(
-					type = "string",
-					description = "需要检索的问题或关键词。"
+		)
+		add(
+			functionTool(
+				name = "search_minecraft_knowledge",
+				description = "检索 Minecraft、QO 服务器玩法、指令、规则和知识库资料。用户询问 Minecraft 知识或服务器资料时使用。",
+				properties = linkedMapOf(
+					"query" to property(
+						type = "string",
+						description = "需要检索的问题或关键词。"
+					),
 				),
-			),
-			required = listOf("query")
-		))
-		add(functionTool(
-			name = "search_chat_history",
-			description = "检索当前群已经持久化的历史聊天。当用户询问较早讨论、某人以前说过什么、旧决定或当前滑动窗口之外的信息时使用。查询范围始终限制在当前群。",
-			properties = linkedMapOf(
-				"query" to property(type = "string", description = "聊天内容关键词；可与 uid、时间范围组合。"),
-				"uid" to property(type = "integer", description = "可选 QQ uid，只查该成员。"),
-				"from_time" to property(type = "integer", description = "可选起始 Unix 时间戳，支持秒或毫秒。"),
-				"to_time" to property(type = "integer", description = "可选结束 Unix 时间戳，支持秒或毫秒。"),
-				"limit" to property(type = "integer", description = "返回条数，默认 12，最大 30。"),
-			),
-			required = listOf("query")
-		))
-		add(functionTool(
-			name = "add_memory",
-			description = "新增或更新一条结构化群长期记忆。你可以选择记住许多信息。相同 subject 和 memory_key 会更新原记录。",
-			properties = linkedMapOf(
-				"subject" to property(
-					type = "string",
-					description = "记忆主体，例如玩家名、项目名、地点或群约定。"
-				),
-				"memory_key" to property(
-					type = "string",
-					description = "事实属性键，例如 favorite_drink、preferred_name、project_role、event_time。"
-				),
-				"fact" to property(
-					type = "string",
-					description = "需要保存的事实。不要包含用户未明确要求保存的额外推测。"
-				),
-				"category" to property(
-					type = "string",
-					description = "分类，例如 preference、identity、project、decision、schedule；默认 general。"
-				),
-				"expires_in_days" to property(
-					type = "integer",
-					description = "可选有效天数。临时安排应设置；长期事实不设置。"
-				),
-			),
-			required = listOf("subject", "memory_key", "fact")
-		))
-		add(functionTool(
-			name = "search_memory",
-			description = "按主体或内容查询当前群的结构化长期记忆。用户询问以前要求记住的内容、偏好、约定或决定时使用。",
-			properties = linkedMapOf(
-				"query" to property(type = "string", description = "要查询的人、事、偏好、约定或关键词。")
-			),
-			required = listOf("query")
-		))
-		add(functionTool(
-			name = "forget_memory",
-			description = "删除当前群的一条结构化长期记忆。用户明确要求忘记或删除记忆时使用。优先使用 memory_id 精确删除；关键词只删除最佳匹配的一条。",
-			properties = linkedMapOf(
-				"memory_id" to property(type = "string", description = "search_memory 返回的记忆 ID。"),
-				"query" to property(type = "string", description = "没有 ID 时用于匹配待删除记忆的关键词。")
+				required = listOf("query")
 			)
-		))
+		)
+		add(
+			functionTool(
+				name = "search_chat_history",
+				description = "检索当前群已经持久化的历史聊天。当用户询问较早讨论、某人以前说过什么、旧决定或当前滑动窗口之外的信息时使用。查询范围始终限制在当前群。",
+				properties = linkedMapOf(
+					"query" to property(type = "string", description = "聊天内容关键词；可与 uid、时间范围组合。"),
+					"uid" to property(type = "integer", description = "可选 QQ uid，只查该成员。"),
+					"from_time" to property(type = "integer", description = "可选起始 Unix 时间戳，支持秒或毫秒。"),
+					"to_time" to property(type = "integer", description = "可选结束 Unix 时间戳，支持秒或毫秒。"),
+					"limit" to property(type = "integer", description = "返回条数，默认 12，最大 30。"),
+				),
+				required = listOf("query")
+			)
+		)
+		add(
+			functionTool(
+				name = "add_memory",
+				description = "新增或更新一条结构化群长期记忆。你可以选择记住许多信息。相同 subject 和 memory_key 会更新原记录。",
+				properties = linkedMapOf(
+					"subject" to property(
+						type = "string",
+						description = "记忆主体，例如玩家名、项目名、地点或群约定。"
+					),
+					"memory_key" to property(
+						type = "string",
+						description = "事实属性键，例如 favorite_drink、preferred_name、project_role、event_time。"
+					),
+					"fact" to property(
+						type = "string",
+						description = "需要保存的事实。不要包含用户未明确要求保存的额外推测。"
+					),
+					"category" to property(
+						type = "string",
+						description = "分类，例如 preference、identity、project、decision、schedule；默认 general。"
+					),
+					"expires_in_days" to property(
+						type = "integer",
+						description = "可选有效天数。临时安排应设置；长期事实不设置。"
+					),
+				),
+				required = listOf("subject", "memory_key", "fact")
+			)
+		)
+		add(
+			functionTool(
+				name = "search_memory",
+				description = "按主体或内容查询当前群的结构化长期记忆。用户询问以前要求记住的内容、偏好、约定或决定时使用。",
+				properties = linkedMapOf(
+					"query" to property(type = "string", description = "要查询的人、事、偏好、约定或关键词。")
+				),
+				required = listOf("query")
+			)
+		)
+		add(
+			functionTool(
+				name = "forget_memory",
+				description = "删除当前群的一条结构化长期记忆。用户明确要求忘记或删除记忆时使用。优先使用 memory_id 精确删除；关键词只删除最佳匹配的一条。",
+				properties = linkedMapOf(
+					"memory_id" to property(type = "string", description = "search_memory 返回的记忆 ID。"),
+					"query" to property(type = "string", description = "没有 ID 时用于匹配待删除记忆的关键词。")
+				)
+			)
+		)
+		add(
+			functionTool(
+				name = "get_remain_balance",
+				description = """
+            查询当前 LLM API 账户的剩余 token 余额。
+            当用户询问账户余额、剩余 token、还可以使用多少 token 或 API 剩余额度时使用。
+            返回当前账户剩余的余额数量CNY。
+        """.trimIndent(),
+				properties = linkedMapOf()
+			)
+		)
 	}
 
 	private fun functionTool(
@@ -207,6 +235,7 @@ class LLMToolService(
 				"add_memory" -> addMemory(args, context)
 				"search_memory" -> searchMemory(args, context.groupId)
 				"forget_memory" -> forgetMemory(args, context.groupId)
+				"get_remaining_balance" -> getRemainBalance()
 				else -> errorResult("unknown_tool", "未知工具：$name")
 			}
 		}.getOrElse { errorResult("tool_error", it.message ?: "工具执行失败") }
@@ -363,6 +392,23 @@ class LLMToolService(
 			addProperty("station_only", stationOnly)
 			addProperty("returned", matches.size())
 			add("matches", matches)
+		})
+	}
+
+	private suspend fun getRemainBalance(): String {
+		val balance = llmServices.getBalance()
+
+		if (!balance.first) {
+			return errorResult(
+				"invalid_balance",
+				"LLM API不支持余额调用。"
+			)
+		}
+
+		return gson.toJson(JsonObject().apply {
+			addProperty("tool", "get_remain_balance")
+			addProperty("balance", balance.second)
+			addProperty("unit", "CNY")
 		})
 	}
 

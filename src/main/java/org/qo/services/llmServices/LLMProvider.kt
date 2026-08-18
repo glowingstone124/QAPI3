@@ -1,9 +1,33 @@
 package org.qo.services.llmServices
 
+import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.Locale
+
+enum class BalanceStructParse(val provider: String) {
+	DEEPSEEK("deepseek"),
+	TEAMOROUTER("teamorouter"),
+	NONE("none");
+
+	companion object {
+		fun fromProvider(provider: String?): BalanceStructParse {
+			if (provider.isNullOrBlank()) {
+				return NONE
+			}
+
+			return entries.firstOrNull {
+				it.provider.equals(provider.trim(), ignoreCase = true)
+			} ?: NONE
+		}
+	}
+}
+
+data class BalanceRelated(
+	val balanceUrl: String?,
+	val balanceStruct: BalanceStructParse,
+)
 
 data class LLMProvider(
 	val name: String,
@@ -13,6 +37,7 @@ data class LLMProvider(
 	val fastModel: String,
 	val thinkingModel: String,
 	val responsesModels: Set<LLMServices.MODELS>,
+	val balanceRelated: BalanceRelated,
 ) {
 	fun modelName(model: LLMServices.MODELS): String = when (model) {
 		LLMServices.MODELS.FAST -> fastModel
@@ -34,13 +59,11 @@ data class LLMProvider(
 			if (configured == null) {
 				error("LLM provider '$selectedName' is not defined in $configPath")
 			}
-			val legacyToken = System.getenv("LLM_API_TOKEN")
-				?: runCatching { Files.readString(Path.of("LLMAPITOKEN")).trim() }.getOrDefault("")
-			val token = configured?.get("token")?.asString?.takeIf { it.isNotBlank() }
-				?: configured?.get("tokenFile")?.asString?.let { tokenFile ->
+			val token = configured.get("token")?.asString?.takeIf { it.isNotBlank() }
+				?: configured.get("tokenFile")?.asString?.let { tokenFile ->
 					runCatching { Files.readString(Path.of(tokenFile)).trim() }.getOrDefault("")
-				}
-				?: legacyToken
+				} ?: throw Exception("token param not found in provider $selectedName")
+			val balanceUrl = configured.get("balanceUrl").asString ?: throw Exception("$selectedName balanceUrl not defined in $configPath")
 
 			return LLMProvider(
 				name = selectedName,
@@ -50,10 +73,14 @@ data class LLMProvider(
 				fastModel = configured.getAsJsonObject("models")?.get("fast")?.asString ?: throw Exception("fastModel not defined in $configPath"),
 				thinkingModel = configured.getAsJsonObject("models")?.get("thinking")?.asString ?: throw Exception("thinkingModel not defined in $configPath"),
 				responsesModels = readResponsesModels(configured),
+				balanceRelated = BalanceRelated(
+					balanceUrl = balanceUrl,
+					balanceStruct = BalanceStructParse.fromProvider(selectedName),
+				)
 			)
 		}
 
-		private fun readConfig(path: Path): com.google.gson.JsonObject? {
+		private fun readConfig(path: Path): JsonObject? {
 			if (!Files.isRegularFile(path)) return null
 			return try {
 				JsonParser.parseString(Files.readString(path)).asJsonObject
@@ -62,7 +89,7 @@ data class LLMProvider(
 			}
 		}
 
-		private fun readResponsesModels(configured: com.google.gson.JsonObject?): Set<LLMServices.MODELS> {
+		private fun readResponsesModels(configured: JsonObject?): Set<LLMServices.MODELS> {
 			val values = configured?.getAsJsonArray("responsesModels")
 				?: return setOf(LLMServices.MODELS.FAST)
 			return values.mapNotNull { item ->
