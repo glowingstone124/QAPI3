@@ -1,4 +1,9 @@
 # QAPI3
+
+## Become a sponsor
+
+Sponsor me on afdian [link](https://afdian.com/a/glowingstone124)
+
 ## Fast, SQL-safe Api.
 This program contains these features:
 - Minecraft Server validation: User can easily bind their account to api,
