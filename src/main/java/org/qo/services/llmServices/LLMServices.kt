@@ -61,10 +61,10 @@ class LLMServices(
 	private val memberProfileContextService: LLMMemberProfileContextService,
 	private val chatHistoryService: LLMChatHistoryService,
 	private val toolService: LLMToolService,
+	private val provider: LLMProvider,
 ) {
 	private val redis = Redis()
 	private val jsonParser = JsonParser()
-	private val provider = LLMProvider.fromEnvironment()
 	private val webSearchEnabled = readBoolean("LLM_WEB_SEARCH_ENABLED", true)
 	private val debugPrompt = readBoolean("LLM_DEBUG_PROMPT", false)
 	private val debugPromptMaxChars = readInt("LLM_DEBUG_PROMPT_MAX_CHARS", 12000).coerceAtLeast(1000)
@@ -394,36 +394,6 @@ class LLMServices(
 			debugPrompt(source, body)
 			setBody(body)
 		}
-
-	suspend fun getBalance(): Pair<Boolean, Double> {
-		if (provider.balanceRelated.balanceStruct == BalanceStructParse.NONE) {
-			return Pair(false, -1.0)
-		}
-		val result = JsonParser.parseString(
-			postUpstream(
-				"balance-query",
-				"",
-				provider.balanceRelated.balanceUrl!!
-			).bodyAsText()
-		).asJsonObject
-
-		when (provider.balanceRelated.balanceStruct) {
-			BalanceStructParse.DEEPSEEK -> {
-				return Pair(
-					true,
-					result.get("balance_infos").asJsonArray.find { it.asJsonObject.get("currency").asString == "CNY" }?.let { return@let it.asJsonObject.get("total_balance").asDouble } ?: 0.0)
-			}
-
-			BalanceStructParse.TEAMOROUTER -> {
-				return Pair(
-					true,
-					result.get("balance").asJsonObject.get("value").asDouble
-				)
-			}
-
-			else -> return Pair(false, -1.0)
-		}
-	}
 
 	private fun authenticateServerToken(token: String): Boolean = nodes.getServerFromToken(token) >= 0
 	private fun authenticatedServerId(token: String): Int? = nodes.getServerFromToken(token).takeIf { it >= 0 }

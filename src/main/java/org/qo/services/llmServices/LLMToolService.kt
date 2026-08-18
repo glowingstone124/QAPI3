@@ -18,7 +18,7 @@ import java.util.Locale
 
 @Service
 class LLMToolService(
-	private val llmServices: LLMServices,
+	private val balanceService: LLMBalanceService,
 	private val status: Status,
 	private val metroService: MetroServiceImpl,
 	private val transportationService: TransportationServiceImpl,
@@ -396,7 +396,7 @@ class LLMToolService(
 	}
 
 	private suspend fun getRemainBalance(): String {
-		val balance = llmServices.getBalance()
+		val balance = balanceService.getBalance()
 
 		if (!balance.first) {
 			return errorResult(
