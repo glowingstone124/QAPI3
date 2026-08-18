@@ -235,7 +235,7 @@ class LLMToolService(
 				"add_memory" -> addMemory(args, context)
 				"search_memory" -> searchMemory(args, context.groupId)
 				"forget_memory" -> forgetMemory(args, context.groupId)
-				"get_remaining_balance" -> getRemainBalance()
+				"get_remain_balance" -> getRemainBalance()
 				else -> errorResult("unknown_tool", "未知工具：$name")
 			}
 		}.getOrElse { errorResult("tool_error", it.message ?: "工具执行失败") }
