@@ -1,11 +1,13 @@
 package org.qo.services.llmServices.tools
 
-import kotlinx.serialization.json.JsonObject
+import com.google.gson.JsonObject
 import org.qo.services.llmServices.LLMToolContext
 
 interface Tools {
 
 	val id: String
 
-	fun execute(args: JsonObject, context: LLMToolContext):String
+	val definition: JsonObject
+
+	suspend fun execute(args: JsonObject, context: LLMToolContext): String
 }
