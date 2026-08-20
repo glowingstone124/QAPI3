@@ -74,15 +74,16 @@ class LLMResponsesAdapterTest {
     }
 
     @Test
-    fun `converts responses result back to chat completion`() {
+    fun `converts responses result back to chat completion without web citations`() {
         val result = LLMResponsesAdapter.toChatCompletion(
-            """{"id":"resp-1","model":"deepseek-v4-flash","status":"completed","output":[{"type":"web_search_call","id":"ws-1","status":"completed"},{"type":"message","role":"assistant","content":[{"type":"output_text","text":"search result","annotations":[{"type":"url_citation","title":"Example","url":"https://example.com"}]}]}],"usage":{"input_tokens":10,"output_tokens":5}}"""
+            """{"id":"resp-1","model":"deepseek-v4-flash","status":"completed","output":[{"type":"web_search_call","id":"ws-1","status":"completed"},{"type":"message","role":"assistant","content":[{"type":"output_text","text":"search result (Example https://example.com)","annotations":[{"type":"url_citation","start_index":14,"end_index":43,"title":"Example","url":"https://example.com"}]}]}],"usage":{"input_tokens":10,"output_tokens":5}}"""
         )
         val json = JsonParser.parseString(result).asJsonObject
 
         val content = json.getAsJsonArray("choices")[0].asJsonObject.getAsJsonObject("message").get("content").asString
-        assertTrue(content.startsWith("search result"))
-        assertTrue(content.contains("Example https://example.com"))
+        assertEquals("search result", content)
+        assertFalse(content.contains("来源："))
+        assertFalse(content.contains("https://example.com"))
         assertEquals(15, json.getAsJsonObject("usage").get("total_tokens").asInt)
     }
 

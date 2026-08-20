@@ -194,27 +194,40 @@ object LLMResponsesAdapter {
 
     private fun extractText(response: JsonObject): String {
         val parts = mutableListOf<String>()
-        val sources = linkedMapOf<String, String>()
         response.getAsJsonArray("output")?.forEach { item ->
             val message = item.takeIf { it.isJsonObject }?.asJsonObject ?: return@forEach
             if (message.get("type")?.asString != "message") return@forEach
             message.getAsJsonArray("content")?.forEach { block ->
                 val text = block.takeIf { it.isJsonObject }?.asJsonObject ?: return@forEach
                 if (text.get("type")?.asString == "output_text") {
-                    text.get("text")?.asString?.takeIf { it.isNotBlank() }?.let(parts::add)
-                    text.getAsJsonArray("annotations")?.forEach { annotation ->
-                        val citation = annotation.takeIf { it.isJsonObject }?.asJsonObject ?: return@forEach
-                        val url = citation.get("url")?.asString?.takeIf { it.isNotBlank() } ?: return@forEach
-                        val title = citation.get("title")?.asString?.takeIf { it.isNotBlank() } ?: url
-                        sources.putIfAbsent(url, title)
-                    }
+                    text.get("text")?.asString
+                        ?.let { stripUrlCitations(it, text.getAsJsonArray("annotations")) }
+                        ?.takeIf { it.isNotBlank() }
+                        ?.let(parts::add)
                 }
             }
         }
-        if (sources.isNotEmpty()) {
-            parts.add("来源：\n" + sources.entries.joinToString("\n") { (url, title) -> "$title $url" })
-        }
         return parts.joinToString("\n\n").trim()
+    }
+
+    private fun stripUrlCitations(text: String, annotations: JsonArray?): String {
+        if (annotations == null) return text
+        val ranges = annotations.mapNotNull { annotation ->
+            val citation = annotation.takeIf { it.isJsonObject }?.asJsonObject ?: return@mapNotNull null
+            if (citation.get("type")?.asString != "url_citation") return@mapNotNull null
+            val start = citation.get("start_index")?.asInt ?: return@mapNotNull null
+            val end = citation.get("end_index")?.asInt ?: return@mapNotNull null
+            if (start !in 0..<end || end > text.length) return@mapNotNull null
+            start until end
+        }.sortedByDescending { it.first }
+
+        return StringBuilder(text).apply {
+            ranges.forEach { range -> delete(range.first, range.last + 1) }
+        }.toString()
+            .replace(Regex("""\s+[，,；;：:]"""), { it.value.trimStart() })
+            .replace(Regex("""[（(]\s*[）)]"""), "")
+            .replace(Regex("""[ \t]{2,}"""), " ")
+            .trim()
     }
 }
 
