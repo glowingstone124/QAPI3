@@ -95,6 +95,8 @@ class LLMServices(
 		}
 	}
 
+	fun modelPresetFromRequest(value: String): String? = providers.current().resolvePreset(value)
+
 	private val client = HttpClient(CIO) {
 		install(HttpTimeout) {
 			requestTimeoutMillis = 120 * 1000
@@ -134,10 +136,10 @@ class LLMServices(
 		return user
 	}
 
-	fun buildPromptRequest(prompt: String, stream: Boolean = true, model: MODELS): String {
+	fun buildPromptRequest(prompt: String, stream: Boolean = true, model: String): String {
 		val provider = providers.current()
 		return JsonObject().apply {
-			addProperty("model", provider.modelName(model))
+			addProperty("model", provider.modelName(model) ?: throw IllegalArgumentException("请求的模型不可用"))
 			addProperty("stream", stream)
 			add(
 				"messages", jsonParser.parse(
@@ -152,7 +154,10 @@ class LLMServices(
 		}.toString()
 	}
 
-	suspend fun completeChat(body: String, token: String, model: MODELS): LLMNonStreamResult {
+	fun buildPromptRequest(prompt: String, stream: Boolean = true, model: MODELS): String =
+		buildPromptRequest(prompt, stream, model.alias)
+
+	suspend fun completeChat(body: String, token: String, model: String): LLMNonStreamResult {
 		val user = authenticate(token) ?: return LLMNonStreamResult(401, errorJson("invalid_token", "权限验证失败"))
 		val requester = LLMRequester(user.uid, user.username, "login")
 		val provider = providers.current()
@@ -172,7 +177,7 @@ class LLMServices(
 			val usage = parseUsage(text)
 			updateAccessRecord(requestId, if (statusCode in 200..299) "completed" else "failed", usage, text.take(512))
 			if (statusCode in 200..299) {
-				recordConversation(requester, request.userContent, text)
+				recordConversation(requester, request.userContent, text, provider)
 			}
 			LLMNonStreamResult(statusCode, text)
 		} catch (e: Exception) {
@@ -181,7 +186,10 @@ class LLMServices(
 		}
 	}
 
-	suspend fun streamChat(body: String, token: String, model: MODELS): LLMStreamResult {
+	suspend fun completeChat(body: String, token: String, model: MODELS): LLMNonStreamResult =
+		completeChat(body, token, model.alias)
+
+	suspend fun streamChat(body: String, token: String, model: String): LLMStreamResult {
 		val user =
 			authenticate(token) ?: return LLMStreamResult(401, flowOfText(errorJson("invalid_token", "权限验证失败")))
 		val requester = LLMRequester(user.uid, user.username, "login")
@@ -200,6 +208,9 @@ class LLMServices(
 		return LLMStreamResult(200, streamFromUpstream(request.body, requestId, "stream", provider))
 	}
 
+	suspend fun streamChat(body: String, token: String, model: MODELS): LLMStreamResult =
+		streamChat(body, token, model.alias)
+
 	suspend fun completeBotChat(
 		body: String,
 		token: String,
@@ -214,9 +225,7 @@ class LLMServices(
 		val username = qqName?.takeIf { it.isNotBlank() }?.let { decodeHeader(it) } ?: "qq:$qqUid"
 		val requester = LLMRequester(qqUid, username, "qq", qqGroupId)
 		val provider = providers.current()
-		val model = MODELS.fromRequest(model) ?: MODELS.entries.firstOrNull {
-			provider.modelName(it) == model
-		}
+		val model = provider.resolvePreset(model)
 			?: return LLMNonStreamResult(400, errorJson("model_not_available", "请求的模型不可用"))
 		val request = normalizeRequest(body, false, requester, model, provider)
 		val requestId = insertAccessRecord(qqUid, username, request.model, false)
@@ -235,7 +244,7 @@ class LLMServices(
 			val usage = parseUsage(text)
 			updateAccessRecord(requestId, if (statusCode in 200..299) "completed" else "failed", usage, text.take(512))
 			if (statusCode in 200..299) {
-				recordConversation(requester, request.userContent, text)
+				recordConversation(requester, request.userContent, text, provider)
 			}
 			LLMNonStreamResult(statusCode, text)
 		} catch (e: Exception) {
@@ -261,7 +270,7 @@ class LLMServices(
 		minecraftName: String,
 		minecraftCoordinate: String,
 		minecraftHP: String,
-		model: MODELS
+		model: String
 	): LLMNonStreamResult {
 		val serverId = authenticatedServerId(token)
 			?: return LLMNonStreamResult(401, errorJson("invalid_token", "Minecraft token 验证失败"))
@@ -304,7 +313,7 @@ class LLMServices(
 			val usage = parseUsage(text)
 			updateAccessRecord(requestId, if (statusCode in 200..299) "completed" else "failed", usage, text.take(512))
 			if (statusCode in 200..299) {
-				recordConversation(requester, request.userContent, text)
+				recordConversation(requester, request.userContent, text, provider)
 			}
 			LLMNonStreamResult(statusCode, text)
 		} catch (e: Exception) {
@@ -313,14 +322,17 @@ class LLMServices(
 		}
 	}
 
+	suspend fun completeMinecraftChat(
+		body: String, token: String, minecraftName: String, minecraftCoordinate: String, minecraftHP: String, model: MODELS,
+	): LLMNonStreamResult = completeMinecraftChat(body, token, minecraftName, minecraftCoordinate, minecraftHP, model.alias)
+
 	private suspend fun completeWithOptionalTools(
 		request: NormalizedRequest,
 		requester: LLMRequester,
 		source: String,
 		provider: LLMProvider,
 	): Pair<Int, String> {
-		val requestModel = MODELS.entries.firstOrNull { provider.modelName(it) == request.model } ?: MODELS.FAST
-		if (provider.supportsResponses(requestModel)) {
+		if (provider.supportsResponses(request.preset)) {
 			return completeWithResponsesApi(request, requester, source, provider)
 		}
 		if (!toolService.enabled()) {
@@ -404,6 +416,16 @@ class LLMServices(
 			setBody(body)
 		}
 
+	private suspend fun postSummaryUpstream(source: String, body: String, summary: LLMSummaryConfig) =
+		client.post(summary.chatCompletionsUrl) {
+			val model = runCatching { JsonParser.parseString(body).asJsonObject.get("model")?.asString }.getOrNull() ?: "unknown"
+			println("[LLM] upstream request source=$source provider=${summary.providerName} model=$model api=chat-completions")
+			header(HttpHeaders.Authorization, "Bearer ${summary.apiToken}")
+			contentType(ContentType.Application.Json)
+			debugPrompt(source, body)
+			setBody(body)
+		}
+
 	private fun authenticateServerToken(token: String): Boolean = nodes.getServerFromToken(token) >= 0
 	private fun authenticatedServerId(token: String): Int? = nodes.getServerFromToken(token).takeIf { it >= 0 }
 	private fun decodeHeader(value: String): String = runCatching {
@@ -450,11 +472,12 @@ class LLMServices(
 		body: String,
 		stream: Boolean,
 		requester: LLMRequester? = null,
-		model: MODELS,
+		model: String,
 		provider: LLMProvider,
 	): NormalizedRequest {
 		val obj = JsonParser.parseString(body).asJsonObject
-		obj.addProperty("model", provider.modelName(model))
+		val resolvedModel = provider.modelName(model) ?: throw IllegalArgumentException("请求的模型不可用")
+		obj.addProperty("model", resolvedModel)
 		requester?.let {
 			obj.addProperty("user_id", it.conversationKey())
 		}
@@ -483,8 +506,10 @@ class LLMServices(
 			summarize = ::summarizeGroupContext,
 		)
 		val memberProfileContext = memberProfileContextService.buildContext(memberMemories, requester?.uid)
-		obj.add("messages", enrichMessages(requestMessages, requester, preparedGroupContext, memberProfileContext))
+		val enrichedMessages = enrichMessages(requestMessages, requester, preparedGroupContext, memberProfileContext)
+		obj.add("messages", limitMessagesToContextWindow(enrichedMessages, provider.contextWindow, obj))
 		return NormalizedRequest(
+			preset = model,
 			model = obj.get("model").asString,
 			body = obj.toString(),
 			userQuestion = userQuestion,
@@ -550,6 +575,113 @@ class LLMServices(
 		return enriched
 	}
 
+	private fun limitMessagesToContextWindow(messages: JsonArray, contextWindow: Int, request: JsonObject): JsonArray {
+		val outputTokens = requestedOutputTokens(request, contextWindow)
+		val inputBudget = (contextWindow - outputTokens).coerceAtLeast(1)
+		val entries = messages.toList()
+		if (estimateTokens(messages) <= inputBudget || entries.isEmpty()) return messages
+
+		val selected = BooleanArray(entries.size)
+		var usedTokens = 0
+		fun select(index: Int) {
+			if (index !in entries.indices || selected[index]) return
+			selected[index] = true
+			usedTokens += estimateTokens(entries[index])
+		}
+
+		select(entries.indexOfFirst { it.isJsonObject && it.asJsonObject.get("role")?.asString == "system" })
+		val latestUser = entries.indexOfLast { it.isJsonObject && it.asJsonObject.get("role")?.asString == "user" }
+		select(if (latestUser >= 0) latestUser else entries.lastIndex)
+		for (index in entries.lastIndex downTo 0) {
+			if (selected[index]) continue
+			val cost = estimateTokens(entries[index])
+			if (usedTokens + cost <= inputBudget) select(index)
+		}
+
+		return JsonArray().apply {
+			entries.forEachIndexed { index, entry ->
+				if (selected[index]) add(entry)
+			}
+		}
+	}
+
+	private fun requestedOutputTokens(request: JsonObject, contextWindow: Int): Int {
+		val explicit = listOf("max_tokens", "max_output_tokens").firstNotNullOfOrNull { key ->
+			request.get(key)?.let { runCatching { it.asInt }.getOrNull() }
+		}
+		return (explicit ?: minOf(4096, contextWindow / 4)).coerceAtLeast(0)
+	}
+
+	private fun estimateTokens(element: JsonElement): Int = when {
+		element.isJsonNull -> 0
+		element.isJsonPrimitive -> estimateTextTokens(element.asString)
+		element.isJsonArray -> element.asJsonArray.sumOf(::estimateTokens)
+		element.isJsonObject -> element.asJsonObject.entrySet().sumOf { (key, value) ->
+			estimateTextTokens(key) + estimateTokens(value) + 1
+		}
+		else -> 0
+	}
+
+	private fun estimateTextTokens(text: String): Int {
+		if (text.isBlank()) return 1
+		var tokens = 0
+		var asciiCharacters = 0
+		for (character in text) {
+			if (character.code in 0x20..0x7E) {
+				asciiCharacters++
+			} else {
+				tokens += (asciiCharacters + 3) / 4
+				asciiCharacters = 0
+				tokens++
+			}
+		}
+		tokens += (asciiCharacters + 3) / 4
+		return tokens.coerceAtLeast(1)
+	}
+
+	private fun fitSummaryInput(
+		existingSummary: String?,
+		messages: List<GroupChatEntry>,
+		instruction: String,
+		contextWindow: Int,
+		outputTokens: Int,
+	): String {
+		val inputBudget = (
+			contextWindow - outputTokens - estimateTextTokens(instruction) - 16
+		).coerceAtLeast(1)
+		var selectedMessages = messages
+		while (selectedMessages.size > 1 && estimateTextTokens(summaryInputText(existingSummary, selectedMessages)) > inputBudget) {
+			selectedMessages = selectedMessages.drop(1)
+		}
+		return clipTextToTokens(summaryInputText(existingSummary, selectedMessages), inputBudget)
+	}
+
+	private fun summaryInputText(existingSummary: String?, messages: List<GroupChatEntry>): String = buildString {
+		if (!existingSummary.isNullOrBlank()) {
+			append("已有摘要：\n").append(existingSummary).append("\n\n")
+		}
+		append("需要合并的新消息：\n")
+		append(messages.joinToString("\n") { entry ->
+			val prefix = if (entry.time > 0) "[${entry.time}] " else ""
+			"$prefix${entry.name}(${entry.uid}): ${entry.content}"
+		})
+	}
+
+	private fun clipTextToTokens(text: String, maxTokens: Int): String {
+		if (estimateTextTokens(text) <= maxTokens) return text
+		var low = 0
+		var high = text.length
+		while (low < high) {
+			val middle = (low + high) / 2
+			if (estimateTextTokens(text.substring(middle)) <= maxTokens) {
+				high = middle
+			} else {
+				low = middle + 1
+			}
+		}
+		return text.substring(low)
+	}
+
 	private fun buildMinecraftRelatedContext(minecraftRelated: MinecraftRelated?): String? {
 		if (minecraftRelated == null) {
 			return null
@@ -564,37 +696,34 @@ class LLMServices(
 	private suspend fun summarizeGroupContext(existingSummary: String?, messages: List<GroupChatEntry>): String? {
 		val provider = providers.current()
 		if (provider.apiToken.isBlank() || messages.isEmpty()) return null
-		val newMessages = messages.joinToString("\n") { entry ->
-			val prefix = if (entry.time > 0) "[${entry.time}] " else ""
-			"$prefix${entry.name}(${entry.uid}): ${entry.content}"
-		}
+		val summaryInstruction = "将群聊历史压缩为可供后续对话使用的事实摘要。保留人物、决定、偏好、未解决问题、路线起终点和重要时间；删除寒暄、重复内容和工具语法。不得添加原文没有的信息。直接输出摘要正文。"
+		val maxSummaryOutputTokens = minOf(1200, (provider.summaryContextWindow / 4).coerceAtLeast(1))
+		val summaryInput = fitSummaryInput(
+			existingSummary = existingSummary,
+			messages = messages,
+			instruction = summaryInstruction,
+			contextWindow = provider.summaryContextWindow,
+			outputTokens = maxSummaryOutputTokens,
+		)
 		val request = JsonObject().apply {
-			addProperty("model", provider.modelName(MODELS.FAST))
+			addProperty("model", provider.summaryModel)
 			addProperty("stream", false)
-			addProperty("max_tokens", 1200)
+			addProperty("max_tokens", maxSummaryOutputTokens)
 			add("thinking", JsonObject().apply { addProperty("type", "disabled") })
 			add("messages", JsonArray().apply {
 				add(JsonObject().apply {
 					addProperty("role", "system")
-					addProperty(
-						"content",
-						"将群聊历史压缩为可供后续对话使用的事实摘要。保留人物、决定、偏好、未解决问题、路线起终点和重要时间；删除寒暄、重复内容和工具语法。不得添加原文没有的信息。直接输出摘要正文。"
-					)
+					addProperty("content", summaryInstruction)
 				})
 				add(JsonObject().apply {
 					addProperty("role", "user")
-					addProperty("content", buildString {
-						if (!existingSummary.isNullOrBlank()) {
-							append("已有摘要：\n").append(existingSummary).append("\n\n")
-						}
-						append("需要合并的新消息：\n").append(newMessages)
-					})
+					addProperty("content", summaryInput)
 				})
 			})
 		}
 		return withTimeoutOrNull(groupSummaryTimeoutMs) {
 			runCatching {
-				val response = postUpstream("group-summary", request.toString(), provider)
+				val response = postSummaryUpstream("group-summary", request.toString(), provider.summary)
 				if (!response.status.isSuccess()) return@runCatching null
 				extractAssistantContent(response.bodyAsText())
 			}.getOrNull()
@@ -692,12 +821,78 @@ class LLMServices(
 			.ignoreException() ?: true
 	}
 
-	private fun recordConversation(requester: LLMRequester, userContent: JsonElement, responseBody: String) {
+	private fun recordConversation(
+		requester: LLMRequester,
+		userContent: JsonElement,
+		responseBody: String,
+		provider: LLMProvider,
+	) {
 		val answer = extractAssistantContent(responseBody) ?: return
-		runCatching {
-			conversationService.append(requester.conversationKey(), userContent, answer)
-		}.onFailure { error ->
+		try {
+			conversationService.append(requester.conversationKey(), userContent, answer, provider.compact)
+		} catch (error: Exception) {
 			println("LLM conversation history persistence failed: ${error.message}")
+			return
+		}
+		initializationScope.launch {
+			try {
+				conversationService.compactIfNeeded(requester.conversationKey(), provider.contextWindow, provider.compact) { existingSummary, messages ->
+					summarizeConversation(existingSummary, messages, provider)
+				}
+			} catch (error: Exception) {
+				println("LLM conversation compaction failed: ${error.message}")
+			}
+		}
+	}
+
+	private suspend fun summarizeConversation(
+		existingSummary: String?,
+		messages: JsonArray,
+		provider: LLMProvider,
+	): String? {
+		val conversation = messages.mapNotNull { item ->
+			val message = item.takeIf { it.isJsonObject }?.asJsonObject ?: return@mapNotNull null
+			val role = message.get("role")?.asString ?: "unknown"
+			val content = message.get("content")?.let(::extractTextContent)
+				?.takeIf { it.isNotBlank() }
+				?: "[非文本内容已省略]"
+			"$role: $content"
+		}.joinToString("\n")
+		if (conversation.isBlank()) return existingSummary
+
+		val instruction = "将多轮对话压缩为后续回答可用的事实摘要。保留用户诉求、已确认的事实、偏好、约束、已完成事项、未解决问题和必要上下文；删除寒暄、重复内容和模型的推理过程。不得添加原文没有的信息。直接输出摘要正文。"
+		val maxOutputTokens = minOf(1200, (provider.summaryContextWindow / 4).coerceAtLeast(1))
+		val inputBudget = (
+			provider.summaryContextWindow - maxOutputTokens - estimateTextTokens(instruction) - 16
+		).coerceAtLeast(1)
+		val input = clipTextToTokens(buildString {
+			if (!existingSummary.isNullOrBlank()) {
+				append("已有摘要：\n").append(existingSummary).append("\n\n")
+			}
+			append("需要合并的较早对话：\n").append(conversation)
+		}, inputBudget)
+		val request = JsonObject().apply {
+			addProperty("model", provider.summaryModel)
+			addProperty("stream", false)
+			addProperty("max_tokens", maxOutputTokens)
+			add("thinking", JsonObject().apply { addProperty("type", "disabled") })
+			add("messages", JsonArray().apply {
+				add(JsonObject().apply {
+					addProperty("role", "system")
+					addProperty("content", instruction)
+				})
+				add(JsonObject().apply {
+					addProperty("role", "user")
+					addProperty("content", input)
+				})
+			})
+		}
+		return withTimeoutOrNull(groupSummaryTimeoutMs) {
+			runCatching {
+				val response = postSummaryUpstream("conversation-compact", request.toString(), provider.summary)
+				if (!response.status.isSuccess()) return@runCatching null
+				extractAssistantContent(response.bodyAsText())
+			}.getOrNull()
 		}
 	}
 
@@ -1052,6 +1247,7 @@ class LLMServices(
 	)
 
 	private data class NormalizedRequest(
+		val preset: String,
 		val model: String,
 		val body: String,
 		val userQuestion: String,

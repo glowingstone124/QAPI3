@@ -145,7 +145,7 @@ The OpenAI-compatible non-stream chat endpoint can execute built-in tools before
 
 Structured memories are stored in the automatically created MySQL `llm_memories` table. A memory is uniquely identified by `group_id + subject + memory_key`, so multiple facts about the same subject can coexist. On the first startup after upgrading, legacy `data/llm/rag/<groupId>/memory.txt` and `data/llm/rag/groups/<groupId>/memory.txt` files are imported once; completion is recorded in `llm_memory_migrations`. Legacy files are retained for rollback but are excluded from RAG after migration.
 
-Group context always retains the newest raw messages. Older messages are incrementally summarized with `deepseek-v4-flash`; summaries are persisted per group and refreshed only after enough messages age out of the recent window. Boolean environment variables accept only `true` and `false`.
+Group context always retains the newest raw messages. Older messages are incrementally summarized with the provider's configured `summary.model`; summaries are persisted per group and refreshed only after enough messages age out of the recent window. Boolean environment variables accept only `true` and `false`.
 
 Related environment variables:
 
@@ -160,6 +160,7 @@ Related environment variables:
 - `LLM_GROUP_SUMMARY_MIN_NEW_CHARS`: newly aged characters required before updating an existing summary, default `1500`.
 - `LLM_GROUP_SUMMARY_MAX_CHARS`: maximum persisted summary characters per group, default `5000`.
 - `LLM_GROUP_SUMMARY_TIMEOUT_MS`: maximum time spent updating a summary before falling back to raw pending history, default `15000`.
+- `LLM_HISTORY_TTL_MS`: in-memory conversation lifetime, default `1800000` (30 minutes).
 - `LLM_MEMORY_CONTEXT_MAX_ITEMS`: maximum relevant memories injected into a request, default `10`.
 - `LLM_MEMORY_CONTEXT_MAX_CHARS`: maximum memory context characters, default `6000`.
 - `LLM_MEMBER_PROFILE_CONTEXT_MAX_ITEMS`: maximum qbot high-activity member profiles injected into one request, default `50`.
@@ -186,9 +187,23 @@ Provider configuration example (`data/llm/providers.json`):
       "chatCompletionsUrl": "https://api.deepseek.com/v1/chat/completions",
       "responsesUrl": "https://api.deepseek.com/v1/responses",
       "tokenFile": "LLMAPITOKEN",
+      "contextWindow": 524288,
       "models": {
         "fast": "deepseek-v4-flash",
-        "thinking": "deepseek-v4-pro"
+        "thinking": "deepseek-v4-pro",
+        "quality": "deepseek-v4-pro"
+      },
+      "summary": {
+        "provider": "another-provider",
+        "model": "fast",
+        "contextWindow": 32768
+      },
+      "compact": {
+        "enabled": true,
+        "triggerTurns": 12,
+        "triggerPercent": 70,
+        "keepTurns": 4,
+        "maxSummaryChars": 8000
       },
       "responsesModels": ["fast"]
     },
@@ -196,9 +211,21 @@ Provider configuration example (`data/llm/providers.json`):
       "chatCompletionsUrl": "https://example.com/v1/chat/completions",
       "responsesUrl": "https://example.com/v1/responses",
       "tokenFile": "data/llm/another-provider.token",
+      "contextWindow": 524288,
       "models": {
         "fast": "provider-fast-model",
         "thinking": "provider-thinking-model"
+      },
+      "summary": {
+        "model": "provider-summary-model",
+        "contextWindow": 32768
+      },
+      "compact": {
+        "enabled": true,
+        "triggerTurns": 12,
+        "triggerPercent": 70,
+        "keepTurns": 4,
+        "maxSummaryChars": 8000
       },
       "responsesModels": ["fast", "thinking"]
     }
@@ -210,6 +237,18 @@ Provider configuration example (`data/llm/providers.json`):
 `chatCompletionsUrl`. Set `LLM_PROVIDER=another-provider` to switch providers.
 `responsesModels` controls which model aliases use the Responses API; `LLM_WEB_SEARCH_ENABLED`
 only controls whether the Responses request includes web search.
+
+`contextWindow` is the main model's context-window size in tokens (default `524288`). The API keeps the
+system prompt and newest user messages, then drops the oldest history when the estimated
+input would exceed that window. `models` accepts arbitrary preset names; request the `quality`
+preset with `?model=quality`. `summary.provider` may reference any configured provider, while
+`summary.model` may be any preset of that provider or a provider model name. `summary.contextWindow`
+independently limits the summary request. Summary settings default to the selected provider's
+`fast` model and the main `contextWindow`.
+Conversation autocompact uses the same summary configuration. Its provider-local `compact`
+object defaults to `enabled=true`, `triggerTurns=12`, `triggerPercent=70`, `keepTurns=4`, and
+`maxSummaryChars=8000`. It replaces older turns with one rolling summary once raw history exceeds
+the turn or token threshold, while keeping the newest configured turns.
 
 Each upstream LLM request logs its source, provider name, resolved model, and API type. Provider
 reloads are logged as `[LLM] reloaded provider old -> new`; tokens and request bodies are not part

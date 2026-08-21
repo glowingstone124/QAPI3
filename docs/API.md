@@ -371,9 +371,22 @@ provider 配置文件默认为 `data/llm/providers.json`，可由 `LLM_PROVIDERS
 - `chatCompletionsUrl`
 - `responsesUrl`
 - `token` 或 `tokenFile`
-- `models.fast`
-- `models.thinking`
+- `contextWindow`
+- `models.<preset>`（任意预设名，至少需配置 `fast` 和 `thinking`）
+- `summary.provider`
+- `summary.model`
+- `summary.contextWindow`
+- `compact.enabled`
+- `compact.triggerTurns`
+- `compact.triggerPercent`
+- `compact.keepTurns`
+- `compact.maxSummaryChars`
 - `responsesModels`
+
+会话历史自动压缩由当前 provider 的 `compact` 对象控制：超过 `compact.triggerTurns`
+（默认 `12`）或估算 token 达到 `compact.triggerPercent`（默认主窗口的 `70%`）时，较早轮次会使用
+`summary.model` 生成滚动摘要，保留最新 `compact.keepTurns`（默认 `4`）轮原文。设置
+`compact.enabled=false` 可关闭。
 
 `responsesUrl` 按 JSON 原值使用，不会从 Chat URL 推导。
 

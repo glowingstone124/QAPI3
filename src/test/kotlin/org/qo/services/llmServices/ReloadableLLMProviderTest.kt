@@ -38,6 +38,71 @@ class ReloadableLLMProviderTest {
 		}
 	}
 
+	@Test
+	fun `loads independent main and summary model context windows`() {
+		val file = tempDir.resolve("providers.json")
+		Files.writeString(file, """
+			{
+			  "defaultProvider": "first",
+			  "providers": {
+			    "first": {
+			      "chatCompletionsUrl": "https://first.example/chat",
+			      "responsesUrl": "https://first.example/responses",
+			      "token": "first-token",
+			      "balanceUrl": "https://first.example/balance",
+			      "contextWindow": 65536,
+			      "models": { "fast": "first-fast", "thinking": "first-thinking" },
+			      "summary": { "model": "first-summary", "contextWindow": 8192 },
+			      "compact": {
+			        "enabled": true,
+			        "triggerTurns": 10,
+			        "triggerPercent": 65,
+			        "keepTurns": 3,
+			        "maxSummaryChars": 6000
+			      }
+			    }
+			  }
+			}
+		""".trimIndent())
+
+		val provider = LLMProvider.fromConfig(file)
+
+		assertEquals(65536, provider.contextWindow)
+		assertEquals("first-summary", provider.summaryModel)
+		assertEquals(8192, provider.summaryContextWindow)
+		assertEquals(10, provider.compact.triggerTurns)
+		assertEquals(65, provider.compact.triggerPercent)
+	}
+
+	@Test
+	fun `summary can use a preset from another provider`() {
+		val file = tempDir.resolve("providers.json")
+		Files.writeString(file, """
+			{
+			  "defaultProvider": "main",
+			  "providers": {
+			    "main": {
+			      "chatCompletionsUrl": "https://main.example/chat", "responsesUrl": "https://main.example/responses",
+			      "token": "main-token", "balanceUrl": "https://main.example/balance",
+			      "models": { "fast": "main-fast", "thinking": "main-thinking" },
+			      "summary": { "provider": "summary", "model": "compact", "contextWindow": 4096 }
+			    },
+			    "summary": {
+			      "chatCompletionsUrl": "https://summary.example/chat", "responsesUrl": "https://summary.example/responses",
+			      "token": "summary-token", "balanceUrl": "https://summary.example/balance",
+			      "models": { "fast": "summary-fast", "thinking": "summary-thinking", "compact": "summary-compact" }
+			    }
+			  }
+			}
+		""".trimIndent())
+
+		val provider = LLMProvider.fromConfig(file)
+
+		assertEquals("summary", provider.summary.providerName)
+		assertEquals("https://summary.example/chat", provider.summary.chatCompletionsUrl)
+		assertEquals("summary-compact", provider.summaryModel)
+	}
+
 	private fun config(defaultProvider: String): String =
 		"""
 		{

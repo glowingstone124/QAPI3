@@ -1,6 +1,8 @@
 package org.qo.services.llmServices
 
 import com.google.gson.JsonParser
+import com.google.gson.JsonPrimitive
+import kotlinx.coroutines.runBlocking
 import java.nio.file.Files
 import java.util.Base64
 import kotlin.io.path.createTempDirectory
@@ -9,6 +11,36 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 class LLMConversationServiceTest {
+    @Test
+    fun `compacts older turns and keeps a rolling summary with recent turns`() = runBlocking {
+        val dir = createTempDirectory("qapi3-llm-compact-test")
+        try {
+            val service = LLMConversationService(LLMImageStore.forTest(dir))
+            repeat(13) { turn ->
+                service.append("qq:compact", JsonPrimitive("question-$turn"), "answer-$turn")
+            }
+
+            var compactedMessages = 0
+            val compacted = service.compactIfNeeded("qq:compact", 524_288) { existingSummary, messages ->
+                assertEquals(null, existingSummary)
+                compactedMessages = messages.size()
+                "Earlier discussion summary"
+            }
+
+            assertTrue(compacted)
+            assertEquals(18, compactedMessages)
+            val history = service.historyMessages("qq:compact")
+            assertEquals(9, history.size())
+            assertTrue(history[0].asJsonObject.get("content").asString.contains("Earlier discussion summary"))
+            assertEquals("question-9", history[1].asJsonObject.get("content").asString)
+        } finally {
+            Files.walk(dir).use { files ->
+                files.sorted(Comparator.reverseOrder())
+                    .forEach { Files.deleteIfExists(it) }
+            }
+        }
+    }
+
     @Test
     fun `stores data url outside conversation content and restores it for history`() {
         val dir = createTempDirectory("qapi3-llm-image-test")
