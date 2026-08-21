@@ -49,9 +49,13 @@ data class LLMProvider(
 	companion object {
 		fun fromEnvironment(): LLMProvider {
 			val configPath = Path.of(System.getenv("LLM_PROVIDERS_FILE") ?: "data/llm/providers.json")
+			val explicitlySelected = System.getenv("LLM_PROVIDER")?.trim()?.takeIf { it.isNotBlank() }
+			return fromConfig(configPath, explicitlySelected)
+		}
+
+		fun fromConfig(configPath: Path, explicitlySelected: String? = null): LLMProvider {
 			val root = readConfig(configPath)
 			val providers = root?.getAsJsonObject("providers")
-			val explicitlySelected = System.getenv("LLM_PROVIDER")?.trim()?.takeIf { it.isNotBlank() }
 			val selectedName = explicitlySelected
 				?: root?.get("defaultProvider")?.asString?.takeIf { it.isNotBlank() }
 				?: providers?.keySet()?.firstOrNull() ?: throw Exception("provider not found")

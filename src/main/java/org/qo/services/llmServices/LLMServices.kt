@@ -61,7 +61,7 @@ class LLMServices(
 	private val memberProfileContextService: LLMMemberProfileContextService,
 	private val chatHistoryService: LLMChatHistoryService,
 	private val toolService: LLMToolService,
-	private val provider: LLMProvider,
+	private val providers: ReloadableLLMProvider,
 ) {
 	private val redis = Redis()
 	private val jsonParser = JsonParser()
@@ -76,9 +76,6 @@ class LLMServices(
 		promptFile = System.getenv("LLM_SYSTEM_PROMPT_FILE")?.trim()?.takeIf { it.isNotBlank() }?.let(Path::of),
 		fallbackPrompt = "",
 	)
-	private val upstreamToken: String
-		get() = provider.apiToken
-
 	enum class MODELS(val alias: String, val apiName: String) {
 		FAST("fast", "deepseek-v4-flash"),
 		THINKING("thinking", "deepseek-v4-pro");
@@ -94,7 +91,7 @@ class LLMServices(
 
 	fun modelFromRequest(value: String): MODELS? {
 		return MODELS.fromRequest(value) ?: MODELS.entries.firstOrNull {
-			provider.modelName(it) == value
+			providers.current().modelName(it) == value
 		}
 	}
 
@@ -113,6 +110,7 @@ class LLMServices(
 	@PostConstruct
 	fun init() {
 		systemPrompt.start()
+		providers.start()
 	}
 
 	@EventListener(ApplicationReadyEvent::class)
@@ -123,6 +121,7 @@ class LLMServices(
 	@PreDestroy
 	fun shutdown() {
 		systemPrompt.close()
+		providers.close()
 		initializationScope.cancel()
 		client.close()
 	}
@@ -136,6 +135,7 @@ class LLMServices(
 	}
 
 	fun buildPromptRequest(prompt: String, stream: Boolean = true, model: MODELS): String {
+		val provider = providers.current()
 		return JsonObject().apply {
 			addProperty("model", provider.modelName(model))
 			addProperty("stream", stream)
@@ -155,19 +155,20 @@ class LLMServices(
 	suspend fun completeChat(body: String, token: String, model: MODELS): LLMNonStreamResult {
 		val user = authenticate(token) ?: return LLMNonStreamResult(401, errorJson("invalid_token", "权限验证失败"))
 		val requester = LLMRequester(user.uid, user.username, "login")
-		val request = normalizeRequest(body, false, requester, model)
+		val provider = providers.current()
+		val request = normalizeRequest(body, false, requester, model, provider)
 		val requestId = insertAccessRecord(user.uid, user.username, request.model, false)
 		if (!reserveRequest(token)) {
 			updateAccessRecord(requestId, "rejected", errorMessage = "duplicate request")
 			return LLMNonStreamResult(429, errorJson("rate_limited", "请求过于频繁"))
 		}
-		if (upstreamToken.isBlank()) {
+		if (provider.apiToken.isBlank()) {
 			updateAccessRecord(requestId, "failed", errorMessage = "missing upstream token")
 			return LLMNonStreamResult(500, errorJson("server_error", "LLM 上游令牌未配置"))
 		}
 
 		return try {
-			val (statusCode, text) = completeWithOptionalTools(request, requester, "chat")
+			val (statusCode, text) = completeWithOptionalTools(request, requester, "chat", provider)
 			val usage = parseUsage(text)
 			updateAccessRecord(requestId, if (statusCode in 200..299) "completed" else "failed", usage, text.take(512))
 			if (statusCode in 200..299) {
@@ -184,18 +185,19 @@ class LLMServices(
 		val user =
 			authenticate(token) ?: return LLMStreamResult(401, flowOfText(errorJson("invalid_token", "权限验证失败")))
 		val requester = LLMRequester(user.uid, user.username, "login")
-		val request = normalizeRequest(body, true, requester, model)
+		val provider = providers.current()
+		val request = normalizeRequest(body, true, requester, model, provider)
 		val requestId = insertAccessRecord(user.uid, user.username, request.model, true)
 		if (!reserveRequest(token)) {
 			updateAccessRecord(requestId, "rejected", errorMessage = "duplicate request")
 			return LLMStreamResult(429, flowOfText(errorJson("rate_limited", "请求过于频繁")))
 		}
-		if (upstreamToken.isBlank()) {
+		if (provider.apiToken.isBlank()) {
 			updateAccessRecord(requestId, "failed", errorMessage = "missing upstream token")
 			return LLMStreamResult(500, flowOfText(errorJson("server_error", "LLM 上游令牌未配置")))
 		}
 
-		return LLMStreamResult(200, streamFromUpstream(request.body, requestId, "stream"))
+		return LLMStreamResult(200, streamFromUpstream(request.body, requestId, "stream", provider))
 	}
 
 	suspend fun completeBotChat(
@@ -211,22 +213,25 @@ class LLMServices(
 		}
 		val username = qqName?.takeIf { it.isNotBlank() }?.let { decodeHeader(it) } ?: "qq:$qqUid"
 		val requester = LLMRequester(qqUid, username, "qq", qqGroupId)
-		val model = modelFromRequest(model)
+		val provider = providers.current()
+		val model = MODELS.fromRequest(model) ?: MODELS.entries.firstOrNull {
+			provider.modelName(it) == model
+		}
 			?: return LLMNonStreamResult(400, errorJson("model_not_available", "请求的模型不可用"))
-		val request = normalizeRequest(body, false, requester, model)
+		val request = normalizeRequest(body, false, requester, model, provider)
 		val requestId = insertAccessRecord(qqUid, username, request.model, false)
 		if (!reserveRequest("bot:$qqUid")) {
 			updateAccessRecord(requestId, "rejected", errorMessage = "duplicate request")
 
 			return LLMNonStreamResult(429, errorJson("rate_limited", "请求过于频繁"))
 		}
-		if (upstreamToken.isBlank()) {
+		if (provider.apiToken.isBlank()) {
 			updateAccessRecord(requestId, "failed", errorMessage = "missing upstream token")
 			return LLMNonStreamResult(500, errorJson("server_error", "LLM 上游令牌未配置"))
 		}
 
 		return try {
-			val (statusCode, text) = completeWithOptionalTools(request, requester, "bot")
+			val (statusCode, text) = completeWithOptionalTools(request, requester, "bot", provider)
 			val usage = parseUsage(text)
 			updateAccessRecord(requestId, if (statusCode in 200..299) "completed" else "failed", usage, text.take(512))
 			if (statusCode in 200..299) {
@@ -282,19 +287,20 @@ class LLMServices(
 				minecraftHP,
 			)
 		)
-		val request = normalizeRequest(body, false, requester, model)
+		val provider = providers.current()
+		val request = normalizeRequest(body, false, requester, model, provider)
 		val requestId = insertAccessRecord(user.uid, playerName, request.model, false)
 		if (!reserveRequest("minecraft:$playerName")) {
 			updateAccessRecord(requestId, "rejected", errorMessage = "duplicate request")
 			return LLMNonStreamResult(429, errorJson("rate_limited", "请求过于频繁"))
 		}
-		if (upstreamToken.isBlank()) {
+		if (provider.apiToken.isBlank()) {
 			updateAccessRecord(requestId, "failed", errorMessage = "missing upstream token")
 			return LLMNonStreamResult(500, errorJson("server_error", "LLM 上游令牌未配置"))
 		}
 
 		return try {
-			val (statusCode, text) = completeWithOptionalTools(request, requester, "minecraft")
+			val (statusCode, text) = completeWithOptionalTools(request, requester, "minecraft", provider)
 			val usage = parseUsage(text)
 			updateAccessRecord(requestId, if (statusCode in 200..299) "completed" else "failed", usage, text.take(512))
 			if (statusCode in 200..299) {
@@ -311,13 +317,14 @@ class LLMServices(
 		request: NormalizedRequest,
 		requester: LLMRequester,
 		source: String,
+		provider: LLMProvider,
 	): Pair<Int, String> {
 		val requestModel = MODELS.entries.firstOrNull { provider.modelName(it) == request.model } ?: MODELS.FAST
 		if (provider.supportsResponses(requestModel)) {
-			return completeWithResponsesApi(request, requester, source)
+			return completeWithResponsesApi(request, requester, source, provider)
 		}
 		if (!toolService.enabled()) {
-			val response = postUpstream(source, request.body)
+			val response = postUpstream(source, request.body, provider)
 			return response.status.value to sanitizeResponseBody(response.bodyAsText())
 		}
 
@@ -331,7 +338,7 @@ class LLMServices(
 		var latestBody = ""
 		repeat(maxToolRounds) { round ->
 			val body = obj.toString()
-			val response = postUpstream("$source/tool-round-${round + 1}", body)
+			val response = postUpstream("$source/tool-round-${round + 1}", body, provider)
 			latestStatus = response.status.value
 			latestBody = response.bodyAsText()
 			if (!response.status.isSuccess()) {
@@ -361,6 +368,7 @@ class LLMServices(
 		request: NormalizedRequest,
 		requester: LLMRequester,
 		source: String,
+		provider: LLMProvider,
 	): Pair<Int, String> {
 		val functionTools = if (toolService.enabled()) toolService.definitions() else JsonArray()
 		val body = LLMResponsesAdapter.fromChatRequest(
@@ -369,7 +377,7 @@ class LLMServices(
 			enableWebSearch = webSearchEnabled,
 		)
 		repeat(maxToolRounds) { round ->
-			val response = postUpstream("$source/responses-round-${round + 1}", body.toString(), provider.responsesUrl)
+			val response = postUpstream("$source/responses-round-${round + 1}", body.toString(), provider, provider.responsesUrl)
 			val responseText = response.bodyAsText()
 			if (!response.status.isSuccess()) {
 				return response.status.value to responseText
@@ -387,9 +395,10 @@ class LLMServices(
 		return 502 to errorJson("tool_round_limit", "工具调用轮数超过限制，请调高 LLM_TOOL_MAX_ROUNDS")
 	}
 
-	private suspend fun postUpstream(source: String, body: String, url: String = provider.chatCompletionsUrl) =
+	private suspend fun postUpstream(source: String, body: String, provider: LLMProvider, url: String = provider.chatCompletionsUrl) =
 		client.post(url) {
-			header(HttpHeaders.Authorization, "Bearer $upstreamToken")
+			logUpstreamRequest(source, body, provider, if (url == provider.responsesUrl) "responses" else "chat-completions")
+			header(HttpHeaders.Authorization, "Bearer ${provider.apiToken}")
 			contentType(ContentType.Application.Json)
 			debugPrompt(source, body)
 			setBody(body)
@@ -401,10 +410,11 @@ class LLMServices(
 		URLDecoder.decode(value, StandardCharsets.UTF_8)
 	}.getOrDefault(value)
 
-	private fun streamFromUpstream(body: String, requestId: Long, source: String): Flow<String> = flow {
+	private fun streamFromUpstream(body: String, requestId: Long, source: String, provider: LLMProvider): Flow<String> = flow {
 		try {
 			val response = client.post(provider.chatCompletionsUrl) {
-				header(HttpHeaders.Authorization, "Bearer $upstreamToken")
+				logUpstreamRequest(source, body, provider, "chat-completions")
+				header(HttpHeaders.Authorization, "Bearer ${provider.apiToken}")
 				contentType(ContentType.Application.Json)
 				debugPrompt(source, body)
 				setBody(body)
@@ -440,7 +450,8 @@ class LLMServices(
 		body: String,
 		stream: Boolean,
 		requester: LLMRequester? = null,
-		model: MODELS
+		model: MODELS,
+		provider: LLMProvider,
 	): NormalizedRequest {
 		val obj = JsonParser.parseString(body).asJsonObject
 		obj.addProperty("model", provider.modelName(model))
@@ -551,7 +562,8 @@ class LLMServices(
 	}
 
 	private suspend fun summarizeGroupContext(existingSummary: String?, messages: List<GroupChatEntry>): String? {
-		if (upstreamToken.isBlank() || messages.isEmpty()) return null
+		val provider = providers.current()
+		if (provider.apiToken.isBlank() || messages.isEmpty()) return null
 		val newMessages = messages.joinToString("\n") { entry ->
 			val prefix = if (entry.time > 0) "[${entry.time}] " else ""
 			"$prefix${entry.name}(${entry.uid}): ${entry.content}"
@@ -582,7 +594,7 @@ class LLMServices(
 		}
 		return withTimeoutOrNull(groupSummaryTimeoutMs) {
 			runCatching {
-				val response = postUpstream("group-summary", request.toString())
+				val response = postUpstream("group-summary", request.toString(), provider)
 				if (!response.status.isSuccess()) return@runCatching null
 				extractAssistantContent(response.bodyAsText())
 			}.getOrNull()
@@ -890,6 +902,13 @@ class LLMServices(
 		println("===== LLM REQUEST BODY [$source] =====")
 		println(clipped)
 		println("===== END LLM REQUEST BODY [$source] =====")
+	}
+
+	private fun logUpstreamRequest(source: String, body: String, provider: LLMProvider, api: String) {
+		val model = runCatching {
+			JsonParser.parseString(body).asJsonObject.get("model")?.asString
+		}.getOrNull() ?: "unknown"
+		println("[LLM] upstream request source=$source provider=${provider.name} model=$model api=$api")
 	}
 
 	private fun readInt(name: String, defaultValue: Int): Int =

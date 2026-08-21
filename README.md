@@ -169,8 +169,8 @@ Related environment variables:
 QQ group messages are archived in the `llm_chat_history` table through `POST /qo/asking/v1/chat/history`. The bot endpoint also backfills its sliding `group_context`, using stable source IDs and `INSERT IGNORE` for idempotency. The LLM can retrieve older, group-scoped records with the `search_chat_history` tool; results never cross group boundaries.
 - `LLM_TOOLS_ENABLED`: enable built-in tools, default `true`.
 - `LLM_WEB_SEARCH_ENABLED`: enable DeepSeek server-side web search for non-stream `deepseek-v4-flash` requests, default `true`.
-- `LLM_PROVIDERS_FILE`: provider configuration JSON path, default `data/llm/providers.json`.
-- `LLM_PROVIDER`: selected provider name. If omitted, the JSON `defaultProvider` is used.
+- `LLM_PROVIDERS_FILE`: provider configuration JSON path, default `data/llm/providers.json`. The file is watched and the configuration (including referenced token files) is periodically reloaded; invalid updates keep the last valid provider.
+- `LLM_PROVIDER`: selected provider name. If omitted, the JSON `defaultProvider` is used and may be changed by hot-reloading the provider file. When set, this environment override remains fixed until restart.
 - `LLM_RESPONSES_API_URL`: legacy fallback Responses API endpoint. Provider JSON should use an explicit `responsesUrl`.
 - `LLM_RESPONSES_MODELS`: legacy comma-separated Responses model aliases. Provider JSON should use `responsesModels`.
 - `LLM_TOOL_MAX_ROUNDS`: maximum tool-call loops per request, default `3`.
@@ -210,6 +210,10 @@ Provider configuration example (`data/llm/providers.json`):
 `chatCompletionsUrl`. Set `LLM_PROVIDER=another-provider` to switch providers.
 `responsesModels` controls which model aliases use the Responses API; `LLM_WEB_SEARCH_ENABLED`
 only controls whether the Responses request includes web search.
+
+Each upstream LLM request logs its source, provider name, resolved model, and API type. Provider
+reloads are logged as `[LLM] reloaded provider old -> new`; tokens and request bodies are not part
+of this status log. Full request-body logging remains separately controlled by `LLM_DEBUG_PROMPT`.
 
 ## For Contributors
 

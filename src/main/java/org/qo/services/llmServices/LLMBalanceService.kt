@@ -13,7 +13,7 @@ import org.springframework.stereotype.Service
 
 @Service
 class LLMBalanceService(
-	private val provider: LLMProvider,
+	private val providers: ReloadableLLMProvider,
 ) {
 	private val client = HttpClient(CIO) {
 		install(HttpTimeout) {
@@ -29,6 +29,7 @@ class LLMBalanceService(
 	}
 
 	suspend fun getBalance(): Pair<Boolean, Double> {
+		val provider = providers.current()
 		val balance = provider.balanceRelated
 		if (balance.balanceStruct == BalanceStructParse.NONE || balance.balanceUrl == null) {
 			return false to -1.0
