@@ -5,10 +5,11 @@ import java.time.ZoneId
 
 internal object FallenSchedule {
 	const val ASSIGNMENT_ZONE_ID = "Asia/Shanghai"
-	const val ASSIGNMENT_CRON = "0 0 0 1 10 *"
+	const val ASSIGNMENT_CRON = "0 59 23 20 9 *"
 
 	val assignmentZone: ZoneId = ZoneId.of(ASSIGNMENT_ZONE_ID)
-	val assignmentInstant = LocalDate.of(2026, 10, 1)
-		.atStartOfDay(assignmentZone)
+	val assignmentInstant = LocalDate.of(2026, 9, 20)
+		.atTime(23, 59)
+		.atZone(assignmentZone)
 		.toInstant()
 }

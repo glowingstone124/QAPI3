@@ -7,11 +7,11 @@ import java.time.ZoneOffset
 
 class FallenScheduleTest {
 	@Test
-	fun assignmentClosesAtMidnightAsiaShanghaiOnOctoberFirst() {
+	fun assignmentClosesAt2359AsiaShanghaiOnSeptemberTwentieth() {
 		assertEquals("Asia/Shanghai", FallenSchedule.assignmentZone.id)
-		assertEquals("0 0 0 1 10 *", FallenSchedule.ASSIGNMENT_CRON)
+		assertEquals("0 59 23 20 9 *", FallenSchedule.ASSIGNMENT_CRON)
 		assertEquals(
-			LocalDateTime.of(2026, 9, 30, 16, 0).toInstant(ZoneOffset.UTC),
+			LocalDateTime.of(2026, 9, 20, 15, 59).toInstant(ZoneOffset.UTC),
 			FallenSchedule.assignmentInstant,
 		)
 	}
