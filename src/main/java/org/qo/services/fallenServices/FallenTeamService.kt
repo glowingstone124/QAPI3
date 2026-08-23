@@ -256,9 +256,31 @@ class FallenTeamService(
 				""".trimIndent(),
 			)
 			database.execute("INSERT IGNORE INTO fallen_team_assignment_lock(id) VALUES (1)")
-			database.execute("ALTER TABLE fallen_team_selections ADD COLUMN IF NOT EXISTS actual_team CHAR(1) NULL")
-			database.execute("ALTER TABLE fallen_team_selections ADD COLUMN IF NOT EXISTS assigned_at BIGINT NULL")
+			addColumnIfMissing("actual_team", "CHAR(1) NULL")
+			addColumnIfMissing("assigned_at", "BIGINT NULL")
 			schemaReady = true
+		}
+	}
+
+	/**
+	 * MySQL versions before 8.0.29 do not support `ADD COLUMN IF NOT EXISTS`.
+	 * Consult the metadata first so migrations remain idempotent on all supported
+	 * MySQL-compatible servers.
+	 */
+	private suspend fun addColumnIfMissing(column: String, definition: String) {
+		val exists = database.one(
+			"""
+			SELECT 1
+			FROM information_schema.columns
+			WHERE (table_schema = DATABASE() OR table_catalog = DATABASE())
+			  AND LOWER(table_name) = 'fallen_team_selections'
+			  AND LOWER(column_name) = LOWER(?)
+			LIMIT 1
+			""".trimIndent(),
+			listOf(column),
+		) { true } != null
+		if (!exists) {
+			database.execute("ALTER TABLE fallen_team_selections ADD COLUMN $column $definition")
 		}
 	}
 
