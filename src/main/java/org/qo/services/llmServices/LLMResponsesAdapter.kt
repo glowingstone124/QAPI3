@@ -170,6 +170,10 @@ object LLMResponsesAdapter {
         val usage = response.getAsJsonObject("usage")
         val promptTokens = usage?.get("input_tokens")?.asInt ?: 0
         val completionTokens = usage?.get("output_tokens")?.asInt ?: 0
+        val cachedTokens = usage?.get("prompt_cache_hit_tokens")?.asInt
+            ?: usage?.getAsJsonObject("input_tokens_details")?.get("cached_tokens")?.asInt
+        val cacheMissTokens = usage?.get("prompt_cache_miss_tokens")?.asInt
+            ?: cachedTokens?.let { (promptTokens - it).coerceAtLeast(0) }
         return JsonObject().apply {
             addProperty("id", response.get("id")?.asString ?: "resp-deepseek")
             addProperty("object", "chat.completion")
@@ -188,6 +192,11 @@ object LLMResponsesAdapter {
                 addProperty("prompt_tokens", promptTokens)
                 addProperty("completion_tokens", completionTokens)
                 addProperty("total_tokens", promptTokens + completionTokens)
+                cachedTokens?.let {
+                    addProperty("prompt_cache_hit_tokens", it)
+                    add("prompt_tokens_details", JsonObject().apply { addProperty("cached_tokens", it) })
+                }
+                cacheMissTokens?.let { addProperty("prompt_cache_miss_tokens", it) }
             })
         }.toString()
     }

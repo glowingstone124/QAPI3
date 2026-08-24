@@ -88,6 +88,18 @@ class LLMResponsesAdapterTest {
     }
 
     @Test
+    fun `preserves prompt cache usage from responses result`() {
+        val result = LLMResponsesAdapter.toChatCompletion(
+            """{"id":"resp-1","model":"deepseek-v4-flash","status":"completed","output":[],"usage":{"input_tokens":100,"input_tokens_details":{"cached_tokens":80},"output_tokens":5}}"""
+        )
+        val usage = JsonParser.parseString(result).asJsonObject.getAsJsonObject("usage")
+
+        assertEquals(80, usage.get("prompt_cache_hit_tokens").asInt)
+        assertEquals(20, usage.get("prompt_cache_miss_tokens").asInt)
+        assertEquals(80, usage.getAsJsonObject("prompt_tokens_details").get("cached_tokens").asInt)
+    }
+
+    @Test
     fun `continues local function calls without previous response id`() {
         val request = JsonObject().apply { add("input", JsonArray()) }
         val response = """{"output":[{"type":"function_call","call_id":"call-1","name":"get_server_status","arguments":"{}"}]}"""

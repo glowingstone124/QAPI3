@@ -205,7 +205,7 @@ class LLMServices(
 			return LLMStreamResult(500, flowOfText(errorJson("server_error", "LLM 上游令牌未配置")))
 		}
 
-		return LLMStreamResult(200, streamFromUpstream(request.body, requestId, "stream", provider))
+		return LLMStreamResult(200, streamFromUpstream(request, requester, requestId, "stream", provider))
 	}
 
 	suspend fun streamChat(body: String, token: String, model: MODELS): LLMStreamResult =
@@ -432,14 +432,20 @@ class LLMServices(
 		URLDecoder.decode(value, StandardCharsets.UTF_8)
 	}.getOrDefault(value)
 
-	private fun streamFromUpstream(body: String, requestId: Long, source: String, provider: LLMProvider): Flow<String> = flow {
+	private fun streamFromUpstream(
+		request: NormalizedRequest,
+		requester: LLMRequester,
+		requestId: Long,
+		source: String,
+		provider: LLMProvider,
+	): Flow<String> = flow {
 		try {
 			val response = client.post(provider.chatCompletionsUrl) {
-				logUpstreamRequest(source, body, provider, "chat-completions")
+				logUpstreamRequest(source, request.body, provider, "chat-completions")
 				header(HttpHeaders.Authorization, "Bearer ${provider.apiToken}")
 				contentType(ContentType.Application.Json)
-				debugPrompt(source, body)
-				setBody(body)
+				debugPrompt(source, request.body)
+				setBody(request.body)
 			}
 			if (!response.status.isSuccess()) {
 				val errorBody = response.bodyAsText()
@@ -449,6 +455,7 @@ class LLMServices(
 			}
 
 			var latestUsage: Usage? = null
+			val assistantContent = StringBuilder()
 			response.bodyAsChannel().toInputStream().bufferedReader().use { reader ->
 				while (true) {
 					val line = reader.readLine() ?: break
@@ -457,11 +464,15 @@ class LLMServices(
 					if (data.isBlank()) continue
 					if (data != "[DONE]") {
 						parseUsage(data)?.let { latestUsage = it }
+						parseStreamAssistantContent(data)?.let(assistantContent::append)
 					}
 					emit(data)
 				}
 			}
 			updateAccessRecord(requestId, "completed", latestUsage)
+			if (assistantContent.isNotBlank()) {
+				recordConversationAnswer(requester, request.userContent, assistantContent.toString(), provider)
+			}
 		} catch (e: Exception) {
 			updateAccessRecord(requestId, "failed", errorMessage = e.message)
 			emit(errorJson("upstream_error", e.message ?: "LLM 上游请求失败"))
@@ -488,7 +499,6 @@ class LLMServices(
 
 		val requestMessages = obj.getAsJsonArray("messages")
 		val userQuestion = latestUserQuestion(requestMessages)
-		val userContent = latestUserContent(requestMessages)
 
 		val groupContext = obj.getAsJsonArray("group_context")
 		obj.remove("group_context")
@@ -506,14 +516,13 @@ class LLMServices(
 			summarize = ::summarizeGroupContext,
 		)
 		val memberProfileContext = memberProfileContextService.buildContext(memberMemories, requester?.uid)
-		val enrichedMessages = enrichMessages(requestMessages, requester, preparedGroupContext, memberProfileContext)
-		obj.add("messages", limitMessagesToContextWindow(enrichedMessages, provider.contextWindow, obj))
+		val enrichedTurn = enrichMessages(requestMessages, requester, preparedGroupContext, memberProfileContext)
+		obj.add("messages", limitMessagesToContextWindow(enrichedTurn.messages, provider.contextWindow, obj))
 		return NormalizedRequest(
 			preset = model,
 			model = obj.get("model").asString,
 			body = obj.toString(),
-			userQuestion = userQuestion,
-			userContent = userContent,
+			userContent = enrichedTurn.persistedUserContent,
 		)
 	}
 
@@ -522,17 +531,18 @@ class LLMServices(
 		requester: LLMRequester?,
 		groupContext: String?,
 		memberProfileContext: String?,
-	): JsonArray {
+	): LLMPromptCacheLayout.CurrentTurn {
 		val enriched = JsonArray()
 		val userQuestion = latestUserQuestion(messages)
-		val contextParts = mutableListOf<String>()
-		contextParts.add(systemPrompt.current())
-		contextParts.add("当前日期：${LocalDate.now()}")
+		val stableContextParts = mutableListOf<String>()
+		val dynamicContextParts = mutableListOf<String>()
+		stableContextParts.add(systemPrompt.current())
+		stableContextParts.add("当前日期：${LocalDate.now()}")
 		if (webSearchEnabled && requester != null) {
-			contextParts.add(webSearchRules())
+			stableContextParts.add(webSearchRules())
 		}
 		requester?.let {
-			contextParts.add(
+			stableContextParts.add(
 				"""
              当前提问用户：
              - 来源：${it.source}
@@ -543,21 +553,21 @@ class LLMServices(
              """.trimIndent()
 			)
 			buildMinecraftRelatedContext(it.minecraftRelated)?.let { minecraftContext ->
-				contextParts.add(minecraftContext)
+				dynamicContextParts.add(minecraftContext)
 			}
 		}
 		ragService.buildContext(userQuestion, requester?.groupId)?.let {
-			contextParts.add(it)
+			dynamicContextParts.add(it)
 		}
 		memoryService.buildContext(requester?.groupId, userQuestion)?.let {
-			contextParts.add(it)
+			dynamicContextParts.add(it)
 		}
-		memberProfileContext?.let(contextParts::add)
-		groupContext?.let(contextParts::add)
-		contextParts.add(hardOutputRules())
+		memberProfileContext?.let(dynamicContextParts::add)
+		groupContext?.let(dynamicContextParts::add)
+		stableContextParts.add(hardOutputRules())
 		enriched.add(JsonObject().apply {
 			addProperty("role", "system")
-			addProperty("content", contextParts.joinToString("\n\n"))
+			addProperty("content", stableContextParts.joinToString("\n\n"))
 		})
 		requester
 			?.takeIf { groupContext == null || it.source == "qq" }
@@ -566,13 +576,12 @@ class LLMServices(
 					enriched.add(message)
 				}
 			}
-		messages.forEach { message ->
-			val role = message.takeIf { it.isJsonObject }?.asJsonObject?.get("role")?.asString
-			if (role != "system" && role != "developer") {
-				enriched.add(message)
-			}
-		}
-		return enriched
+		val currentTurn = LLMPromptCacheLayout.prepareCurrentTurn(
+			messages,
+			dynamicContextParts.joinToString("\n\n").takeIf { it.isNotBlank() },
+		)
+		currentTurn.messages.forEach(enriched::add)
+		return currentTurn.copy(messages = enriched)
 	}
 
 	private fun limitMessagesToContextWindow(messages: JsonArray, contextWindow: Int, request: JsonObject): JsonArray {
@@ -777,13 +786,6 @@ class LLMServices(
 			.orEmpty()
 	}
 
-	private fun latestUserContent(messages: JsonArray): JsonElement {
-		return latestUserMessage(messages)
-			?.get("content")
-			?.deepCopy()
-			?: JsonPrimitive("")
-	}
-
 	private fun latestUserMessage(messages: JsonArray): JsonObject? {
 		for (index in messages.size() - 1 downTo 0) {
 			val message = messages[index].takeIf { it.isJsonObject }?.asJsonObject ?: continue
@@ -828,6 +830,15 @@ class LLMServices(
 		provider: LLMProvider,
 	) {
 		val answer = extractAssistantContent(responseBody) ?: return
+		recordConversationAnswer(requester, userContent, answer, provider)
+	}
+
+	private fun recordConversationAnswer(
+		requester: LLMRequester,
+		userContent: JsonElement,
+		answer: String,
+		provider: LLMProvider,
+	) {
 		try {
 			conversationService.append(requester.conversationKey(), userContent, answer, provider.compact)
 		} catch (error: Exception) {
@@ -1000,6 +1011,17 @@ class LLMServices(
 			?.asString
 			?.trim()
 			?.takeIf { it.isNotBlank() }
+	}.getOrNull()
+
+	private fun parseStreamAssistantContent(body: String): String? = runCatching {
+		val root = jsonParser.parse(body).asJsonObject
+		root.getAsJsonArray("choices")
+			?.get(0)
+			?.asJsonObject
+			?.getAsJsonObject("delta")
+			?.get("content")
+			?.takeIf { !it.isJsonNull }
+			?.asString
 	}.getOrNull()
 
 	private fun sanitizeResponseBody(responseBody: String): String {
@@ -1193,6 +1215,9 @@ class LLMServices(
 		usage: Usage? = null,
 		errorMessage: String? = null,
 	) {
+		if (usage?.cacheHitTokens != null || usage?.cacheMissTokens != null) {
+			println("[LLM] prompt cache hit_tokens=${usage.cacheHitTokens ?: 0} miss_tokens=${usage.cacheMissTokens ?: 0}")
+		}
 		if (id <= 0) return
 		try {
 			awaitAccessRecordSchema()
@@ -1220,10 +1245,17 @@ class LLMServices(
 	private fun parseUsage(body: String): Usage? = runCatching {
 		val obj = jsonParser.parse(body).asJsonObject
 		val usage = obj.getAsJsonObject("usage") ?: return null
+		val promptTokens = usage.get("prompt_tokens")?.asInt ?: usage.get("input_tokens")?.asInt
+		val cachedTokens = usage.get("prompt_cache_hit_tokens")?.asInt
+			?: usage.getAsJsonObject("prompt_tokens_details")?.get("cached_tokens")?.asInt
+			?: usage.getAsJsonObject("input_tokens_details")?.get("cached_tokens")?.asInt
 		Usage(
-			usage.get("prompt_tokens")?.asInt,
-			usage.get("completion_tokens")?.asInt,
+			promptTokens,
+			usage.get("completion_tokens")?.asInt ?: usage.get("output_tokens")?.asInt,
 			usage.get("total_tokens")?.asInt,
+			cachedTokens,
+			usage.get("prompt_cache_miss_tokens")?.asInt
+				?: promptTokens?.let { total -> cachedTokens?.let { (total - it).coerceAtLeast(0) } },
 		)
 	}.getOrNull()
 
@@ -1250,7 +1282,6 @@ class LLMServices(
 		val preset: String,
 		val model: String,
 		val body: String,
-		val userQuestion: String,
 		val userContent: JsonElement,
 	)
 
@@ -1269,7 +1300,13 @@ class LLMServices(
 	}
 
 	private data class ToolCall(val id: String, val name: String, val arguments: String?)
-	private data class Usage(val promptTokens: Int?, val completionTokens: Int?, val totalTokens: Int?)
+	private data class Usage(
+		val promptTokens: Int?,
+		val completionTokens: Int?,
+		val totalTokens: Int?,
+		val cacheHitTokens: Int?,
+		val cacheMissTokens: Int?,
+	)
 }
 
 data class LLMNonStreamResult(val status: Int, val body: String)
