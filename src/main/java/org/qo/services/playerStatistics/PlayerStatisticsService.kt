@@ -13,8 +13,6 @@ data class PlayerStatisticsSnapshot(
 	val distanceCm: Long = 0,
 	val damageDealt: Long = 0,
 	val mobKills: Long = 0,
-	val blocksMined: Long = 0,
-	val blocksPlaced: Long = 0,
 	val elytraFlightTicks: Long = 0,
 )
 
@@ -50,8 +48,6 @@ class PlayerStatisticsService(
 			distance_cm BIGINT NOT NULL DEFAULT 0,
 			damage_dealt BIGINT NOT NULL DEFAULT 0,
 			mob_kills BIGINT NOT NULL DEFAULT 0,
-			blocks_mined BIGINT NOT NULL DEFAULT 0,
-			blocks_placed BIGINT NOT NULL DEFAULT 0,
 			elytra_flight_ticks BIGINT NOT NULL DEFAULT 0,
 			updated_at BIGINT NOT NULL DEFAULT 0
 		)
@@ -59,14 +55,12 @@ class PlayerStatisticsService(
 
 	private val upsertSql = """
 		INSERT INTO player_statistics (
-			username, distance_cm, damage_dealt, mob_kills, blocks_mined, blocks_placed, elytra_flight_ticks, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?) AS incoming
+			username, distance_cm, damage_dealt, mob_kills, elytra_flight_ticks, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?) AS incoming
 		ON DUPLICATE KEY UPDATE
 			distance_cm = GREATEST(distance_cm, incoming.distance_cm),
 			damage_dealt = GREATEST(damage_dealt, incoming.damage_dealt),
 			mob_kills = GREATEST(mob_kills, incoming.mob_kills),
-			blocks_mined = GREATEST(blocks_mined, incoming.blocks_mined),
-			blocks_placed = GREATEST(blocks_placed, incoming.blocks_placed),
 			elytra_flight_ticks = GREATEST(elytra_flight_ticks, incoming.elytra_flight_ticks),
 			updated_at = GREATEST(updated_at, incoming.updated_at)
 	""".trimIndent()
@@ -86,8 +80,6 @@ class PlayerStatisticsService(
 					snapshot.distanceCm,
 					snapshot.damageDealt,
 					snapshot.mobKills,
-					snapshot.blocksMined,
-					snapshot.blocksPlaced,
 					snapshot.elytraFlightTicks,
 					System.currentTimeMillis(),
 				),
@@ -103,9 +95,9 @@ class PlayerStatisticsService(
 	suspend fun getPlayerStatistics(name: String): PlayerStatistics {
 		if (!PLAYER_NAME.matches(name)) return PlayerStatistics()
 		ensureTable()
-		return database.one(
+		val playerStatistics = database.one(
 			"""
-			SELECT distance_cm, damage_dealt, mob_kills, blocks_mined, blocks_placed, elytra_flight_ticks
+			SELECT distance_cm, damage_dealt, mob_kills, elytra_flight_ticks
 			FROM player_statistics WHERE username = ? LIMIT 1
 			""".trimIndent(),
 			listOf(name),
@@ -114,11 +106,17 @@ class PlayerStatisticsService(
 				distanceCm = row.get("distance_cm", java.lang.Long::class.java)?.toLong() ?: 0,
 				damageDealt = row.get("damage_dealt", java.lang.Long::class.java)?.toLong() ?: 0,
 				mobKills = row.get("mob_kills", java.lang.Long::class.java)?.toLong() ?: 0,
-				blocksMined = row.get("blocks_mined", java.lang.Long::class.java)?.toLong() ?: 0,
-				blocksPlaced = row.get("blocks_placed", java.lang.Long::class.java)?.toLong() ?: 0,
 				elytraFlightTicks = row.get("elytra_flight_ticks", java.lang.Long::class.java)?.toLong() ?: 0,
 			)
 		} ?: PlayerStatistics()
+		val blockStatistics = database.one(
+			"SELECT COALESCE(destroy, 0) AS blocks_mined, COALESCE(place, 0) AS blocks_placed FROM users WHERE username = ? LIMIT 1",
+			listOf(name),
+		) { row ->
+			(row.get("blocks_mined", java.lang.Long::class.java)?.toLong() ?: 0) to
+				(row.get("blocks_placed", java.lang.Long::class.java)?.toLong() ?: 0)
+		} ?: (0L to 0L)
+		return playerStatistics.copy(blocksMined = blockStatistics.first, blocksPlaced = blockStatistics.second)
 	}
 
 	private suspend fun ensureTable() {
@@ -141,8 +139,6 @@ class PlayerStatisticsService(
 			snapshot.distanceCm,
 			snapshot.damageDealt,
 			snapshot.mobKills,
-			snapshot.blocksMined,
-			snapshot.blocksPlaced,
 			snapshot.elytraFlightTicks,
 		).any { it < 0 || it > MAX_STAT_VALUE }) return null
 		return snapshot

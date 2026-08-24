@@ -84,7 +84,7 @@
 | 方法 | 路径 | 认证 | 参数 |
 |---|---|---|---|
 | `GET` | `/qo/download/registry?name=<name>` | 公开 | 按 Minecraft 用户名查询注册信息；`last_login` 为玩家最后上线的 Unix 毫秒时间戳，未记录时为 `0` 或 `null`。 |
-| `POST` | `/qo/player-statistics/upload` | 生存服节点 | 上传玩家累计统计快照：移动距离、伤害、击杀、挖掘、放置与鞘翅飞行时间。 |
+| `POST` | `/qo/player-statistics/upload` | 生存服节点 | 上传玩家累计统计快照：移动距离、伤害、击杀与鞘翅飞行时间。挖掘、放置直接复用排行榜累计数据。 |
 
 `/qo/download/registry` 的响应包含 `statistics` 对象：`distance_cm`、`damage_dealt`（Minecraft 原始值，10 为 1 点伤害）、`mob_kills`、`blocks_mined`、`blocks_placed` 和 `elytra_flight_ticks`。
 | `GET` | `/qo/download/name?qq=<qq>` | 公开 | 按 QQ UID 查询注册信息。 |

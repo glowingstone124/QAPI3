@@ -7,6 +7,7 @@ import org.qo.datas.Nodes
 import org.qo.datas.ReactiveDatabase
 import org.qo.orm.UserORM
 import org.qo.services.messageServices.Msg
+import org.qo.services.playerStatistics.PlayerStatisticsService
 import org.qo.utils.ReturnInterface
 import org.qo.utils.SerializeUtils.convertToJsonArray
 import org.springframework.stereotype.Service
@@ -20,6 +21,7 @@ class AuthorityNeededServicesImpl(
 	private val ft: FortuneTools,
 	private val nodes: Nodes,
 	private val database: ReactiveDatabase,
+	private val playerStatisticsService: PlayerStatisticsService,
 ) {
 	val gson = Gson()
 	private val userORM = UserORM()
@@ -63,6 +65,7 @@ class AuthorityNeededServicesImpl(
 			addProperty("playtime", userInfo.playtime)
 			addProperty("profile_id", userInfo.profile_id)
 			addProperty("invite_cnt", userInfo.invite)
+			add("statistics", playerStatisticsService.getPlayerStatistics(accountName!!).toJson())
 		}
 		val loginHistory = login.queryLoginHistoryAsync(username = accountName).convertToJsonArray()
 		returnObject.add("logins", loginHistory)
