@@ -12,6 +12,7 @@ import org.qo.services.loginService.AvatarRelatedImpl;
 import org.qo.services.loginService.Login;
 import org.qo.datas.Mapping.*;
 import org.qo.services.loginService.PlayerCardCustomizationImpl;
+import org.qo.services.playerStatistics.PlayerStatisticsService;
 import org.qo.redis.DatabaseType;
 import org.qo.redis.Redis;
 import org.qo.server.AvatarCache;
@@ -44,6 +45,8 @@ public class UserProcess {
     private AvatarRelatedImpl avatarRelatedImpl;
     @Resource
     private AffiliatedAccountServices affiliatedAccountServices;
+    @Resource
+    private PlayerStatisticsService playerStatisticsService;
     public static final String CODE_CONFIGURATION = "data/code.json";
     public static ConcurrentLinkedDeque<registry_verify_class> verify_list = new ConcurrentLinkedDeque<>();
     public static ConcurrentLinkedDeque<password_verify_class> pwdupd_list = new ConcurrentLinkedDeque<>();
@@ -117,7 +120,7 @@ public class UserProcess {
         }
 
         return reactiveStore.readUser(name)
-                .map(result -> {
+                .flatMap(result -> playerStatisticsService.getPlayerStatisticsJsonReactive(name).map(statistics -> {
                     boolean temp = result.getTemp();
                     Long uid = result.getUid();
                     Boolean frozen = result.getFrozen();
@@ -135,11 +138,12 @@ public class UserProcess {
                     responseJson.addProperty("exp_level", result.getExp_level());
                     responseJson.addProperty("score", result.getScore());
                     responseJson.addProperty("affiliated", false);
+                    responseJson.add("statistics", statistics);
                     redis.insert("user:" + name, responseJson.toString(), regDb).ignoreException();
 
                     responseJson.addProperty("code", temp ? 2 : 0);
                     return responseJson.toString();
-                })
+                }))
                 .switchIfEmpty(affiliatedAccountServices.validateAffiliatedAccountReactive(name)
                         .map(result -> {
                             if (result.getFirst() && result.getSecond() != null) {
@@ -155,7 +159,7 @@ public class UserProcess {
 
     public Mono<String> queryReg(long qq) {
         return reactiveStore.readUser(qq)
-                .map(user -> {
+                .flatMap(user -> playerStatisticsService.getPlayerStatisticsJsonReactive(user.getUsername()).map(statistics -> {
                     JsonObject responseJson = new JsonObject();
                     responseJson.addProperty("code", 0);
                     responseJson.addProperty("frozen", user.getFrozen());
@@ -164,8 +168,9 @@ public class UserProcess {
                     responseJson.addProperty("playtime", user.getPlaytime());
                     responseJson.addProperty("last_login", user.getLast_login());
                     responseJson.addProperty("profile_id", user.getProfile_id());
+                    responseJson.add("statistics", statistics);
                     return responseJson.toString();
-                })
+                }))
                 .defaultIfEmpty("{\"code\":1,\"username\":-1}");
     }
 

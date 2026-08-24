@@ -9,6 +9,7 @@ import org.mockito.Mockito
 import org.qo.datas.Mapping
 import org.qo.services.loginService.AffiliatedAccountServices
 import org.qo.services.loginService.Login
+import org.qo.services.playerStatistics.PlayerStatisticsService
 import org.springframework.test.util.ReflectionTestUtils
 import reactor.core.publisher.Mono
 
@@ -17,9 +18,11 @@ class UserProcessPlayerActivityTest {
 	private val reactiveStore = Mockito.mock(UserProcessReactiveStore::class.java)
 	private val userProcess = UserProcess(login, reactiveStore)
 	private val affiliatedAccountServices = Mockito.mock(AffiliatedAccountServices::class.java)
+	private val playerStatisticsService = Mockito.mock(PlayerStatisticsService::class.java)
 
 	init {
 		ReflectionTestUtils.setField(userProcess, "affiliatedAccountServices", affiliatedAccountServices)
+		ReflectionTestUtils.setField(userProcess, "playerStatisticsService", playerStatisticsService)
 	}
 
 	@Test
@@ -34,11 +37,15 @@ class UserProcessPlayerActivityTest {
 		Mockito.`when`(reactiveStore.readUser("alex")).thenReturn(Mono.just(user))
 		Mockito.`when`(affiliatedAccountServices.validateAffiliatedAccountReactive("alex"))
 			.thenReturn(Mono.empty())
+		val statistics = com.google.gson.JsonObject().apply { addProperty("blocks_mined", 42) }
+		Mockito.`when`(playerStatisticsService.getPlayerStatisticsJsonReactive("alex"))
+			.thenReturn(Mono.just(statistics))
 
 		val response = JsonParser.parseString(userProcess.queryReg("alex").block()).asJsonObject
 
 		assertEquals(0, response["code"].asInt)
 		assertEquals(lastLogin, response["last_login"].asLong)
+		assertEquals(42, response.getAsJsonObject("statistics")["blocks_mined"].asInt)
 	}
 
 	@Test
