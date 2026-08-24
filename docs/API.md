@@ -83,7 +83,7 @@
 
 | 方法 | 路径 | 认证 | 参数 |
 |---|---|---|---|
-| `GET` | `/qo/download/registry?name=<name>` | 公开 | 按 Minecraft 用户名查询注册信息。 |
+| `GET` | `/qo/download/registry?name=<name>` | 公开 | 按 Minecraft 用户名查询注册信息；`last_login` 为玩家最后上线的 Unix 毫秒时间戳，未记录时为 `0` 或 `null`。 |
 | `GET` | `/qo/download/name?qq=<qq>` | 公开 | 按 QQ UID 查询注册信息。 |
 | `GET` | `/qo/download/avatar?name=<name>` | 公开 | 查询头像 URL。 |
 | `GET` | `/qo/download/getgametime?username=<name>` | 公开 | 查询玩家累计游戏时间。 |

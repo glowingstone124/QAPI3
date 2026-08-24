@@ -129,6 +129,7 @@ public class UserProcess {
                     responseJson.addProperty("economy", eco);
                     responseJson.addProperty("online", redis.exists("online" + name, DatabaseType.QO_ONLINE_DATABASE.getValue()).ignoreException());
                     responseJson.addProperty("playtime", playtime);
+                    responseJson.addProperty("last_login", result.getLast_login());
                     responseJson.addProperty("temp", temp);
                     responseJson.addProperty("profile_id", result.getProfile_id());
                     responseJson.addProperty("exp_level", result.getExp_level());
@@ -161,6 +162,7 @@ public class UserProcess {
                     responseJson.addProperty("username", user.getUsername());
                     responseJson.addProperty("economy", user.getEconomy());
                     responseJson.addProperty("playtime", user.getPlaytime());
+                    responseJson.addProperty("last_login", user.getLast_login());
                     responseJson.addProperty("profile_id", user.getProfile_id());
                     return responseJson.toString();
                 })
@@ -368,6 +370,14 @@ public class UserProcess {
         }
     }
 
+    public Mono<Void> recordPlayerOnline(String name, String ip) {
+        handlePlayerOnline(name, ip);
+        return reactiveStore.updateLastLogin(name, System.currentTimeMillis())
+                .doOnError(error -> Logger.log("failed to update last_login for " + name + ": " + error.getMessage(), ERROR))
+                .onErrorReturn(false)
+                .then();
+    }
+
     public static void handlePlayerOffline(String name) {
         if (Boolean.TRUE.equals(redis.exists("online" + name, DatabaseType.QO_ONLINE_DATABASE.getValue()).ignoreException())) {
             redis.delete("online" + name, DatabaseType.QO_ONLINE_DATABASE.getValue()).ignoreException();
@@ -389,9 +399,11 @@ public class UserProcess {
                                 .then(passwordUpgrade
                                         .doOnError(error -> Logger.log("failed to upgrade password for " + username + ": " + error.getMessage(), ERROR))
                                         .onErrorReturn(false))
-                                .then(reactiveStore.updateLastLogin(username, System.currentTimeMillis())
-                                        .doOnError(error -> Logger.log("failed to update last_login for " + username + ": " + error.getMessage(), ERROR))
-                                        .onErrorReturn(false))
+                                .then(web
+                                        ? Mono.just(true)
+                                        : reactiveStore.updateLastLogin(username, System.currentTimeMillis())
+                                                .doOnError(error -> Logger.log("failed to update last_login for " + username + ": " + error.getMessage(), ERROR))
+                                                .onErrorReturn(false))
                                 .thenReturn(new Pair<>(true, token));
                     });
                 })

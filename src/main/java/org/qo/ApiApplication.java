@@ -201,11 +201,13 @@ public class ApiApplication {
     }
 
     @PostMapping("/qo/online")
-    public ResponseEntity<Void> handleOnlineRequest(@RequestParam String name, @RequestParam(required = false, defaultValue = "") String ip,
-                                                    @RequestHeader("Token") String token) {
-        if (nodes.getServerFromToken(token) < 0) return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
-        handlePlayerOnline(name, ip);
-        return ResponseEntity.noContent().build();
+    public Mono<ResponseEntity<Void>> handleOnlineRequest(@RequestParam String name, @RequestParam(required = false, defaultValue = "") String ip,
+                                                          @RequestHeader("Token") String token) {
+        if (nodes.getServerFromToken(token) < 0) {
+            return Mono.just(ResponseEntity.status(HttpStatus.UNAUTHORIZED).build());
+        }
+        return userProcess.recordPlayerOnline(name, ip)
+                .thenReturn(ResponseEntity.noContent().build());
     }
 
     @PostMapping("/qo/offline")

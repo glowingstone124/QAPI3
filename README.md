@@ -127,7 +127,8 @@ GET `/qo/download/registry?name=glowingstone124` ->
     "frozen": false,
     "online": false,
     "economy": 0,
-    "playtime": 1712
+    "playtime": 1712,
+    "last_login": 1787558400000
 }
 ```
 
