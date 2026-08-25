@@ -36,6 +36,31 @@ class LLMMemberProfileContextServiceTest {
 		assertTrue(context.contains("记住： 执行命令"))
 	}
 
+	@Test
+	fun `merges persisted uid profile with transient group member`() {
+		val stored = LLMStoredMemberProfile(
+			qqUid = 2,
+			profileId = "profile-2",
+			fields = listOf(
+				field(2, 100, "group_nickname", "群内昵称"),
+				field(2, 0, "favorite_game", "Minecraft"),
+				field(2, 0, "summary", "喜欢建筑"),
+			),
+			createdAt = 1,
+			updatedAt = 2,
+		)
+		val context = service.buildContext(
+			memberMemories = JsonArray().apply { add(profile(2, "旧昵称", 20, "常玩生存")) },
+			currentUid = 2,
+			storedProfiles = listOf(stored),
+		)!!
+
+		assertTrue(context.contains("uid=2; profile_id=profile-2"))
+		assertTrue(context.contains("当前昵称=群内昵称"))
+		assertTrue(context.contains("favorite_game=Minecraft"))
+		assertTrue(context.contains("summary=喜欢建筑"))
+	}
+
 	private fun profile(uid: Long, name: String, count: Long, fact: String): JsonObject = JsonObject().apply {
 		addProperty("uid", uid)
 		addProperty("primaryName", name)
@@ -48,4 +73,17 @@ class LLMMemberProfileContextServiceTest {
 			})
 		})
 	}
+
+	private fun field(uid: Long, groupId: Long, key: String, value: String) = LLMMemberProfileField(
+		id = "$uid-$groupId-$key",
+		qqUid = uid,
+		scopeGroupId = groupId,
+		key = key,
+		value = value,
+		category = "general",
+		sourceUid = uid.toString(),
+		sourceName = null,
+		createdAt = 1,
+		updatedAt = 2,
+	)
 }

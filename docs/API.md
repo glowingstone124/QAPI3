@@ -366,6 +366,9 @@ Body：
 - `add_memory`
 - `search_memory`
 - `forget_memory`
+- `get_member_profile`
+- `upsert_member_profile`
+- `forget_member_profile_field`
 
 ### LLM 配置
 

@@ -143,8 +143,13 @@ The OpenAI-compatible non-stream chat endpoint can execute built-in tools before
 - `add_memory`: create or update a structured per-group long-term memory.
 - `search_memory`: query structured memories for the current group.
 - `forget_memory`: delete structured memories only when explicitly requested.
+- `get_member_profile`: read the current user's persistent QQ-uid profile.
+- `upsert_member_profile`: create or update a confirmed identity, preference, summary, or group nickname under the current user's QQ uid.
+- `forget_member_profile_field`: delete a profile field when the current user explicitly asks to forget it.
 
 Structured memories are stored in the automatically created MySQL `llm_memories` table. A memory is uniquely identified by `group_id + subject + memory_key`, so multiple facts about the same subject can coexist. On the first startup after upgrading, legacy `data/llm/rag/<groupId>/memory.txt` and `data/llm/rag/groups/<groupId>/memory.txt` files are imported once; completion is recorded in `llm_memory_migrations`. Legacy files are retained for rollback but are excluded from RAG after migration.
+
+Member profiles are stored separately in `llm_member_profiles` and `llm_member_profile_fields`. QQ `uid` is the global unique identity and receives a stable generated `profile_id`; preferences and summaries use global fields, while `group_nickname` is scoped by group. Only profiles belonging to participants in the current conversation are injected into LLM context.
 
 Group context always retains the newest raw messages. Older messages are incrementally summarized with the provider's configured `summary.model`; summaries are persisted per group and refreshed only after enough messages age out of the recent window. Boolean environment variables accept only `true` and `false`.
 
@@ -152,6 +157,10 @@ Related environment variables:
 
 - `LLM_SYSTEM_PROMPT`: fixed system prompt text. When set, it takes precedence over the prompt file.
 - `LLM_SYSTEM_PROMPT_FILE`: system prompt file. Linux inotify events, atomic replacements, Docker bind mounts, and Kubernetes ConfigMap/Secret-style replacements are reloaded without restarting the API; invalid or blank updates keep the previous valid prompt.
+- `LLM_QO_GROUP_ID`: QQ group allowed to access QO server knowledge and server tools. If omitted, QO RAG and server tools remain unavailable.
+- `LLM_BLOCKED_QQ_UIDS`: comma- or space-separated QQ uids denied before any LLM request. If omitted, no user is blocked by this rule.
+- `LLM_ULTRA_BRIEF_QQ_UIDS`: comma- or space-separated QQ uids that receive one-sentence replies unless safety or factual clarification requires more.
+- `LLM_STRIP_EMOJI`: set to `true` to remove emoji from upstream answers during output sanitization. Tool-call markup and emoticons are always removed.
 - `LLM_GROUP_SUMMARY_ENABLED`: enable per-group rolling summaries for messages older than the recent window, default `true`.
 - `LLM_GROUP_SUMMARY_DIR`: persistent rolling-summary directory, default `data/llm/summaries`.
 - `LLM_GROUP_CONTEXT_RECENT_MESSAGES`: number of newest raw group messages retained, default `160`.

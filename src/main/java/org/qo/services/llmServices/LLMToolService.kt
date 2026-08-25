@@ -12,6 +12,13 @@ import org.springframework.stereotype.Service
 class LLMToolService(
 	private val registeredTools: List<Tools>,
 ) {
+	private val qoGroupId = System.getenv("LLM_QO_GROUP_ID")?.trim()?.toLongOrNull()
+	private val qoScopedToolIds = setOf(
+		"get_server_status",
+		"get_player_rankings",
+		"query_metro_lines",
+		"search_minecraft_knowledge",
+	)
 	private val gson: Gson = GsonBuilder().disableHtmlEscaping().create()
 	private val tools: List<Tools> by lazy {
 		val order = listOf(
@@ -20,6 +27,9 @@ class LLMToolService(
 			"query_metro_lines",
 			"search_minecraft_knowledge",
 			"search_chat_history",
+			"get_member_profile",
+			"upsert_member_profile",
+			"forget_member_profile_field",
 			"add_memory",
 			"search_memory",
 			"forget_memory",
@@ -36,6 +46,9 @@ class LLMToolService(
 	}
 
 	suspend fun execute(name: String, rawArguments: String?, context: LLMToolContext): String {
+		if (name in qoScopedToolIds && (qoGroupId == null || context.groupId != qoGroupId)) {
+			return errorResult("qo_group_required", "该工具只能在 QO 官方群中使用")
+		}
 		val args = parseArguments(rawArguments)
 		return runCatching {
 			tools.firstOrNull { it.id == name }
