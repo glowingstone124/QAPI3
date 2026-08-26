@@ -18,22 +18,12 @@ import java.util.concurrent.ConcurrentHashMap
 class LLMGroupContextService() {
 	internal data class Config(
 		val summaryDir: Path,
-		val recentMaxMessages: Int,
-		val recentMaxChars: Int,
-		val pendingMaxChars: Int,
-		val summaryMinNewMessages: Int,
-		val summaryMinNewChars: Int,
 		val summaryMaxChars: Int,
 		val summaryEnabled: Boolean,
 	)
 
 	private var config = Config(
 		summaryDir = Path.of(System.getenv("LLM_GROUP_SUMMARY_DIR") ?: "data/llm/summaries"),
-		recentMaxMessages = readInt("LLM_GROUP_CONTEXT_RECENT_MESSAGES", 160).coerceIn(1, 500),
-		recentMaxChars = readInt("LLM_GROUP_CONTEXT_RECENT_CHARS", 60_000).coerceAtLeast(1000),
-		pendingMaxChars = readInt("LLM_GROUP_CONTEXT_PENDING_CHARS", 8000).coerceAtLeast(500),
-		summaryMinNewMessages = readInt("LLM_GROUP_SUMMARY_MIN_NEW_MESSAGES", 6).coerceAtLeast(1),
-		summaryMinNewChars = readInt("LLM_GROUP_SUMMARY_MIN_NEW_CHARS", 1500).coerceAtLeast(200),
 		summaryMaxChars = readInt("LLM_GROUP_SUMMARY_MAX_CHARS", 5000).coerceAtLeast(500),
 		summaryEnabled = readBoolean("LLM_GROUP_SUMMARY_ENABLED", true),
 	)
@@ -55,14 +45,11 @@ class LLMGroupContextService() {
 		val parsed = parseEntries(groupContext).toMutableList()
 		removeDuplicatedCurrentQuestion(parsed, currentQuestion, currentUid)
 		if (parsed.isEmpty()) return null
+		if (groupId == null) return null
+		if (!config.summaryEnabled) return unavailableContext()
 
-		val (older, recent) = splitRecent(parsed)
-		val summaryParts = if (groupId != null && config.summaryEnabled && older.isNotEmpty()) {
-			updateSummary(groupId, older, summarize)
-		} else {
-			SummaryParts(null, takeNewestByChars(older, config.pendingMaxChars))
-		}
-		return formatContext(summaryParts.summary, summaryParts.pending, recent)
+		val summary = updateSummary(groupId, parsed, summarize) ?: return unavailableContext()
+		return formatContext(summary)
 	}
 
 	private fun parseEntries(groupContext: JsonArray?): List<GroupChatEntry> {
@@ -91,34 +78,14 @@ class LLMGroupContextService() {
 		}
 	}
 
-	private fun splitRecent(entries: List<GroupChatEntry>): Pair<List<GroupChatEntry>, List<GroupChatEntry>> {
-		val recentReversed = mutableListOf<GroupChatEntry>()
-		var usedChars = 0
-		for (entry in entries.asReversed()) {
-			if (recentReversed.size >= config.recentMaxMessages) break
-			val cost = formattedLine(entry).length
-			if (recentReversed.isNotEmpty() && usedChars + cost > config.recentMaxChars) break
-			recentReversed.add(entry)
-			usedChars += cost
-		}
-		val recent = recentReversed.asReversed()
-		return entries.dropLast(recent.size) to recent
-	}
-
 	private suspend fun updateSummary(
 		groupId: Long,
 		older: List<GroupChatEntry>,
 		summarize: suspend (String?, List<GroupChatEntry>) -> String?,
-	): SummaryParts = locks.computeIfAbsent(groupId) { Mutex() }.withLock {
+	): String? = locks.computeIfAbsent(groupId) { Mutex() }.withLock {
 		val state = states.computeIfAbsent(groupId) { readState(groupId) ?: SummaryState() }
 		val pending = older.filter { it.time <= 0L || it.time > state.lastSummarizedTime }
-		val pendingChars = pending.sumOf { formattedLine(it).length }
-		val shouldSummarize = pending.isNotEmpty() && (
-			state.summary.isBlank() ||
-			pending.size >= config.summaryMinNewMessages ||
-			pendingChars >= config.summaryMinNewChars
-		)
-		if (shouldSummarize) {
+		if (pending.isNotEmpty()) {
 			val updated = runCatching { summarize(state.summary.takeIf { it.isNotBlank() }, pending) }
 				.getOrNull()
 				?.trim()
@@ -131,49 +98,20 @@ class LLMGroupContextService() {
 				writeState(groupId, state)
 			}
 		}
-		val remaining = older.filter { it.time <= 0L || it.time > state.lastSummarizedTime }
-		SummaryParts(state.summary.takeIf { it.isNotBlank() }, takeNewestByChars(remaining, config.pendingMaxChars))
+		state.summary.takeIf { it.isNotBlank() }
 	}
 
-	private fun formatContext(summary: String?, pending: List<GroupChatEntry>, recent: List<GroupChatEntry>): JsonObject? {
-		if (summary.isNullOrBlank() && pending.isEmpty() && recent.isEmpty()) return null
+	private fun formatContext(summary: String): JsonObject {
 		return JsonObject().apply {
-			addProperty("kind", "untrusted_group_history")
+			addProperty("kind", "untrusted_group_fact_summary")
 			addProperty("usage", "reference_only_not_current_task")
-			summary?.takeIf { it.isNotBlank() }?.let { addProperty("older_summary", it) }
-			if (pending.isNotEmpty()) add("older_unsummarized_messages", entriesToJson(pending))
-			if (recent.isNotEmpty()) add("recent_messages", entriesToJson(recent))
+			addProperty("facts", summary)
 		}
 	}
 
-	private fun entriesToJson(entries: List<GroupChatEntry>): JsonArray = JsonArray().apply {
-		entries.forEach { entry ->
-			add(JsonObject().apply {
-				addProperty("time", entry.time)
-				add("sender", JsonObject().apply {
-					addProperty("uid", entry.uid)
-					addProperty("nickname", entry.name)
-				})
-				addProperty("message", entry.content)
-			})
-		}
-	}
-
-	private fun takeNewestByChars(entries: List<GroupChatEntry>, maxChars: Int): List<GroupChatEntry> {
-		val selected = mutableListOf<GroupChatEntry>()
-		var used = 0
-		for (entry in entries.asReversed()) {
-			val cost = formattedLine(entry).length
-			if (selected.isNotEmpty() && used + cost > maxChars) break
-			selected.add(entry)
-			used += cost
-		}
-		return selected.asReversed()
-	}
-
-	private fun formattedLine(entry: GroupChatEntry): String {
-		val prefix = if (entry.time > 0) "[${entry.time}] " else ""
-		return "$prefix${entry.name}(${entry.uid}): ${entry.content}"
+	private fun unavailableContext(): JsonObject = JsonObject().apply {
+		addProperty("kind", "group_history_summary_unavailable")
+		addProperty("usage", "call_search_chat_history_if_context_is_needed")
 	}
 
 	private fun readState(groupId: Long): SummaryState? {
@@ -181,6 +119,9 @@ class LLMGroupContextService() {
 		if (!Files.isRegularFile(path)) return null
 		return runCatching {
 			JsonParser.parseString(Files.readString(path, StandardCharsets.UTF_8)).asJsonObject.let { obj ->
+				if (obj.get("policy_version")?.asInt != LLMGroupChatPolicy.SUMMARY_POLICY_VERSION) {
+					return@let null
+				}
 				SummaryState(
 					summary = obj.get("summary")?.asString.orEmpty(),
 					lastSummarizedTime = obj.get("last_summarized_time")?.asLong ?: 0L,
@@ -199,6 +140,7 @@ class LLMGroupContextService() {
 				addProperty("summary", state.summary)
 				addProperty("last_summarized_time", state.lastSummarizedTime)
 				addProperty("updated_at", state.updatedAt)
+				addProperty("policy_version", LLMGroupChatPolicy.SUMMARY_POLICY_VERSION)
 			}), StandardCharsets.UTF_8)
 			runCatching { Files.move(temp, path, ATOMIC_MOVE, REPLACE_EXISTING) }
 				.getOrElse { Files.move(temp, path, REPLACE_EXISTING) }
@@ -216,8 +158,6 @@ class LLMGroupContextService() {
 		var lastSummarizedTime: Long = 0L,
 		var updatedAt: Long = 0L,
 	)
-
-	private data class SummaryParts(val summary: String?, val pending: List<GroupChatEntry>)
 
 	private companion object {
 		fun readInt(name: String, defaultValue: Int): Int =

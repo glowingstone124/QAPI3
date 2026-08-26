@@ -39,18 +39,10 @@ class LLMMemberProfileContextService() {
 				?.distinct()
 				?.take(8)
 				.orEmpty()
-			val facts = obj.getAsJsonArray("facts")
-				?.mapNotNull { fact ->
-					fact.takeIf { it.isJsonObject }?.asJsonObject
-						?.get("content")
-						?.takeIf { !it.isJsonNull }
-						?.asString
-				}
-				?.map { inline(it, 300) }
-				?.filter { it.isNotBlank() }
-					?.distinct()
-					?.takeLast(config.maxFactsPerProfile)
-					.orEmpty()
+			// Transient member memories originate from chat history and are never
+			// promoted to durable profile facts. Only explicitly persisted fields
+			// for the current uid are eligible below.
+			val facts = emptyList<String>()
 			MemberProfile(uid, null, name, aliases, count, facts)
 		}.orEmpty().distinctBy { it.uid }
 		val storedByUid = storedProfiles.associateBy { it.qqUid }
@@ -62,7 +54,7 @@ class LLMMemberProfileContextService() {
 			val displayName = stored?.fields?.firstOrNull { it.key == "display_name" }?.value
 			val storedFacts = stored?.fields.orEmpty()
 				.filterNot { it.key in setOf("group_nickname", "display_name") }
-				.filterNot { uid != currentUid && LLMGroupChatPolicy.isInteractionPreferenceField(it.key) }
+				.filter { uid == currentUid && it.category == LLMGroupChatPolicy.EXPLICIT_USER_PROFILE_CATEGORY }
 				.map { "${it.key}=${it.value}" }
 				.take(config.maxFactsPerProfile)
 			MemberProfile(

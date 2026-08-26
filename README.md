@@ -149,9 +149,9 @@ The OpenAI-compatible non-stream chat endpoint can execute built-in tools before
 
 Structured memories are stored in the automatically created MySQL `llm_memories` table. A memory is uniquely identified by `group_id + subject + memory_key`, so multiple facts about the same subject can coexist. On the first startup after upgrading, legacy `data/llm/rag/<groupId>/memory.txt` and `data/llm/rag/groups/<groupId>/memory.txt` files are imported once; completion is recorded in `llm_memory_migrations`. Legacy files are retained for rollback but are excluded from RAG after migration.
 
-Member profiles are stored separately in `llm_member_profiles` and `llm_member_profile_fields`. QQ `uid` is the global unique identity and receives a stable generated `profile_id`; preferences and summaries use global fields, while `group_nickname` is scoped by group. Only profiles belonging to participants in the current conversation are injected into LLM context.
+Member profiles are stored separately in `llm_member_profiles` and `llm_member_profile_fields`. QQ `uid` is the global unique identity and receives a stable generated `profile_id`; `group_nickname` is scoped by group. Durable profile facts must be created through the explicit `/remember content` protocol. Only explicitly persisted facts belonging to the current sender are injected; other participants contribute identity metadata only.
 
-Group context always retains the newest raw messages. Older messages are incrementally summarized with the provider's configured `summary.model`; summaries are persisted per group and refreshed only after enough messages age out of the recent window. Boolean environment variables accept only `true` and `false`.
+Group context is incrementally converted into a multi-member fact and dialogue-relation summary with the provider's configured `summary.model`. Raw group messages are archived but are not automatically included in the main prompt; the model retrieves a small relevant subset with `search_chat_history` when exact wording or unresolved references require it. Summaries are policy-versioned so older summaries are rebuilt after isolation-policy changes. Boolean environment variables accept only `true` and `false`.
 
 Related environment variables:
 
@@ -161,15 +161,10 @@ Related environment variables:
 - `LLM_BLOCKED_QQ_UIDS`: comma- or space-separated QQ uids denied before any LLM request. If omitted, no user is blocked by this rule.
 - `LLM_ULTRA_BRIEF_QQ_UIDS`: comma- or space-separated QQ uids that receive one-sentence replies unless safety or factual clarification requires more.
 - `LLM_STRIP_EMOJI`: set to `true` to remove emoji from upstream answers during output sanitization. Tool-call markup and emoticons are always removed.
-- `LLM_GROUP_SUMMARY_ENABLED`: enable per-group rolling summaries for messages older than the recent window, default `true`.
+- `LLM_GROUP_SUMMARY_ENABLED`: enable per-group rolling fact summaries, default `true`. When disabled, raw history is still archived for explicit search but is not automatically injected.
 - `LLM_GROUP_SUMMARY_DIR`: persistent rolling-summary directory, default `data/llm/summaries`.
-- `LLM_GROUP_CONTEXT_RECENT_MESSAGES`: number of newest raw group messages retained, default `160`.
-- `LLM_GROUP_CONTEXT_RECENT_CHARS`: maximum characters for newest raw group messages, default `60000`.
-- `LLM_GROUP_CONTEXT_PENDING_CHARS`: maximum unsummarized older-message characters retained while waiting for the next summary update, default `8000`.
-- `LLM_GROUP_SUMMARY_MIN_NEW_MESSAGES`: newly aged messages required before updating an existing summary, default `6`.
-- `LLM_GROUP_SUMMARY_MIN_NEW_CHARS`: newly aged characters required before updating an existing summary, default `1500`.
 - `LLM_GROUP_SUMMARY_MAX_CHARS`: maximum persisted summary characters per group, default `5000`.
-- `LLM_GROUP_SUMMARY_TIMEOUT_MS`: maximum time spent updating a summary before falling back to raw pending history, default `15000`.
+- `LLM_GROUP_SUMMARY_TIMEOUT_MS`: maximum time spent updating a summary; on timeout, the previous safe summary is retained and raw history is not injected, default `15000`.
 - `LLM_HISTORY_TTL_MS`: in-memory conversation lifetime, default `1800000` (30 minutes).
 - `LLM_MEMORY_CONTEXT_MAX_ITEMS`: maximum relevant memories injected into a request, default `10`.
 - `LLM_MEMORY_CONTEXT_MAX_CHARS`: maximum memory context characters, default `6000`.

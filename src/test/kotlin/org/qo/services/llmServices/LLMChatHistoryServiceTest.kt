@@ -41,6 +41,18 @@ class LLMChatHistoryServiceTest {
 		assertTrue(service.search(300, "以前", uid = 9).single().content.contains("决定"))
 	}
 
+	@Test
+	fun `blank query returns latest messages for ambiguous followups`() = runBlocking {
+		service.archiveGroupContext(400, JsonArray().apply {
+			add(message("older", 1, "Alice", "第一条", 1_700_000_000L))
+			add(message("newer", 2, "Bob", "第二条", 1_700_000_001L))
+		})
+
+		val result = service.search(400, "", limit = 1)
+
+		assertEquals("第二条", result.single().content)
+	}
+
 	private fun message(sourceId: String, uid: Long, name: String, content: String, time: Long): JsonObject = JsonObject().apply {
 		addProperty("sourceId", sourceId)
 		addProperty("uid", uid)
