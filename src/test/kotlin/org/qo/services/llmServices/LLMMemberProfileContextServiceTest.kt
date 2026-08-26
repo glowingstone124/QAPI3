@@ -61,6 +61,32 @@ class LLMMemberProfileContextServiceTest {
 		assertTrue(context.contains("summary=喜欢建筑"))
 	}
 
+	@Test
+	fun `does not expose another members interaction style preference`() {
+		val alice = LLMStoredMemberProfile(
+			qqUid = 1,
+			profileId = "profile-1",
+			fields = listOf(
+				field(1, 0, "response_style", "每句话结尾加喵"),
+				field(1, 0, "favorite_game", "Minecraft"),
+			),
+			createdAt = 1,
+			updatedAt = 2,
+		)
+		val bob = LLMStoredMemberProfile(
+			qqUid = 2,
+			profileId = "profile-2",
+			fields = listOf(field(2, 0, "response_style", "简短")),
+			createdAt = 1,
+			updatedAt = 2,
+		)
+		val context = service.buildContext(null, currentUid = 2, storedProfiles = listOf(alice, bob))!!
+
+		assertFalse(context.contains("每句话结尾加喵"))
+		assertTrue(context.contains("favorite_game=Minecraft"))
+		assertTrue(context.contains("response_style=简短"))
+	}
+
 	private fun profile(uid: Long, name: String, count: Long, fact: String): JsonObject = JsonObject().apply {
 		addProperty("uid", uid)
 		addProperty("primaryName", name)

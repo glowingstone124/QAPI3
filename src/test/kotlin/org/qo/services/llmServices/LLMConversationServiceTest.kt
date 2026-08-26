@@ -31,6 +31,7 @@ class LLMConversationServiceTest {
             assertEquals(18, compactedMessages)
             val history = service.historyMessages("qq:compact")
             assertEquals(9, history.size())
+            assertEquals("user", history[0].asJsonObject.get("role").asString)
             assertTrue(history[0].asJsonObject.get("content").asString.contains("Earlier discussion summary"))
             assertEquals("question-9", history[1].asJsonObject.get("content").asString)
         } finally {

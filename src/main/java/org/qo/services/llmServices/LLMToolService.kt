@@ -75,4 +75,9 @@ class LLMToolService(
 		System.getenv(name)?.trim()?.lowercase()?.toBooleanStrictOrNull() ?: defaultValue
 }
 
-data class LLMToolContext(val groupId: Long?, val uid: String?, val name: String?)
+data class LLMToolContext(
+	val groupId: Long?,
+	val uid: String?,
+	val name: String?,
+	val currentMessage: String? = null,
+)
