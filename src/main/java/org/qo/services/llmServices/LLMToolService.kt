@@ -34,6 +34,7 @@ class LLMToolService(
 			"search_memory",
 			"forget_memory",
 			"get_remain_balance",
+			"set_msg_emoji_like",
 		)
 		val byId = registeredTools.associateBy { it.id }
 		order.map { id -> byId[id] ?: error("Missing definition for tool: $id") }
@@ -80,4 +81,5 @@ data class LLMToolContext(
 	val uid: String?,
 	val name: String?,
 	val currentMessage: String? = null,
+	val currentMessageId: Long? = null,
 )

@@ -51,13 +51,14 @@ class LLMController(private val llmServices: LLMServices) {
 		@RequestHeader("X-QQ-UID") qqUid: Long,
 		@RequestHeader("X-QQ-Group-ID", required = false) qqGroupId: Long?,
 		@RequestHeader("X-QQ-Name", required = false) qqName: String?,
+		@RequestHeader("X-QQ-Message-ID", required = false) qqMessageId: Long?,
 		@RequestParam(name = "model", required = false, defaultValue = "fast") model: String = "fast",
 		@RequestBody body: String
 	): ResponseEntity<String> {
 		val requestToken = AuthTokens.resolve(token, authorization)
 			?: return jsonResponse("""{"error":{"message":"缺少或无效的令牌","type":"invalid_token","code":"invalid_token"}}""", HttpStatus.UNAUTHORIZED)
 
-		val result = runCatching { llmServices.completeBotChat(body, requestToken, qqUid, qqGroupId, qqName, model) }.getOrElse {
+		val result = runCatching { llmServices.completeBotChat(body, requestToken, qqUid, qqGroupId, qqName, qqMessageId, model) }.getOrElse {
 			LLMNonStreamResult(400, """{"error":{"message":"${it.message ?: "请求格式错误"}","type":"bad_request","code":"bad_request"}}""")
 		}
 		return jsonResponse(result.body, HttpStatus.valueOf(result.status))

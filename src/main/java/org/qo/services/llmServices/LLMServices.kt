@@ -222,6 +222,7 @@ class LLMServices(
 		qqUid: Long,
 		qqGroupId: Long?,
 		qqName: String?,
+		qqMessageId: Long? = null,
 		model: String
 	): LLMNonStreamResult {
 		if (!authenticateServerToken(token)) {
@@ -231,7 +232,7 @@ class LLMServices(
 			return LLMNonStreamResult(403, errorJson("blocked_user", "该用户暂时不能使用此功能"))
 		}
 		val username = qqName?.takeIf { it.isNotBlank() }?.let { decodeHeader(it) } ?: "qq:$qqUid"
-		val requester = LLMRequester(qqUid, username, "qq", qqGroupId)
+		val requester = LLMRequester(qqUid, username, "qq", qqGroupId, qqMessageId)
 		val provider = providers.current()
 		val model = provider.resolvePreset(model)
 			?: return LLMNonStreamResult(400, errorJson("model_not_available", "请求的模型不可用"))
@@ -1368,6 +1369,7 @@ class LLMServices(
 		val name: String,
 		val source: String,
 		val groupId: Long? = null,
+		val messageId: Long? = null,
 		val conversationSource: String = source,
 		val minecraftRelated: MinecraftRelated? = null,
 	) {
@@ -1375,7 +1377,7 @@ class LLMServices(
 			listOfNotNull(conversationSource, groupId?.toString(), uid.toString()).joinToString(":")
 
 		fun toolContext(currentMessage: String? = null): LLMToolContext =
-			LLMToolContext(groupId, uid.toString(), name, currentMessage)
+			LLMToolContext(groupId, uid.toString(), name, currentMessage, messageId)
 	}
 
 	private data class ToolCall(val id: String, val name: String, val arguments: String?)

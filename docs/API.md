@@ -369,6 +369,7 @@ Body：
 - `get_member_profile`
 - `upsert_member_profile`
 - `forget_member_profile_field`
+- `set_msg_emoji_like`：为群消息设置表情回应（贴一贴）。`emoji_id` 支持语义名或数字 ID，当前支持 `monkey_head`（128053，🐵）。需配置 `QBOT_ENDPOINT` 与 `QBOT_TOKEN` 指向 qbot。
 
 ### LLM 配置
 
