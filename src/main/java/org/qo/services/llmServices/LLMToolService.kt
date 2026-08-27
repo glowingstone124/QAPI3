@@ -7,12 +7,17 @@ import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import org.qo.services.llmServices.tools.Tools
 import org.springframework.stereotype.Service
+import java.nio.charset.StandardCharsets
+import java.nio.file.Files
+import java.nio.file.Path
+import java.nio.file.StandardOpenOption
 
 @Service
 class LLMToolService(
 	private val registeredTools: List<Tools>,
 ) {
 	private val qoGroupId = System.getenv("LLM_QO_GROUP_ID")?.trim()?.toLongOrNull()
+	private val failureLogPath: Path = Path.of("data/llm/toolcall-failure.log")
 	private val qoScopedToolIds = setOf(
 		"get_server_status",
 		"get_player_rankings",
@@ -48,14 +53,48 @@ class LLMToolService(
 
 	suspend fun execute(name: String, rawArguments: String?, context: LLMToolContext): String {
 		if (name in qoScopedToolIds && (qoGroupId == null || context.groupId != qoGroupId)) {
-			return errorResult("qo_group_required", "该工具只能在 QO 官方群中使用")
+			val result = errorResult("qo_group_required", "该工具只能在 QO 官方群中使用")
+			logFailure(name, rawArguments, context, result)
+			return result
 		}
 		val args = parseArguments(rawArguments)
-		return runCatching {
+		val result = runCatching {
 			tools.firstOrNull { it.id == name }
 				?.execute(args, context)
 				?: errorResult("unknown_tool", "未知工具：$name")
 		}.getOrElse { errorResult("tool_error", it.message ?: "工具执行失败") }
+		if (isFailure(result)) {
+			logFailure(name, rawArguments, context, result)
+		}
+		return result
+	}
+
+	private fun isFailure(result: String): Boolean =
+		runCatching { JsonParser.parseString(result).asJsonObject.has("error") }.getOrDefault(false)
+
+	private fun logFailure(name: String, rawArguments: String?, context: LLMToolContext, result: String) {
+		val parsed = runCatching { JsonParser.parseString(result).asJsonObject }.getOrNull()
+		val entry = gson.toJson(JsonObject().apply {
+			addProperty("tool", name)
+			addProperty("arguments", rawArguments?.take(500))
+			addProperty("group_id", context.groupId)
+			addProperty("uid", context.uid)
+			addProperty("name", context.name)
+			addProperty("error", parsed?.get("error")?.asString ?: "unknown")
+			addProperty("message", (parsed?.get("message")?.asString ?: result).take(500))
+			addProperty("time", System.currentTimeMillis())
+		})
+		println("[LLMTool] call failed: $entry")
+		runCatching {
+			failureLogPath.parent?.let { Files.createDirectories(it) }
+			Files.writeString(
+				failureLogPath,
+				entry + System.lineSeparator(),
+				StandardCharsets.UTF_8,
+				StandardOpenOption.CREATE,
+				StandardOpenOption.APPEND,
+			)
+		}.onFailure { println("[LLMTool] failed to write failure log: ${it.message}") }
 	}
 
 	private fun parseArguments(rawArguments: String?): JsonObject {
