@@ -19,6 +19,7 @@ import org.qo.services.registrationServices.MinecraftRegistrationSessionService;
 import org.qo.redis.Configuration;
 import org.qo.services.messageServices.Msg;
 import org.qo.services.gameStatusService.Status;
+import org.qo.server.AvatarCache;
 import org.qo.utils.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -29,6 +30,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.CacheControl;
 import org.springframework.http.server.reactive.ServerHttpRequest;
 import org.springframework.web.bind.annotation.*;
 
@@ -44,6 +46,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.Date;
 import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 
 import static org.qo.utils.UserProcess.*;
 
@@ -344,12 +347,46 @@ public class ApiApplication {
 
     public record PasswordResetRequest(Long uid, String password) {}
 
+    public Mono<ResponseEntity<String>> avartarTrans(String name) {
+        return avatarResponse(name, null);
+    }
+
     @RequestMapping("/qo/download/avatar")
-    public Mono<ResponseEntity<String>> avartarTrans(@RequestParam() String name) {
+    public Mono<ResponseEntity<String>> avartarTrans(@RequestParam() String name, ServerHttpRequest request) {
+        String publicBaseUrl = request.getURI().getRawAuthority() == null
+                ? null
+                : request.getURI().getScheme() + "://" + request.getURI().getRawAuthority();
+        return avatarResponse(name, publicBaseUrl);
+    }
+
+    private Mono<ResponseEntity<String>> avatarResponse(String name, String publicBaseUrl) {
         if (name == null || name.isEmpty()) {
-            return Mono.just(ri.GeneralHttpHeader("no input"));
+            return Mono.just(ri.GeneralHttpHeader("no input", HttpStatus.BAD_REQUEST));
         }
-        return userProcess.avatarTrans(name).map(ri::GeneralHttpHeader);
+        if (!AvatarCache.isValidName(name)) {
+            return Mono.just(ri.GeneralHttpHeader("invalid Minecraft username", HttpStatus.BAD_REQUEST));
+        }
+        return userProcess.avatarTrans(name, publicBaseUrl).map(ri::GeneralHttpHeader);
+    }
+
+    @GetMapping(value = "/qo/download/avatar/image", produces = MediaType.IMAGE_PNG_VALUE)
+    public Mono<ResponseEntity<byte[]>> avatarImage(@RequestParam String name) {
+        if (!AvatarCache.isValidName(name)) {
+            return Mono.just(ResponseEntity.badRequest().build());
+        }
+        return Mono.fromCallable(() -> AvatarCache.read(name))
+                .subscribeOn(Schedulers.boundedElastic())
+                .map(bytes -> {
+                    if (bytes == null) {
+                        return ResponseEntity.notFound().build();
+                    }
+                    HttpHeaders headers = new HttpHeaders();
+                    headers.setContentType(MediaType.IMAGE_PNG);
+                    headers.setCacheControl(CacheControl
+                            .maxAge(1, TimeUnit.DAYS)
+                            .cachePublic());
+                    return new ResponseEntity<>(bytes, headers, HttpStatus.OK);
+                });
     }
 
     @RequestMapping("/qo/download/registry")

@@ -88,7 +88,8 @@
 
 `/qo/download/registry` 的响应包含 `statistics` 对象：`distance_cm`、`damage_dealt`（Minecraft 原始值，10 为 1 点伤害）、`mob_kills`、`blocks_mined`、`blocks_placed` 和 `elytra_flight_ticks`。
 | `GET` | `/qo/download/name?qq=<qq>` | 公开 | 按 QQ UID 查询注册信息。 |
-| `GET` | `/qo/download/avatar?name=<name>` | 公开 | 查询头像 URL。 |
+| `GET` | `/qo/download/avatar?name=<name>` | 公开 | 查询头像 URL；Minecraft 头像命中本地缓存时返回本服务图片地址。 |
+| `GET` | `/qo/download/avatar/image?name=<name>` | 公开 | 读取本地缓存的 Minecraft PNG 头像。 |
 | `GET` | `/qo/download/getgametime?username=<name>` | 公开 | 查询玩家累计游戏时间。 |
 | `GET` | `/qo/download/logingreeting?username=<name>` | 公开 | 返回玩家时间和在线玩家列表。 |
 

@@ -4,6 +4,7 @@ import jakarta.annotation.Resource;
 import org.qo.redis.Redis;
 import org.qo.services.mmdb.Init;
 import org.qo.redis.Configuration;
+import org.qo.server.AvatarCache;
 import org.qo.services.messageServices.Msg;
 import org.qo.utils.FileUpdateHook;
 import org.qo.utils.Funcs;
@@ -19,6 +20,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.reactive.UrlBasedCorsConfigurationSource;
 import org.springframework.web.cors.reactive.CorsWebFilter;
+import java.io.IOException;
 import java.util.Arrays;
 
 
@@ -41,6 +43,11 @@ public class Main {
         org.qo.redis.Configuration.INSTANCE.init();
         Funcs.Start();
         Init.INSTANCE.init();
+        try {
+            AvatarCache.init();
+        } catch (IOException exception) {
+            Logger.log("Failed to initialize avatar cache: " + exception.getMessage(), ERROR);
+        }
         Funcs.ShowDic();
         Logger.log("API Started.", INFO);
         SpringApplication.run(ApiApplication.class, args);

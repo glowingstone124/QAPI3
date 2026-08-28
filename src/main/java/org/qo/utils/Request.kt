@@ -12,11 +12,15 @@ import java.net.HttpURLConnection
 import java.net.URI
 import java.nio.file.Files
 import java.nio.file.Path
-import java.nio.file.StandardCopyOption
 import java.util.concurrent.CompletableFuture
 
 class Request {
     private val coroutineScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+
+    companion object {
+        private const val CONNECT_TIMEOUT_MILLIS = 5_000
+        private const val READ_TIMEOUT_MILLIS = 15_000
+    }
 
     fun sendPostRequest(target: String, data: String): CompletableFuture<String> {
         val result = CompletableFuture<String>()
@@ -27,6 +31,8 @@ class Request {
                     requestMethod = "POST"
                     doInput = true
                     doOutput = true
+                    connectTimeout = CONNECT_TIMEOUT_MILLIS
+                    readTimeout = READ_TIMEOUT_MILLIS
                     setRequestProperty("Content-Type", "application/json; charset=utf-8")
                 }
 
@@ -56,6 +62,8 @@ class Request {
                 val connection = (url.openConnection() as HttpURLConnection).apply {
                     requestMethod = "GET"
                     doInput = true
+                    connectTimeout = CONNECT_TIMEOUT_MILLIS
+                    readTimeout = READ_TIMEOUT_MILLIS
                     setRequestProperty("Content-Type", "application/json; charset=utf-8")
                 }
 
@@ -73,17 +81,46 @@ class Request {
         return result
     }
 
-    fun download(url: String, path: String): CompletableFuture<Unit> {
+    fun download(url: String, path: String): CompletableFuture<Unit> =
+        download(url, path, Long.MAX_VALUE)
+
+    fun download(url: String, path: String, maxBytes: Long): CompletableFuture<Unit> {
         val result = CompletableFuture<Unit>()
         coroutineScope.launch {
             try {
+                require(maxBytes > 0) { "maxBytes must be positive" }
                 val targetUrl = URI.create(url).toURL()
-                val connection = targetUrl.openConnection() as HttpURLConnection
+                val connection = (targetUrl.openConnection() as HttpURLConnection).apply {
+                    requestMethod = "GET"
+                    connectTimeout = CONNECT_TIMEOUT_MILLIS
+                    readTimeout = READ_TIMEOUT_MILLIS
+                }
 
-                connection.inputStream.use { input ->
+                try {
+                    if (connection.responseCode !in 200..299) {
+                        throw IOException("Failed to download resource: ${connection.responseCode}")
+                    }
+
                     val targetPath = Path.of(path)
-                    Files.copy(input, targetPath, StandardCopyOption.REPLACE_EXISTING)
+                    targetPath.parent?.let { Files.createDirectories(it) }
+                    connection.inputStream.use { input ->
+                        Files.newOutputStream(targetPath).use { output ->
+                            val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                            var totalBytes = 0L
+                            while (true) {
+                                val read = input.read(buffer)
+                                if (read < 0) break
+                                if (totalBytes > maxBytes - read) {
+                                    throw IOException("Downloaded resource exceeds $maxBytes bytes")
+                                }
+                                output.write(buffer, 0, read)
+                                totalBytes += read
+                            }
+                        }
+                    }
                     result.complete(Unit)
+                } finally {
+                    connection.disconnect()
                 }
             } catch (e: Exception) {
                 result.completeExceptionally(e)

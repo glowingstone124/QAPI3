@@ -265,10 +265,17 @@ public class UserProcess {
     }
 
     public Mono<String> avatarTrans(String name) {
+        return avatarTrans(name, null);
+    }
+
+    public Mono<String> avatarTrans(String name, String publicBaseUrl) {
+        if (!AvatarCache.isValidName(name)) {
+            return Mono.just(defaultAvatarJson(name));
+        }
         return playerCardCustomizationImpl.getProfileDetailWithGivenNameReactive(name)
                 .flatMap(profile -> {
                     if (profile.getAvatar() == null || "default".equals(profile.getAvatar())) {
-                        return fetchMinecraftAvatar(name);
+                        return fetchMinecraftAvatar(name, publicBaseUrl);
                     }
                     return avatarRelatedImpl.getAvatarUrlReactive(profile.getAvatar())
                             .map(url -> {
@@ -280,13 +287,13 @@ public class UserProcess {
                             })
                             .switchIfEmpty(Mono.just(avatarJson(null, name, true)));
                 })
-                .switchIfEmpty(fetchMinecraftAvatar(name))
+                .switchIfEmpty(fetchMinecraftAvatar(name, publicBaseUrl))
                 .onErrorResume(error -> Mono.just(defaultAvatarJson(name)));
     }
 
-    private Mono<String> fetchMinecraftAvatar(String name) {
-        if (AvatarCache.has(name)) {
-            return Mono.just(defaultAvatarJson(name));
+    private Mono<String> fetchMinecraftAvatar(String name, String publicBaseUrl) {
+        if (AvatarCache.isFresh(name)) {
+            return Mono.just(avatarJson(AvatarCache.url(name, publicBaseUrl), name, false));
         }
         String apiURL = "https://api.mojang.com/users/profiles/minecraft/" + name;
         return Mono.fromFuture(request.sendGetRequest(apiURL))
@@ -296,25 +303,25 @@ public class UserProcess {
                         .map(JsonParser::parseString)
                         .filter(JsonElement::isJsonObject)
                         .map(JsonElement::getAsJsonObject))
-                .map(playerDb -> {
+                .flatMap(playerDb -> {
                     if (!playerDb.get("success").getAsBoolean()) {
-                        return defaultAvatarJson(name);
+                        return Mono.just(defaultAvatarJson(name));
                     }
                     JsonObject player = playerDb.getAsJsonObject("data").getAsJsonObject("player");
                     String avatar = player.get("avatar").getAsString();
                     String username = player.get("username").getAsString();
-                    try {
-                        AvatarCache.cache(avatar, username);
-                    } catch (Exception ignored) {
-                        Logger.log("failed to cache avatar for " + username + ": " + ignored.getMessage(), ERROR);
-                    }
-                    JsonObject result = new JsonObject();
-                    result.addProperty("url", avatar);
-                    result.addProperty("name", username);
-                    result.addProperty("special", false);
-                    return result.toString();
+                    AvatarLookup lookup = new AvatarLookup(avatar, username);
+                    return Mono.fromFuture(AvatarCache.cacheAsync(lookup.url(), lookup.username()))
+                        .map(ignored -> avatarJson(AvatarCache.url(lookup.username(), publicBaseUrl), lookup.username(), false))
+                        .onErrorResume(error -> {
+                            Logger.log("failed to cache avatar for " + lookup.username() + ": " + error.getMessage(), ERROR);
+                            return Mono.just(avatarJson(lookup.url(), lookup.username(), false));
+                        });
                 })
                 .onErrorResume(error -> Mono.just(defaultAvatarJson(name)));
+    }
+
+    private record AvatarLookup(String url, String username) {
     }
 
     private String defaultAvatarJson(String name) {
