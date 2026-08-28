@@ -5,6 +5,7 @@ import org.springframework.web.reactive.HandlerMapping
 import org.springframework.web.server.ServerWebExchange
 import org.springframework.web.server.WebFilter
 import org.springframework.web.server.WebFilterChain
+import org.springframework.web.util.pattern.PathPattern
 import reactor.core.publisher.Mono
 
 /** Records the processing time of every WebFlux request by HTTP method and route. */
@@ -20,8 +21,11 @@ class ApiEndpointMetricFilter(
 	}
 
 	private fun endpointName(exchange: ServerWebExchange): String {
-		val route = exchange.getAttribute<String>(HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE)
-			?.takeIf { it.isNotBlank() }
+		val route = when (val pattern = exchange.attributes[HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE]) {
+			is PathPattern -> pattern.patternString
+			is String -> pattern.takeIf { it.isNotBlank() }
+			else -> null
+		}
 			?: exchange.request.path.pathWithinApplication().value()
 		val method = exchange.request.method?.name() ?: "UNKNOWN"
 		return "$method $route"
