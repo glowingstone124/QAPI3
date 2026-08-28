@@ -62,6 +62,15 @@ created. The original pool defaults (initial/minimum idle 5, maximum 100,
 3-second acquisition timeout, and 60-second eviction interval) are retained;
 do not configure a JDBC `DataSource` for request handling.
 
+### API performance metrics
+
+`GET /qo/metrics` returns the in-memory processing-time summary for every HTTP
+endpoint. Each metric is keyed by HTTP method and Spring route template, for
+example `GET /qo/download/status`, and contains `count`, `avgMs`, `p90Ms`, and
+`p99Ms`. `avgMs` is calculated over all requests since startup; percentiles are
+calculated from the most recent 4096 requests for that endpoint. The sample
+limit can be changed with the `qapi.metrics.max-samples-per-endpoint` property.
+
 ### API Endpoint
 
 GET `/qo/download/status` -> 
