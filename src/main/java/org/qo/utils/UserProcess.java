@@ -278,17 +278,29 @@ public class UserProcess {
                         return fetchMinecraftAvatar(name, publicBaseUrl);
                     }
                     return avatarRelatedImpl.getAvatarUrlReactive(profile.getAvatar())
-                            .map(url -> {
-                                JsonObject result = new JsonObject();
-                                result.addProperty("url", url);
-                                result.addProperty("special", true);
-                                result.addProperty("name", name);
-                                return result.toString();
-                            })
+                            .flatMap(url -> fetchSpecialAvatar(name, url, publicBaseUrl))
                             .switchIfEmpty(Mono.just(avatarJson(null, name, true)));
                 })
                 .switchIfEmpty(fetchMinecraftAvatar(name, publicBaseUrl))
                 .onErrorResume(error -> Mono.just(defaultAvatarJson(name)));
+    }
+
+    private Mono<String> fetchSpecialAvatar(String name, String url, String publicBaseUrl) {
+        String cacheKey;
+        try {
+            cacheKey = AvatarCache.externalKey(url);
+        } catch (IllegalArgumentException exception) {
+            return Mono.just(avatarJson(url, name, true));
+        }
+        if (AvatarCache.isFreshKey(cacheKey)) {
+            return Mono.just(avatarJson(AvatarCache.urlForKey(cacheKey, publicBaseUrl), name, true));
+        }
+        return Mono.fromFuture(AvatarCache.cacheAsyncForKey(url, cacheKey))
+                .map(ignored -> avatarJson(AvatarCache.urlForKey(cacheKey, publicBaseUrl), name, true))
+                .onErrorResume(error -> {
+                    Logger.log("failed to cache special avatar for " + name + ": " + error.getMessage(), ERROR);
+                    return Mono.just(avatarJson(url, name, true));
+                });
     }
 
     private Mono<String> fetchMinecraftAvatar(String name, String publicBaseUrl) {

@@ -2,6 +2,7 @@ package org.qo.services.registrationServices
 
 import com.google.gson.JsonParser
 import org.qo.utils.Funcs
+import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Service
 import java.io.File
 import java.util.UUID
@@ -55,7 +56,10 @@ data class RegistrationQuizMetadata(
 )
 
 @Service
-class RegistrationQuizService {
+class RegistrationQuizService(
+	@param:Value("\${qapi.registration.quiz-file:quiz.json}")
+	private val quizFileName: String,
+) {
 	private val sessions = ConcurrentHashMap<String, RegistrationQuizSession>()
 	private val proofs = ConcurrentHashMap<String, RegistrationQuizProof>()
 
@@ -146,7 +150,7 @@ class RegistrationQuizService {
 	}
 
 	private fun loadDefinition(): RegistrationQuizDefinition {
-		val file = File(QUIZ_FILE_NAME)
+		val file = File(quizFileName)
 		check(file.isFile) { "Missing registration quiz configuration: ${file.absolutePath}" }
 		val root = file.reader(Charsets.UTF_8).use { JsonParser.parseReader(it).asJsonObject }
 		val passingScore = root.get("passingScore")?.asInt

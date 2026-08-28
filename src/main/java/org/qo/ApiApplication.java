@@ -370,11 +370,16 @@ public class ApiApplication {
     }
 
     @GetMapping(value = "/qo/download/avatar/image", produces = MediaType.IMAGE_PNG_VALUE)
-    public Mono<ResponseEntity<byte[]>> avatarImage(@RequestParam String name) {
-        if (!AvatarCache.isValidName(name)) {
+    public Mono<ResponseEntity<byte[]>> avatarImage(
+            @RequestParam(required = false) String name,
+            @RequestParam(required = false) String key) {
+        if (key == null && !AvatarCache.isValidName(name)) {
             return Mono.just(ResponseEntity.badRequest().build());
         }
-        return Mono.fromCallable(() -> AvatarCache.read(name))
+        if (key != null && !AvatarCache.isValidCacheKey(key)) {
+            return Mono.just(ResponseEntity.badRequest().build());
+        }
+        return Mono.fromCallable(() -> key == null ? AvatarCache.read(name) : AvatarCache.readKey(key))
                 .subscribeOn(Schedulers.boundedElastic())
                 .map(bytes -> {
                     if (bytes == null) {

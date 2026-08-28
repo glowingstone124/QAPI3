@@ -23,11 +23,11 @@ simply just run gradle build and that's all. Don't forget to add configurations 
 
 I recommend you to just run program in docker and redirect port to nginx, etc.
 
-Avatar images are cached under `avatars/` and served by
-`/qo/download/avatar/image`. Set `QAPI_AVATAR_CACHE_DIR` to change the cache
-directory, `QAPI_AVATAR_CACHE_TTL_SECONDS` to change the refresh interval
-(default: 86400), and `QAPI_PUBLIC_BASE_URL` when the API response must contain
-an absolute cached-image URL.
+Avatar images, including special card avatars, are cached under `avatars/` and
+served by `/qo/download/avatar/image`. Set `QAPI_AVATAR_CACHE_DIR` to change
+the cache directory, `QAPI_AVATAR_CACHE_TTL_SECONDS` to change the refresh
+interval (default: 86400), and `QAPI_PUBLIC_BASE_URL` when the API response
+must contain an absolute cached-image URL.
 
 To add components, sub servers, please add node object in `nodes.json`
 

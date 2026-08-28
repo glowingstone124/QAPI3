@@ -21,6 +21,12 @@ class R2dbcDatabaseConfiguration(
 	private val resourceLoader: ResourceLoader,
 	@param:Value("\${qapi.database.config-location:file:data/sql/info.json}")
 	private val configLocation: String,
+	@param:Value("\${qapi.database.url:}")
+	private val configuredUrl: String,
+	@param:Value("\${qapi.database.username:}")
+	private val configuredUsername: String,
+	@param:Value("\${qapi.database.password:}")
+	private val configuredPassword: String,
 ) {
 	@Bean(destroyMethod = "dispose")
 	fun connectionFactory(): ConnectionPool {
@@ -54,6 +60,18 @@ class R2dbcDatabaseConfiguration(
 		TransactionalOperator.create(transactionManager)
 
 	private fun connectionSettings(): ConnectionSettings {
+		val directUrl = configuredUrl.trim()
+		if (directUrl.isNotEmpty()) {
+			require(directUrl.startsWith("jdbc:") || directUrl.startsWith("r2dbc:")) {
+				"Database URL must start with jdbc: or r2dbc:"
+			}
+			return ConnectionSettings(
+				url = normalizeUrl(directUrl),
+				username = configuredUsername,
+				password = configuredPassword,
+			)
+		}
+
 		val resource = resourceLoader.getResource(configLocation)
 		require(resource.exists()) {
 			"Missing database configuration: $configLocation"
@@ -66,14 +84,16 @@ class R2dbcDatabaseConfiguration(
 			"Database URL in $configLocation must start with jdbc: or r2dbc:"
 		}
 		return ConnectionSettings(
-			url = if (configuredUrl.startsWith("jdbc:")) {
-				"r2dbc:" + configuredUrl.removePrefix("jdbc:")
-			} else {
-				configuredUrl
-			},
+			url = normalizeUrl(configuredUrl),
 			username = username,
 			password = password,
 		)
+	}
+
+	private fun normalizeUrl(url: String): String = if (url.startsWith("jdbc:")) {
+		"r2dbc:" + url.removePrefix("jdbc:")
+	} else {
+		url
 	}
 
 	private companion object {

@@ -9,6 +9,8 @@ import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.util.Locale;
 import java.util.Optional;
@@ -22,6 +24,8 @@ public final class AvatarCache {
     public static final long MAX_AVATAR_BYTES = 1024L * 1024L;
     private static final long DEFAULT_CACHE_TTL_MILLIS = Duration.ofDays(1).toMillis();
     private static final Pattern MINECRAFT_NAME = Pattern.compile("^[A-Za-z0-9_]{3,16}$");
+    private static final Pattern CACHE_KEY = Pattern.compile("^[A-Za-z0-9_-]{1,100}$");
+    private static final String SPECIAL_KEY_PREFIX = "special-";
     private static final Request REQUEST = new Request();
     private static final ConcurrentHashMap<String, CompletableFuture<Path>> IN_FLIGHT = new ConcurrentHashMap<>();
 
@@ -52,7 +56,14 @@ public final class AvatarCache {
     }
 
     public static boolean isFresh(String name) {
-        Optional<Path> cached = cachedPath(name).filter(Files::isRegularFile);
+        if (!isValidName(name)) {
+            return false;
+        }
+        return isFreshKey(cacheKey(name));
+    }
+
+    public static boolean isFreshKey(String key) {
+        Optional<Path> cached = cachedPathForKey(key).filter(Files::isRegularFile);
         if (cached.isEmpty()) {
             return false;
         }
@@ -70,7 +81,11 @@ public final class AvatarCache {
     }
 
     public static byte[] read(String name) throws IOException {
-        Optional<Path> path = getCachedPath(name);
+        return readKey(cacheKey(name));
+    }
+
+    public static byte[] readKey(String key) throws IOException {
+        Optional<Path> path = cachedPathForKey(key).filter(Files::isRegularFile);
         if (path.isEmpty()) {
             return null;
         }
@@ -86,13 +101,21 @@ public final class AvatarCache {
     }
 
     public static String url(String name, String requestedBaseUrl) {
-        String key = cacheKey(name);
-        String encodedName = URLEncoder.encode(key, StandardCharsets.UTF_8);
+        return urlForKey(cacheKey(name), "name", requestedBaseUrl);
+    }
+
+    public static String urlForKey(String key, String requestedBaseUrl) {
+        validateCacheKey(key);
+        return urlForKey(key, "key", requestedBaseUrl);
+    }
+
+    private static String urlForKey(String key, String parameter, String requestedBaseUrl) {
+        String encodedKey = URLEncoder.encode(key, StandardCharsets.UTF_8);
         String publicBaseUrl = configuredPublicBaseUrl();
         if (publicBaseUrl.isEmpty() && requestedBaseUrl != null && !requestedBaseUrl.isBlank()) {
             publicBaseUrl = requestedBaseUrl.trim().replaceAll("/+$", "");
         }
-        String path = "/qo/download/avatar/image?name=" + encodedName;
+        String path = "/qo/download/avatar/image?" + parameter + "=" + encodedKey;
         return publicBaseUrl.isEmpty() ? path : publicBaseUrl + path;
     }
 
@@ -103,6 +126,18 @@ public final class AvatarCache {
         final String key;
         try {
             key = cacheKey(name);
+        } catch (IllegalArgumentException exception) {
+            return CompletableFuture.failedFuture(exception);
+        }
+        return cacheAsyncForKey(url, key);
+    }
+
+    public static CompletableFuture<Path> cacheAsyncForKey(String url, String key) {
+        if (url == null || url.isBlank()) {
+            return CompletableFuture.failedFuture(new IllegalArgumentException("Avatar URL is empty."));
+        }
+        try {
+            validateCacheKey(key);
         } catch (IllegalArgumentException exception) {
             return CompletableFuture.failedFuture(exception);
         }
@@ -123,6 +158,24 @@ public final class AvatarCache {
 
     public static void cache(String url, String name) throws Exception {
         cacheAsync(url, name).get();
+    }
+
+    public static String externalKey(String url) {
+        if (url == null || url.isBlank()) {
+            throw new IllegalArgumentException("Avatar URL is empty.");
+        }
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                    .digest(url.getBytes(StandardCharsets.UTF_8));
+            StringBuilder hex = new StringBuilder(SPECIAL_KEY_PREFIX.length() + digest.length * 2);
+            hex.append(SPECIAL_KEY_PREFIX);
+            for (byte value : digest) {
+                hex.append(String.format(Locale.ROOT, "%02x", value & 0xff));
+            }
+            return hex.toString();
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("SHA-256 is unavailable", exception);
+        }
     }
 
     private static CompletableFuture<Path> startCache(String url, String key) {
@@ -172,7 +225,14 @@ public final class AvatarCache {
         if (!isValidName(name)) {
             return Optional.empty();
         }
-        return Optional.of(pathForKey(cacheDirectory, cacheKey(name)));
+        return cachedPathForKey(cacheKey(name));
+    }
+
+    private static Optional<Path> cachedPathForKey(String key) {
+        if (!isValidCacheKey(key)) {
+            return Optional.empty();
+        }
+        return Optional.of(pathForKey(cacheDirectory, key));
     }
 
     private static Path ensureDirectory() throws IOException {
@@ -193,6 +253,16 @@ public final class AvatarCache {
             throw new IllegalArgumentException("Invalid Minecraft username.");
         }
         return name.toLowerCase(Locale.ROOT);
+    }
+
+    public static boolean isValidCacheKey(String key) {
+        return key != null && CACHE_KEY.matcher(key).matches();
+    }
+
+    private static void validateCacheKey(String key) {
+        if (!isValidCacheKey(key)) {
+            throw new IllegalArgumentException("Invalid avatar cache key.");
+        }
     }
 
     private static Path configuredCacheDirectory() {

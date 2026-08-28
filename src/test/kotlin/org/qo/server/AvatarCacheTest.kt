@@ -82,5 +82,19 @@ class AvatarCacheTest {
         assertTrue(AvatarCache.has("Alex_123"))
     }
 
+    @Test
+    fun `external special avatar uses an isolated cache key`() {
+        val sourceUrl = "https://bucket.glowingstone.cn/avatars/pixel_artworks/koishi.png"
+        val key = AvatarCache.externalKey(sourceUrl)
+
+        assertTrue(AvatarCache.isValidCacheKey(key))
+        AvatarCache.cacheAsyncForKey(downloadUrl(), key).join()
+
+        assertTrue(AvatarCache.isFreshKey(key))
+        assertEquals(payload.toList(), AvatarCache.readKey(key)!!.toList())
+        assertEquals("/qo/download/avatar/image?key=$key", AvatarCache.urlForKey(key, null))
+        assertFalse(AvatarCache.has("glowingstone124"))
+    }
+
     private fun downloadUrl(): String = "http://127.0.0.1:${server.address.port}/avatar"
 }
