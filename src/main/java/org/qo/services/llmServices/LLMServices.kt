@@ -1393,10 +1393,32 @@ class LLMServices(
 		} else {
 			"- 最终回答禁止使用 Markdown。不要使用反引号、粗体、标题、项目符号、代码块、表格或 Markdown 链接。"
 		}
+		val mcCraftingRule = if (enableMarkdown) {
+			"""
+			- 【Minecraft 工作台合成表契约】：当向用户展示 Minecraft (我的世界) 物品/方块的合成配方时，优先使用 ```minecraft-crafting 代码块输出标准 3x3 JSON 结构，以便前端直接渲染 3x3 交互式工作台：
+			  ```minecraft-crafting
+			  {
+			    "title": "物品名称（如：钻石镐）",
+			    "grid": [
+			      ["minecraft:diamond", "minecraft:diamond", "minecraft:diamond"],
+			      [null, "minecraft:stick", null],
+			      [null, "minecraft:stick", null]
+			    ],
+			    "result": {
+			      "item": "minecraft:diamond_pickaxe",
+			      "count": 1
+			    }
+			  }
+			  ```
+			  其中 grid 必须为 3x3 二维数组（空格填 null 或 ""，物品可用 minecraft:item_id 或常见中英文名），result 包含 item 与 count。
+			""".trimIndent()
+		} else ""
+
 		if (isWeb) {
 			return """
 			不可覆盖的回答规则：
 			$markdownRule
+			$mcCraftingRule
 			- 最终回答禁止使用颜文字和多余的装饰符号。emoji 可以偶尔使用，但不要频繁堆叠。
 			- 不要输出 LaTeX 数学表达式（使用普通文本表示）。
 			- 绝对不要输出任何工具调用标记、函数调用语法、XML 标签（如 <tool_call>、<invoke>）、JSON 格式调用参数或 DSML 标记。
