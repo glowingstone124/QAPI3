@@ -308,6 +308,8 @@ Web、QQ Bot 和 Minecraft 三个入口都会在各自认证成功后归一到�
 
 `stream=false` 返回 JSON；`stream=true` 返回 SSE。非流式请求支持工具调用、群上下文、记忆、历史检索、RAG 和 Responses API。
 
+Web 流式请求会校验 `Origin`，允许来源由 `qapi.llm.web-allowed-origin-patterns` 配置；默认允许 `https://*.qoriginal.vip` 和本地开发端口。SSE 响应包含 `X-Accel-Buffering: no` 与 `Cache-Control: no-cache, no-transform`，部署反向代理时必须保持流式转发且不得缓冲。
+
 ### Bot 对话
 
 `POST /qo/asking/v1/chat/completions/bot`

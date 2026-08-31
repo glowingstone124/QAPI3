@@ -43,6 +43,7 @@ class LLMControllerQuotaTest {
         webTestClient.post()
             .uri("/qo/asking/v1/chat/completions?model=fast")
             .header("Authorization", "Bearer login-token")
+            .header("Origin", "http://localhost:8080")
             .contentType(MediaType.APPLICATION_JSON)
             .bodyValue("""{"stream":true,"messages":[{"role":"user","content":"hello"}]}""")
             .exchange()
@@ -53,6 +54,20 @@ class LLMControllerQuotaTest {
             .expectHeader().exists("Retry-After")
             .expectBody()
             .jsonPath("$.error.code").isEqualTo("daily_quota_exceeded")
+    }
+
+    @Test
+    fun `stream endpoint rejects an untrusted web origin`() = runBlocking {
+        webTestClient.post()
+            .uri("/qo/asking/v1/chat/completions?model=fast")
+            .header("Authorization", "Bearer login-token")
+            .header("Origin", "https://untrusted.example")
+            .contentType(MediaType.APPLICATION_JSON)
+            .bodyValue("""{"stream":true,"messages":[{"role":"user","content":"hello"}]}""")
+            .exchange()
+            .expectStatus().isForbidden
+            .expectBody()
+            .jsonPath("$.error.code").isEqualTo("origin_not_allowed")
     }
 
     @Test

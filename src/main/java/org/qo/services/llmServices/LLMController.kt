@@ -10,6 +10,8 @@ import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
 import org.springframework.http.ResponseEntity
 import org.springframework.http.codec.ServerSentEvent
+import org.springframework.beans.factory.annotation.Value
+import org.springframework.util.PatternMatchUtils
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.RequestBody
@@ -20,11 +22,22 @@ import org.springframework.web.bind.annotation.RestController
 
 @RestController
 @RequestMapping("/qo/asking")
-class LLMController(private val llmServices: LLMServices) {
+class LLMController(
+	private val llmServices: LLMServices,
+	@Value("\${qapi.llm.web-allowed-origin-patterns:https://*.qoriginal.vip,http://localhost:*,http://127.0.0.1:*}")
+	allowedWebOriginPatterns: String,
+) {
+	private val allowedWebOriginPatterns = allowedWebOriginPatterns
+		.split(',')
+		.map(String::trim)
+		.filter(String::isNotEmpty)
+		.toTypedArray()
+
 	@PostMapping("/v1/chat/completions", produces = [MediaType.APPLICATION_JSON_VALUE, MediaType.TEXT_EVENT_STREAM_VALUE])
 	suspend fun chatCompletions(
 		@RequestHeader("token", required = false) token: String?,
 		@RequestHeader(HttpHeaders.AUTHORIZATION, required = false) authorization: String?,
+		@RequestHeader(HttpHeaders.ORIGIN, required = false) origin: String?,
 		@RequestHeader("X-Request-ID", required = false) requestId: String?,
 		@RequestParam(name = "model", required = false, defaultValue = "fast") model: String = "fast",
 		@RequestBody body: String,
@@ -35,6 +48,12 @@ class LLMController(private val llmServices: LLMServices) {
 		val stream = runCatching {
 			com.google.gson.JsonParser.parseString(body).asJsonObject.get("stream")?.asBoolean == true
 		}.getOrDefault(false)
+		if (stream && !isAllowedWebOrigin(origin)) {
+			return jsonResponse(
+				"""{"error":{"message":"不允许的 Web 来源","type":"origin_not_allowed","code":"origin_not_allowed"}}""",
+				HttpStatus.FORBIDDEN,
+			)
+		}
 		val useModel = llmServices.modelPresetFromRequest(model)
 			?: return jsonResponse("""{"error":{"message":"请求的模型不存在","type":"invalid_model","code":"invalid_model"}}""", HttpStatus.BAD_REQUEST)
 		return if (stream) {
@@ -52,6 +71,11 @@ class LLMController(private val llmServices: LLMServices) {
 			}
 			jsonResponse(result.body, HttpStatus.valueOf(result.status), result.quota)
 		}
+	}
+
+	private fun isAllowedWebOrigin(origin: String?): Boolean {
+		if (origin.isNullOrBlank() || allowedWebOriginPatterns.isEmpty()) return false
+		return PatternMatchUtils.simpleMatch(allowedWebOriginPatterns, origin.trim())
 	}
 
 	@GetMapping("/v1/quota", produces = [MediaType.APPLICATION_JSON_VALUE])
@@ -150,6 +174,8 @@ class LLMController(private val llmServices: LLMServices) {
 
 	private fun streamResponse(result: LLMStreamResult): ResponseEntity<Flow<ServerSentEvent<String>>> {
 		val builder = ResponseEntity.status(result.status).contentType(MediaType.TEXT_EVENT_STREAM)
+		builder.header(HttpHeaders.CACHE_CONTROL, "no-cache, no-transform")
+		builder.header("X-Accel-Buffering", "no")
 		applyQuotaHeaders(builder, result.quota, result.status)
 		return builder.body(streamEvents(result.chunks))
 	}

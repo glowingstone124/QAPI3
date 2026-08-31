@@ -516,6 +516,7 @@ class LLMServices(
 			val response = client.post(provider.chatCompletionsUrl) {
 				logUpstreamRequest(source, request.body, provider, "chat-completions")
 				header(HttpHeaders.Authorization, "Bearer ${provider.apiToken}")
+				header(HttpHeaders.Accept, ContentType.Text.EventStream.toString())
 				contentType(ContentType.Application.Json)
 				debugPrompt(source, request.body)
 				setBody(request.body)
@@ -531,6 +532,22 @@ class LLMServices(
 
 			var latestUsage: Usage? = null
 			val assistantContent = StringBuilder()
+			if (response.contentType()?.match(ContentType.Text.EventStream) != true) {
+				val body = response.bodyAsText()
+				val converted = nonStreamCompletionToStreamChunk(body)
+				if (converted == null) {
+					dailyQuotaService.refund(quotaReservation)
+					updateAccessRecord(requestId, "failed", errorMessage = body.take(512))
+					emit(normalizeUpstreamError(body))
+					return@flow
+				}
+				latestUsage = parseUsage(body)
+				assistantContent.append(converted.second)
+				emit(converted.first)
+				updateAccessRecord(requestId, "completed", latestUsage)
+				recordConversationAnswer(requester, request.userContent, assistantContent.toString(), provider)
+				return@flow
+			}
 			response.bodyAsChannel().toInputStream().bufferedReader().use { reader ->
 				while (true) {
 					val line = reader.readLine() ?: break
@@ -541,7 +558,7 @@ class LLMServices(
 						parseUsage(data)?.let { latestUsage = it }
 						parseStreamAssistantContent(data)?.let(assistantContent::append)
 					}
-					emit(data)
+					if (data != "[DONE]") emit(data)
 				}
 			}
 			updateAccessRecord(requestId, "completed", latestUsage)
@@ -556,6 +573,42 @@ class LLMServices(
 			emit(errorJson("upstream_error", e.message ?: "LLM 上游请求失败"))
 		}
 	}
+
+	private fun nonStreamCompletionToStreamChunk(body: String): Pair<String, String>? = runCatching {
+		val root = jsonParser.parse(body).asJsonObject
+		val choice = root.getAsJsonArray("choices")?.firstOrNull()?.asJsonObject
+			?: error("upstream response has no choices")
+		val message = choice.getAsJsonObject("message")
+			?: error("upstream response has no assistant message")
+		val content = message.get("content")
+			?.takeIf { !it.isJsonNull }
+			?.let(::extractTextContent)
+			?: error("upstream response has no assistant content")
+		val chunk = JsonObject().apply {
+			root.get("id")?.let { add("id", it.deepCopy()) }
+			addProperty("object", "chat.completion.chunk")
+			root.get("created")?.let { add("created", it.deepCopy()) }
+			root.get("model")?.let { add("model", it.deepCopy()) }
+			add("choices", JsonArray().apply {
+				add(JsonObject().apply {
+					add("index", choice.get("index")?.deepCopy() ?: JsonPrimitive(0))
+					add("delta", JsonObject().apply {
+						addProperty("role", message.get("role")?.asString ?: "assistant")
+						addProperty("content", content)
+					})
+					add("finish_reason", choice.get("finish_reason")?.deepCopy())
+				})
+			})
+			root.get("usage")?.let { add("usage", it.deepCopy()) }
+		}
+		chunk.toString() to content
+	}.getOrNull()
+
+	private fun normalizeUpstreamError(body: String): String = runCatching {
+		val root = jsonParser.parse(body).asJsonObject
+		if (root.has("error")) root.toString()
+		else errorJson("upstream_error", body.take(256))
+	}.getOrElse { errorJson("upstream_error", body.take(256)) }
 
 	private suspend fun normalizeRequest(
 		body: String,
