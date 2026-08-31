@@ -113,9 +113,9 @@ class LLMController(
 	): ResponseEntity<String> {
 		val requestToken = AuthTokens.resolve(token, authorization)
 			?: return jsonResponse("""{"error":{"message":"缺少或无效的令牌","type":"invalid_token","code":"invalid_token"}}""", HttpStatus.UNAUTHORIZED)
-		val user = llmServices.authenticate(requestToken)
+		val user = llmServices.authenticateWeb(requestToken)
 			?: return jsonResponse("""{"error":{"message":"权限验证失败","type":"invalid_token","code":"invalid_token"}}""", HttpStatus.UNAUTHORIZED)
-		val list = kotshiConversationService.listConversations(user.uid)
+		val list = kotshiConversationService.listConversations(user.qqUid)
 		return ResponseEntity.ok(gson.toJson(list))
 	}
 
@@ -127,13 +127,13 @@ class LLMController(
 	): ResponseEntity<String> {
 		val requestToken = AuthTokens.resolve(token, authorization)
 			?: return jsonResponse("""{"error":{"message":"缺少或无效的令牌","type":"invalid_token","code":"invalid_token"}}""", HttpStatus.UNAUTHORIZED)
-		val user = llmServices.authenticate(requestToken)
+		val user = llmServices.authenticateWeb(requestToken)
 			?: return jsonResponse("""{"error":{"message":"权限验证失败","type":"invalid_token","code":"invalid_token"}}""", HttpStatus.UNAUTHORIZED)
 		val json = runCatching { com.google.gson.JsonParser.parseString(body.orEmpty()).asJsonObject }.getOrNull()
 		val title = json?.get("title")?.takeIf { !it.isJsonNull }?.asString
 		val model = json?.get("model")?.takeIf { !it.isJsonNull }?.asString ?: "fast"
 		val customId = json?.get("id")?.takeIf { !it.isJsonNull }?.asString
-		val conv = kotshiConversationService.createConversation(user.uid, title, model, customId)
+		val conv = kotshiConversationService.createConversation(user.qqUid, title, model, customId)
 		return ResponseEntity.ok(gson.toJson(conv))
 	}
 
@@ -145,9 +145,9 @@ class LLMController(
 	): ResponseEntity<String> {
 		val requestToken = AuthTokens.resolve(token, authorization)
 			?: return jsonResponse("""{"error":{"message":"缺少或无效的令牌","type":"invalid_token","code":"invalid_token"}}""", HttpStatus.UNAUTHORIZED)
-		val user = llmServices.authenticate(requestToken)
+		val user = llmServices.authenticateWeb(requestToken)
 			?: return jsonResponse("""{"error":{"message":"权限验证失败","type":"invalid_token","code":"invalid_token"}}""", HttpStatus.UNAUTHORIZED)
-		val messages = kotshiConversationService.getMessages(user.uid, id)
+		val messages = kotshiConversationService.getMessages(user.qqUid, id)
 		return ResponseEntity.ok(gson.toJson(messages))
 	}
 
@@ -159,9 +159,9 @@ class LLMController(
 	): ResponseEntity<String> {
 		val requestToken = AuthTokens.resolve(token, authorization)
 			?: return jsonResponse("""{"error":{"message":"缺少或无效的令牌","type":"invalid_token","code":"invalid_token"}}""", HttpStatus.UNAUTHORIZED)
-		val user = llmServices.authenticate(requestToken)
+		val user = llmServices.authenticateWeb(requestToken)
 			?: return jsonResponse("""{"error":{"message":"权限验证失败","type":"invalid_token","code":"invalid_token"}}""", HttpStatus.UNAUTHORIZED)
-		val deleted = kotshiConversationService.deleteConversation(user.uid, id)
+		val deleted = kotshiConversationService.deleteConversation(user.qqUid, id)
 		return ResponseEntity.ok("""{"success":$deleted}""")
 	}
 
@@ -174,12 +174,12 @@ class LLMController(
 	): ResponseEntity<String> {
 		val requestToken = AuthTokens.resolve(token, authorization)
 			?: return jsonResponse("""{"error":{"message":"缺少或无效的令牌","type":"invalid_token","code":"invalid_token"}}""", HttpStatus.UNAUTHORIZED)
-		val user = llmServices.authenticate(requestToken)
+		val user = llmServices.authenticateWeb(requestToken)
 			?: return jsonResponse("""{"error":{"message":"权限验证失败","type":"invalid_token","code":"invalid_token"}}""", HttpStatus.UNAUTHORIZED)
 		val json = runCatching { com.google.gson.JsonParser.parseString(body).asJsonObject }.getOrNull()
 		val title = json?.get("title")?.takeIf { !it.isJsonNull }?.asString
 		val model = json?.get("model")?.takeIf { !it.isJsonNull }?.asString
-		val updated = kotshiConversationService.updateConversation(user.uid, id, title, model)
+		val updated = kotshiConversationService.updateConversation(user.qqUid, id, title, model)
 		return ResponseEntity.ok("""{"success":$updated}""")
 	}
 

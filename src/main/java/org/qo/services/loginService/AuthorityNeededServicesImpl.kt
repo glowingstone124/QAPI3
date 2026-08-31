@@ -54,6 +54,30 @@ class AuthorityNeededServicesImpl(
 
 	suspend fun getAccountInfo(token: String): String {
 		val (accountName, errorCode) = login.validate(token)
+		if (accountName?.startsWith(QqLoginService.GUEST_PREFIX) == true) {
+			val qq = accountName.removePrefix(QqLoginService.GUEST_PREFIX).toLongOrNull()
+				?: return JsonObject().apply {
+					addProperty("error", 1)
+					addProperty("message", "Invalid guest token.")
+				}.toString()
+			val boundAccount = userORM.readAsync(qq)
+			if (boundAccount == null) {
+				return JsonObject().apply {
+					addProperty("username", "QQ $qq")
+					addProperty("uid", qq)
+					addProperty("playtime", 0)
+					addProperty("profile_id", "")
+					addProperty("account_type", "guest")
+				}.toString()
+			}
+			return JsonObject().apply {
+				addProperty("username", boundAccount.username)
+				addProperty("uid", boundAccount.uid)
+				addProperty("playtime", boundAccount.playtime)
+				addProperty("profile_id", boundAccount.profile_id)
+				addProperty("account_type", "qo")
+			}.toString()
+		}
 		val precheckResult = doPrecheck(accountName, errorCode)
 		if (precheckResult != null) {
 			return precheckResult

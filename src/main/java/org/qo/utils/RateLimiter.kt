@@ -21,6 +21,8 @@ class RateLimiter {
 	)
 
 	private val rules = listOf(
+		Rule("/qo/game/qq-login/confirm", 180, 60),
+		Rule("/qo/game/qq-login", 30, 60),
 		Rule("/qo/game/login", 100, 60),
 		Rule("/qo/upload/registry", 10, 30),
 		Rule("/qo/upload/password", 10, 30),

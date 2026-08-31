@@ -38,6 +38,8 @@ import org.qo.orm.UserORM
 import org.qo.redis.DatabaseType
 import org.qo.redis.Redis
 import org.qo.services.loginService.AuthorityNeededServicesImpl
+import org.qo.services.loginService.Login
+import org.qo.services.loginService.QqLoginService
 import org.qo.services.messageServices.Message
 import org.qo.services.messageServices.Msg
 import org.springframework.boot.context.event.ApplicationReadyEvent
@@ -53,6 +55,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 @Service
 class LLMServices(
 	private val authorityNeededServicesImpl: AuthorityNeededServicesImpl,
+	private val login: Login,
 	private val nodes: Nodes,
 	private val database: ReactiveDatabase,
 	private val ragService: RAGService,
@@ -144,10 +147,37 @@ class LLMServices(
 		return user
 	}
 
+	suspend fun authenticateWeb(token: String): LLMPrincipal? {
+		val (identity, errorCode) = login.validate(token)
+		if (errorCode != 0 || identity.isNullOrBlank()) return null
+		if (identity.startsWith(QqLoginService.GUEST_PREFIX)) {
+			val qqUid = identity.removePrefix(QqLoginService.GUEST_PREFIX).toLongOrNull()?.takeIf { it > 0 }
+				?: return null
+			val account = userORM.readAsync(qqUid)
+			if (account?.frozen == true) return null
+			return LLMPrincipal(
+				qqUid = qqUid,
+				displayName = account?.username ?: "QQ $qqUid",
+				source = LLMSource.WEB,
+				sourceIdentity = identity,
+				hasAccount = account != null,
+			)
+		}
+		val account = userORM.readAsync(identity) ?: return null
+		if (account.frozen == true) return null
+		return LLMPrincipal(
+			qqUid = account.uid,
+			displayName = account.username,
+			source = LLMSource.WEB,
+			sourceIdentity = account.username,
+			hasAccount = true,
+		)
+	}
+
 	suspend fun quotaStatus(token: String): LLMNonStreamResult {
-		val user = authenticate(token)
+		val principal = authenticateWeb(token)
 			?: return LLMNonStreamResult(401, errorJson("invalid_token", "权限验证失败"))
-		val quota = dailyQuotaService.snapshot(user.uid, hasAccount = true)
+		val quota = dailyQuotaService.snapshot(principal.qqUid, hasAccount = principal.hasAccount)
 		if (quota.status == LLMQuotaStatus.UNAVAILABLE) {
 			return LLMNonStreamResult(
 				503,
@@ -186,8 +216,7 @@ class LLMServices(
 		clientRequestId: String? = null,
 		conversationId: String? = null,
 	): LLMNonStreamResult {
-		val user = authenticate(token) ?: return LLMNonStreamResult(401, errorJson("invalid_token", "权限验证失败"))
-		val principal = LLMPrincipal(user.uid, user.username, LLMSource.WEB, user.username, hasAccount = true)
+		val principal = authenticateWeb(token) ?: return LLMNonStreamResult(401, errorJson("invalid_token", "权限验证失败"))
 		val resolvedConvId = conversationId ?: extractConversationId(body)
 		val requester = principal.toRequester(conversationId = resolvedConvId, model = model)
 		val provider = providers.current()
@@ -239,9 +268,8 @@ class LLMServices(
 		clientRequestId: String? = null,
 		conversationId: String? = null,
 	): LLMStreamResult {
-		val user = authenticate(token)
+		val principal = authenticateWeb(token)
 			?: return LLMStreamResult(401, flowOfText(errorJson("invalid_token", "权限验证失败")))
-		val principal = LLMPrincipal(user.uid, user.username, LLMSource.WEB, user.username, hasAccount = true)
 		val resolvedConvId = conversationId ?: extractConversationId(body)
 		val requester = principal.toRequester(conversationId = resolvedConvId, model = model)
 		val provider = providers.current()

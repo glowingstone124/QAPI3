@@ -16,7 +16,7 @@ class GetUserQuotaToolTest {
 	fun `tool returns remaining quota and guest details when user is not registered`() = runBlocking {
 		val store = InMemoryQuotaStore()
 		val quotaService = LLMDailyQuotaService(store, 50, 20, "Asia/Shanghai")
-		val now = Instant.parse("2026-08-31T08:00:00Z")
+		val now = Instant.now()
 		val tool = GetUserQuotaTool(quotaService)
 
 		// Reserve 5 turns as guest
@@ -43,7 +43,7 @@ class GetUserQuotaToolTest {
 	fun `tool supports querying target_uid from args`() = runBlocking {
 		val store = InMemoryQuotaStore()
 		val quotaService = LLMDailyQuotaService(store, 50, 20, "Asia/Shanghai")
-		val now = Instant.parse("2026-08-31T08:00:00Z")
+		val now = Instant.now()
 		val tool = GetUserQuotaTool(quotaService)
 
 		val targetPrincipal = LLMPrincipal(888888L, "other", LLMSource.QQ, "888888", hasAccount = false)

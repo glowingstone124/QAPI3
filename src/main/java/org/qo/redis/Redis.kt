@@ -45,6 +45,28 @@ class Redis {
 		}
 	}
 
+	fun getAndDelete(key: String, database: Int): RedisResult<String?> {
+		return RedisResult {
+			if (!Configuration.EnableRedis) return@RedisResult null
+			pool?.resource?.use { jedis ->
+				jedis.select(database)
+				repeat(4) {
+					jedis.watch(key)
+					val value = jedis.get(key)
+					if (value == null) {
+						jedis.unwatch()
+						return@use null
+					}
+					val transaction = jedis.multi()
+					transaction.del(key)
+					if (transaction.exec() != null) return@use value
+				}
+				jedis.unwatch()
+				null
+			} ?: throw IllegalStateException("Redis pool is not initialized.")
+		}
+	}
+
 	fun exists(key: String, database: Int): RedisResult<Boolean> {
 		return RedisResult {
 			if (!Configuration.EnableRedis) return@RedisResult false
@@ -93,31 +115,29 @@ class Redis {
 			if (!Configuration.EnableRedis) return@RedisResult null
 			pool?.resource?.use { jedis ->
 				jedis.select(database)
-				val result = jedis.eval(
-					"""
-					if redis.call('EXISTS', KEYS[2]) == 1 then
-					  local current = tonumber(redis.call('GET', KEYS[1]) or '0')
-					  return {2, current}
-					end
-					local current = tonumber(redis.call('GET', KEYS[1]) or '0')
-					if current >= tonumber(ARGV[1]) then
-					  return {0, current}
-					end
-					current = redis.call('INCR', KEYS[1])
-					redis.call('EXPIREAT', KEYS[1], ARGV[2])
-					redis.call('SET', KEYS[2], 'reserved')
-					redis.call('EXPIREAT', KEYS[2], ARGV[2])
-					return {1, current}
-					""".trimIndent(),
-					listOf(quotaKey, requestKey),
-					listOf(limit.toString(), expiresAtEpochSeconds.toString()),
-				) as? List<*> ?: throw IllegalStateException("Unexpected Redis quota response")
-				AtomicQuotaResult(
-					status = (result.getOrNull(0) as? Number)?.toLong()
-						?: throw IllegalStateException("Missing Redis quota status"),
-					used = (result.getOrNull(1) as? Number)?.toLong()
-						?: throw IllegalStateException("Missing Redis quota usage"),
-				)
+				repeat(8) {
+					jedis.watch(quotaKey, requestKey)
+					val current = jedis.get(quotaKey)?.toLongOrNull() ?: 0L
+					if (jedis.exists(requestKey)) {
+						jedis.unwatch()
+						return@use AtomicQuotaResult(status = 2L, used = current)
+					}
+					if (current >= limit) {
+						jedis.unwatch()
+						return@use AtomicQuotaResult(status = 0L, used = current)
+					}
+					val transaction = jedis.multi()
+					transaction.incr(quotaKey)
+					transaction.expireAt(quotaKey, expiresAtEpochSeconds)
+					transaction.set(requestKey, "reserved")
+					transaction.expireAt(requestKey, expiresAtEpochSeconds)
+					val result = transaction.exec() ?: return@repeat
+					val used = (result.firstOrNull() as? Number)?.toLong()
+						?: throw IllegalStateException("Unexpected Redis quota response")
+					return@use AtomicQuotaResult(status = 1L, used = used)
+				}
+				jedis.unwatch()
+				throw IllegalStateException("Redis quota transaction was repeatedly contended")
 			} ?: throw IllegalStateException("Redis pool is not initialized.")
 		}
 	}
@@ -132,23 +152,27 @@ class Redis {
 			if (!Configuration.EnableRedis) return@RedisResult null
 			pool?.resource?.use { jedis ->
 				jedis.select(database)
-				val result = jedis.eval(
-					"""
-					if redis.call('GET', KEYS[2]) ~= 'reserved' then
-					  return tonumber(redis.call('GET', KEYS[1]) or '0')
-					end
-					local current = tonumber(redis.call('GET', KEYS[1]) or '0')
-					if current > 0 then
-					  current = redis.call('DECR', KEYS[1])
-					end
-					redis.call('SET', KEYS[2], 'refunded')
-					redis.call('EXPIREAT', KEYS[2], ARGV[1])
-					return current
-					""".trimIndent(),
-					listOf(quotaKey, requestKey),
-					listOf(expiresAtEpochSeconds.toString()),
-				) as? Number ?: throw IllegalStateException("Unexpected Redis quota refund response")
-				result.toLong()
+				repeat(8) {
+					jedis.watch(quotaKey, requestKey)
+					val current = jedis.get(quotaKey)?.toLongOrNull() ?: 0L
+					if (jedis.get(requestKey) != "reserved") {
+						jedis.unwatch()
+						return@use current
+					}
+					val transaction = jedis.multi()
+					if (current > 0L) transaction.decr(quotaKey)
+					transaction.set(requestKey, "refunded")
+					transaction.expireAt(requestKey, expiresAtEpochSeconds)
+					val result = transaction.exec() ?: return@repeat
+					return@use if (current > 0L) {
+						(result.firstOrNull() as? Number)?.toLong()
+							?: throw IllegalStateException("Unexpected Redis quota refund response")
+					} else {
+						0L
+					}
+				}
+				jedis.unwatch()
+				throw IllegalStateException("Redis quota refund transaction was repeatedly contended")
 			} ?: throw IllegalStateException("Redis pool is not initialized.")
 		}
 	}
