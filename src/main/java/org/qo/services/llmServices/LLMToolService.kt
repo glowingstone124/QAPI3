@@ -39,6 +39,7 @@ class LLMToolService(
 			"search_memory",
 			"forget_memory",
 			"get_remain_balance",
+			"get_user_quota",
 			"set_msg_emoji_like",
 		)
 		val byId = registeredTools.associateBy { it.id }

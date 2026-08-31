@@ -145,7 +145,7 @@ class LLMServices(
 	suspend fun quotaStatus(token: String): LLMNonStreamResult {
 		val user = authenticate(token)
 			?: return LLMNonStreamResult(401, errorJson("invalid_token", "权限验证失败"))
-		val quota = dailyQuotaService.snapshot(user.uid)
+		val quota = dailyQuotaService.snapshot(user.uid, hasAccount = true)
 		if (quota.status == LLMQuotaStatus.UNAVAILABLE) {
 			return LLMNonStreamResult(
 				503,
@@ -179,7 +179,7 @@ class LLMServices(
 
 	suspend fun completeChat(body: String, token: String, model: String, clientRequestId: String? = null): LLMNonStreamResult {
 		val user = authenticate(token) ?: return LLMNonStreamResult(401, errorJson("invalid_token", "权限验证失败"))
-		val principal = LLMPrincipal(user.uid, user.username, LLMSource.WEB, user.username)
+		val principal = LLMPrincipal(user.uid, user.username, LLMSource.WEB, user.username, hasAccount = true)
 		val requester = principal.toRequester()
 		val provider = providers.current()
 		if (provider.apiToken.isBlank()) {
@@ -192,7 +192,7 @@ class LLMServices(
 			return LLMNonStreamResult(429, errorJson("rate_limited", "请求过于频繁"))
 		}
 		val quota = reserveQuota(principal, clientRequestId)
-		quotaFailure(quota)?.let {
+		quotaFailure(quota, principal)?.let {
 			updateAccessRecord(requestId, "rejected", errorMessage = it.body.take(512))
 			return it
 		}
@@ -221,7 +221,7 @@ class LLMServices(
 	suspend fun streamChat(body: String, token: String, model: String, clientRequestId: String? = null): LLMStreamResult {
 		val user = authenticate(token)
 			?: return LLMStreamResult(401, flowOfText(errorJson("invalid_token", "权限验证失败")))
-		val principal = LLMPrincipal(user.uid, user.username, LLMSource.WEB, user.username)
+		val principal = LLMPrincipal(user.uid, user.username, LLMSource.WEB, user.username, hasAccount = true)
 		val requester = principal.toRequester()
 		val provider = providers.current()
 		if (provider.apiToken.isBlank()) {
@@ -234,8 +234,8 @@ class LLMServices(
 			return LLMStreamResult(429, flowOfText(errorJson("rate_limited", "请求过于频繁")))
 		}
 		val quota = reserveQuota(principal, clientRequestId)
-		quotaStreamFailure(quota)?.let {
-			updateAccessRecord(requestId, "rejected", errorMessage = quotaErrorMessage(quota.status))
+		quotaStreamFailure(quota, principal)?.let {
+			updateAccessRecord(requestId, "rejected", errorMessage = quotaErrorMessage(quota.status, principal))
 			return it
 		}
 		val reservation = requireNotNull(quota.reservation)
@@ -266,8 +266,10 @@ class LLMServices(
 		if (qqUid in blockedQqUids) {
 			return LLMNonStreamResult(403, errorJson("blocked_user", "该用户暂时不能使用此功能"))
 		}
-		val username = qqName?.takeIf { it.isNotBlank() }?.let { decodeHeader(it) } ?: "qq:$qqUid"
-		val principal = LLMPrincipal(qqUid, username, LLMSource.QQ, qqUid.toString())
+		val user = userORM.readAsync(qqUid)
+		val hasAccount = user != null
+		val username = qqName?.takeIf { it.isNotBlank() }?.let { decodeHeader(it) } ?: (user?.username ?: "qq:$qqUid")
+		val principal = LLMPrincipal(qqUid, username, LLMSource.QQ, qqUid.toString(), hasAccount = hasAccount)
 		val requester = principal.toRequester(groupId = qqGroupId, messageId = qqMessageId)
 		val provider = providers.current()
 		val model = provider.resolvePreset(model)
@@ -283,7 +285,7 @@ class LLMServices(
 			return LLMNonStreamResult(429, errorJson("rate_limited", "请求过于频繁"))
 		}
 		val quota = reserveQuota(principal, clientRequestId)
-		quotaFailure(quota)?.let {
+		quotaFailure(quota, principal)?.let {
 			updateAccessRecord(requestId, "rejected", errorMessage = it.body.take(512))
 			return it
 		}
@@ -344,6 +346,7 @@ class LLMServices(
 			"$playerName/qq:${user.uid}",
 			LLMSource.MINECRAFT,
 			playerName,
+			hasAccount = true,
 		)
 		val requester = principal.toRequester(
 			groupId = groupId,
@@ -364,7 +367,7 @@ class LLMServices(
 			return LLMNonStreamResult(429, errorJson("rate_limited", "请求过于频繁"))
 		}
 		val quota = reserveQuota(principal, clientRequestId)
-		quotaFailure(quota)?.let {
+		quotaFailure(quota, principal)?.let {
 			updateAccessRecord(requestId, "rejected", errorMessage = it.body.take(512))
 			return it
 		}
@@ -961,24 +964,28 @@ class LLMServices(
 		}
 	}
 
-	private fun quotaFailure(decision: LLMQuotaDecision): LLMNonStreamResult? {
+	private fun quotaFailure(decision: LLMQuotaDecision, principal: LLMPrincipal): LLMNonStreamResult? {
 		val (status, code) = when (decision.status) {
 			LLMQuotaStatus.ACCEPTED -> return null
 			LLMQuotaStatus.EXCEEDED -> 429 to "daily_quota_exceeded"
 			LLMQuotaStatus.DUPLICATE -> 409 to "duplicate_request"
 			LLMQuotaStatus.UNAVAILABLE -> 503 to "quota_unavailable"
 		}
-		return LLMNonStreamResult(status, errorJson(code, quotaErrorMessage(decision.status)), decision.view)
+		return LLMNonStreamResult(status, errorJson(code, quotaErrorMessage(decision.status, principal)), decision.view)
 	}
 
-	private fun quotaStreamFailure(decision: LLMQuotaDecision): LLMStreamResult? {
-		val failure = quotaFailure(decision) ?: return null
+	private fun quotaStreamFailure(decision: LLMQuotaDecision, principal: LLMPrincipal): LLMStreamResult? {
+		val failure = quotaFailure(decision, principal) ?: return null
 		return LLMStreamResult(failure.status, flowOfText(failure.body), failure.quota)
 	}
 
-	private fun quotaErrorMessage(status: LLMQuotaStatus): String = when (status) {
+	private fun quotaErrorMessage(status: LLMQuotaStatus, principal: LLMPrincipal): String = when (status) {
 		LLMQuotaStatus.ACCEPTED -> ""
-		LLMQuotaStatus.EXCEEDED -> "今天的对话额度已经用完"
+		LLMQuotaStatus.EXCEEDED -> if (principal.hasAccount) {
+			"今天的对话额度已经用完"
+		} else {
+			"今天的游客对话额度已用完（每日 20 轮）。加入或注册 QO 账户可获取更多额度（每日 50 轮）！"
+		}
 		LLMQuotaStatus.DUPLICATE -> "该请求已经提交，请勿重复发送"
 		LLMQuotaStatus.UNAVAILABLE -> "额度服务暂时不可用，请稍后重试"
 	}

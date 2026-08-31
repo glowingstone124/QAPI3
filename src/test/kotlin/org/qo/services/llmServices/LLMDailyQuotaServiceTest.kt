@@ -100,6 +100,37 @@ class LLMDailyQuotaServiceTest {
         assertEquals(LLMQuotaStatus.UNAVAILABLE, decision.status)
     }
 
+    @Test
+    fun `guest users have 20 rounds limit while registered users have 50 rounds limit`() {
+        val service = LLMDailyQuotaService(InMemoryQuotaStore(), 50, 20, "Asia/Shanghai")
+        val now = Instant.parse("2026-08-31T08:00:00Z")
+        val guestPrincipal = LLMPrincipal(999999L, "guest", LLMSource.QQ, "guest", hasAccount = false)
+
+        for (i in 1..20) {
+            val decision = service.reserve(guestPrincipal, "guest-req-$i", now)
+            assertEquals(LLMQuotaStatus.ACCEPTED, decision.status)
+            assertEquals(20, decision.view.limit)
+            assertEquals(i, decision.view.used)
+            assertEquals(20 - i, decision.view.remaining)
+        }
+
+        val exceeded = service.reserve(guestPrincipal, "guest-req-21", now)
+        assertEquals(LLMQuotaStatus.EXCEEDED, exceeded.status)
+        assertEquals(20, exceeded.view.limit)
+        assertEquals(20, exceeded.view.used)
+        assertEquals(0, exceeded.view.remaining)
+
+        val guestSnapshot = service.snapshot(999999L, hasAccount = false, now = now)
+        assertEquals(LLMQuotaStatus.EXCEEDED, guestSnapshot.status)
+        assertEquals(20, guestSnapshot.view.limit)
+        assertEquals(0, guestSnapshot.view.remaining)
+
+        val userSnapshot = service.snapshot(999999L, hasAccount = true, now = now)
+        assertEquals(LLMQuotaStatus.ACCEPTED, userSnapshot.status)
+        assertEquals(50, userSnapshot.view.limit)
+        assertEquals(30, userSnapshot.view.remaining)
+    }
+
     private fun principal(source: LLMSource) = LLMPrincipal(
         qqUid = 123456L,
         displayName = "tester",

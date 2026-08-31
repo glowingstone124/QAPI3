@@ -23,6 +23,7 @@ data class LLMPrincipal(
     val displayName: String,
     val source: LLMSource,
     val sourceIdentity: String,
+    val hasAccount: Boolean = true,
 )
 
 enum class LLMQuotaStatus {
@@ -117,10 +118,21 @@ class RedisLLMQuotaStore : LLMQuotaStore {
 class LLMDailyQuotaService(
     private val store: LLMQuotaStore,
     @Value("\${qapi.llm.daily-limit:50}") configuredDailyLimit: Int,
-    @Value("\${qapi.llm.quota-zone:Asia/Shanghai}") quotaZoneName: String,
+    @Value("\${qapi.llm.guest-daily-limit:20}") configuredGuestDailyLimit: Int = 20,
+    @Value("\${qapi.llm.quota-zone:Asia/Shanghai}") quotaZoneName: String = "Asia/Shanghai",
 ) {
     val dailyLimit = configuredDailyLimit.coerceAtLeast(1)
+    val guestDailyLimit = configuredGuestDailyLimit.coerceAtLeast(1)
     private val quotaZone = ZoneId.of(quotaZoneName)
+
+    constructor(
+        store: LLMQuotaStore,
+        configuredDailyLimit: Int,
+        quotaZoneName: String,
+    ) : this(store, configuredDailyLimit, 20, quotaZoneName)
+
+    fun effectiveLimit(hasAccount: Boolean): Int =
+        if (hasAccount) dailyLimit else guestDailyLimit
 
     fun reserve(
         principal: LLMPrincipal,
@@ -128,15 +140,16 @@ class LLMDailyQuotaService(
         now: Instant = Instant.now(),
     ): LLMQuotaDecision {
         require(principal.qqUid > 0) { "QQ UID must be positive" }
+        val limit = effectiveLimit(principal.hasAccount)
         val window = window(now)
         val quotaKey = quotaKey(principal.qqUid, window.date)
         val requestKey = requestKey(principal, requestId, window.date)
-        val stored = store.reserve(quotaKey, requestKey, dailyLimit, window.expiresAtEpochSeconds)
+        val stored = store.reserve(quotaKey, requestKey, limit, window.expiresAtEpochSeconds)
             ?: return LLMQuotaDecision(
                 LLMQuotaStatus.UNAVAILABLE,
-                view(0, window.resetAtEpochSeconds),
+                view(0, limit, window.resetAtEpochSeconds),
             )
-        val quotaView = view(stored.used, window.resetAtEpochSeconds)
+        val quotaView = view(stored.used, limit, window.resetAtEpochSeconds)
         val reservation = if (stored.status == LLMQuotaStatus.ACCEPTED) {
             LLMQuotaReservation(quotaKey, requestKey, window.expiresAtEpochSeconds, quotaView)
         } else {
@@ -145,26 +158,30 @@ class LLMDailyQuotaService(
         return LLMQuotaDecision(stored.status, quotaView, reservation)
     }
 
-    fun snapshot(qqUid: Long, now: Instant = Instant.now()): LLMQuotaDecision {
+    fun snapshot(qqUid: Long, now: Instant = Instant.now()): LLMQuotaDecision =
+        snapshot(qqUid, true, now)
+
+    fun snapshot(qqUid: Long, hasAccount: Boolean, now: Instant = Instant.now()): LLMQuotaDecision {
         require(qqUid > 0) { "QQ UID must be positive" }
+        val limit = effectiveLimit(hasAccount)
         val window = window(now)
         val used = store.used(quotaKey(qqUid, window.date))
             ?: return LLMQuotaDecision(
                 LLMQuotaStatus.UNAVAILABLE,
-                view(0, window.resetAtEpochSeconds),
+                view(0, limit, window.resetAtEpochSeconds),
             )
-        val status = if (used >= dailyLimit) LLMQuotaStatus.EXCEEDED else LLMQuotaStatus.ACCEPTED
-        return LLMQuotaDecision(status, view(used, window.resetAtEpochSeconds))
+        val status = if (used >= limit) LLMQuotaStatus.EXCEEDED else LLMQuotaStatus.ACCEPTED
+        return LLMQuotaDecision(status, view(used, limit, window.resetAtEpochSeconds))
     }
 
     fun refund(reservation: LLMQuotaReservation): Boolean = store.refund(reservation) != null
 
-    private fun view(used: Int, resetAtEpochSeconds: Long): LLMQuotaView {
+    private fun view(used: Int, limit: Int, resetAtEpochSeconds: Long): LLMQuotaView {
         val boundedUsed = used.coerceAtLeast(0)
         return LLMQuotaView(
-            limit = dailyLimit,
+            limit = limit,
             used = boundedUsed,
-            remaining = (dailyLimit - boundedUsed).coerceAtLeast(0),
+            remaining = (limit - boundedUsed).coerceAtLeast(0),
             resetAtEpochSeconds = resetAtEpochSeconds,
         )
     }

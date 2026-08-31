@@ -274,7 +274,7 @@ IP 添加/删除常见返回码：`0` 成功，`1` 令牌无效，`2` 超出数�
 
 ### 统一每日额度
 
-Web、QQ Bot 和 Minecraft 三个入口都会在各自认证成功后归一到同一个 QQ UID，并共享该账户每天 50 轮的 LLM 额度。额度按 `Asia/Shanghai` 自然日重置，不能通过更换 token、IP 或调用入口绕过。
+Web、QQ Bot 和 Minecraft 三个入口都会在各自认证成功后归一到同一个 QQ UID，并共享该账户每天的 LLM 额度：拥有 QO 账户的用户每天 50 轮；未注册 QO 账户的游客每天 20 轮（超限时会提示加入/注册 QO 账户获取更多额度）。额度按 `Asia/Shanghai` 自然日重置，不能通过更换 token、IP 或调用入口绕过。
 
 - 可选 Header：`X-Request-ID: <client-generated-id>`，同一 source 内重复提交相同 ID 不会重复扣除额度。
 - `GET /qo/asking/v1/quota`：使用用户登录令牌查询统一额度，返回 `limit`、`used`、`remaining` 和 Unix 秒格式的 `reset_at`。
@@ -282,7 +282,7 @@ Web、QQ Bot 和 Minecraft 三个入口都会在各自认证成功后归一到�
 - Redis 不可用时额度受保护的 LLM 请求返回 HTTP `503`，不会 fail-open。
 - 上游在接受请求前失败会退还预留额度；上游已经接受请求或开始流式输出后，即使客户端中断也计为一轮。
 
-额度可通过 Spring property `qapi.llm.daily-limit` 调整，默认 `50`；时区可通过 `qapi.llm.quota-zone` 调整，默认 `Asia/Shanghai`。
+额度可通过 Spring property `qapi.llm.daily-limit` 调整（默认 `50`），游客额度可通过 `qapi.llm.guest-daily-limit` 调整（默认 `20`）；时区可通过 `qapi.llm.quota-zone` 调整，默认 `Asia/Shanghai`。
 
 ### OpenAI Chat Completions
 
@@ -382,6 +382,8 @@ Body：
 - `get_member_profile`
 - `upsert_member_profile`
 - `forget_member_profile_field`
+- `get_remain_balance`：查询当前 LLM API 账户的 token 余额。
+- `get_user_quota`：查询当前用户今日剩余的 LLM 对话轮数、每日上限、重置时间及账户类型（QO 绑定用户/游客），若为游客还会附带加入 QO 获取更多额度的提示。
 - `set_msg_emoji_like`：为群消息设置表情回应（贴一贴）。`emoji_id` 支持语义名或数字 ID，当前支持 `monkey_head`（128053，🐵）。需配置 `QBOT_ENDPOINT` 与 `QBOT_TOKEN` 指向 qbot。
 
 ### LLM 配置
