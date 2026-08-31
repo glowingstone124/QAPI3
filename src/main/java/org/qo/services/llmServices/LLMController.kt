@@ -31,7 +31,10 @@ class LLMController(
 	@Value("\${qapi.llm.web-allowed-origin-patterns:https://*.qoriginal.vip,http://localhost:*,http://127.0.0.1:*}")
 	allowedWebOriginPatterns: String,
 ) {
-	private val gson = com.google.gson.Gson()
+	private val gson = com.google.gson.GsonBuilder()
+		.setFieldNamingPolicy(com.google.gson.FieldNamingPolicy.LOWER_CASE_WITH_UNDERSCORES)
+		.disableHtmlEscaping()
+		.create()
 	private val allowedWebOriginPatterns = allowedWebOriginPatterns
 		.split(',')
 		.map(String::trim)

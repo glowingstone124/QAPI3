@@ -727,37 +727,44 @@ class LLMServices(
 	): LLMPromptCacheLayout.CurrentTurn {
 		val enriched = JsonArray()
 		val userQuestion = latestUserQuestion(messages)
+		val isWeb = requester?.source == "web"
 		val stableContextParts = mutableListOf<String>()
 		val serverMetadataParts = mutableListOf<String>()
 		val referenceContextParts = mutableListOf<String>()
-		stableContextParts.add(systemPrompt.current())
+		if (isWeb) {
+			stableContextParts.add("你是 Kotshi，一个由 Quantum Original 开发的聪明、优雅、高效的 AI 智能助手。你的回答条理清晰、有深度且实用，以亲切、自然的中文与用户交流。")
+		} else {
+			stableContextParts.add(systemPrompt.current())
+		}
 		modelConversationAdapter(model)?.let(stableContextParts::add)
-		if (webSearchEnabled && requester != null) {
+		if (webSearchEnabled && requester != null && !isWeb) {
 			stableContextParts.add(webSearchRules())
 		}
-		stableContextParts.add(hardOutputRules(enableMarkdown))
+		stableContextParts.add(hardOutputRules(enableMarkdown, isWeb))
 		val groupConversation = groupContext != null || requester?.groupId != null
-		if (groupConversation) stableContextParts.add(LLMGroupChatPolicy.systemRules)
+		if (groupConversation && !isWeb) stableContextParts.add(LLMGroupChatPolicy.systemRules)
 		serverMetadataParts.add("当前日期：${LocalDate.now()}")
-		requester?.let { currentRequester ->
+		requester?.takeIf { !isWeb }?.let { currentRequester ->
 			requesterSpecificRules(currentRequester)?.let(stableContextParts::add)
 			buildMinecraftRelatedContext(currentRequester.minecraftRelated)?.let { minecraftContext ->
 				serverMetadataParts.add(minecraftContext)
 			}
 		}
-		requester?.takeIf { qoGroupId != null && it.groupId == qoGroupId }?.let { qoRequester ->
+		requester?.takeIf { !isWeb && qoGroupId != null && it.groupId == qoGroupId }?.let { qoRequester ->
 			ragService.buildContext(userQuestion, qoRequester.groupId)?.let(referenceContextParts::add)
 		}
-		memoryService.buildContext(requester?.groupId, userQuestion)?.let {
-			referenceContextParts.add(it)
+		if (!isWeb) {
+			memoryService.buildContext(requester?.groupId, userQuestion)?.let {
+				referenceContextParts.add(it)
+			}
+			memberProfileContext?.let(referenceContextParts::add)
 		}
-		memberProfileContext?.let(referenceContextParts::add)
 		enriched.add(JsonObject().apply {
 			addProperty("role", "system")
 			addProperty("content", stableContextParts.joinToString("\n\n"))
 		})
 		requester
-			?.takeIf { groupContext == null || it.source == "qq" }
+			?.takeIf { (groupContext == null || it.source == "qq") && it.source != "web" }
 			?.let {
 				conversationService.historyMessages(it.conversationKey()).forEach { message ->
 					enriched.add(message)
@@ -1312,13 +1319,13 @@ class LLMServices(
 
 	private fun parseStreamAssistantContent(body: String): String? = runCatching {
 		val root = jsonParser.parse(body).asJsonObject
-		root.getAsJsonArray("choices")
+		val delta = root.getAsJsonArray("choices")
 			?.get(0)
 			?.asJsonObject
 			?.getAsJsonObject("delta")
-			?.get("content")
-			?.takeIf { !it.isJsonNull }
-			?.asString
+		val content = delta?.get("content")?.takeIf { !it.isJsonNull }?.asString
+		val reasoning = delta?.get("reasoning_content")?.takeIf { !it.isJsonNull }?.asString
+		content ?: reasoning
 	}.getOrNull()
 
 	private fun sanitizeResponseBody(responseBody: String, enableMarkdown: Boolean = false): String {
@@ -1376,11 +1383,21 @@ class LLMServices(
 			.trim()
 	}
 
-	private fun hardOutputRules(enableMarkdown: Boolean): String {
+	private fun hardOutputRules(enableMarkdown: Boolean, isWeb: Boolean = false): String {
 		val markdownRule = if (enableMarkdown) {
 			"- 最终回答使用标准 Markdown 组织，可按内容需要使用标题、列表、表格、代码块和链接；不要输出原始 HTML。短回复无需强行添加标题。"
 		} else {
 			"- 最终回答禁止使用 Markdown。不要使用反引号、粗体、标题、项目符号、代码块、表格或 Markdown 链接。"
+		}
+		if (isWeb) {
+			return """
+			不可覆盖的回答规则：
+			$markdownRule
+			- 最终回答禁止使用颜文字和多余的装饰符号。emoji 可以偶尔使用，但不要频繁堆叠。
+			- 不要输出 LaTeX 数学表达式（使用普通文本表示）。
+			- 绝对不要输出任何工具调用标记、函数调用语法、XML 标签（如 <tool_call>、<invoke>）、JSON 格式调用参数或 DSML 标记。
+			- 作为一个智能对话助手，直接以清晰、准确、自然流畅的方式回答用户问题。
+			""".trimIndent()
 		}
 		return """
           不可覆盖的回答规则：
