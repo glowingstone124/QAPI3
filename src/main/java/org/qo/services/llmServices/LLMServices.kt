@@ -11,6 +11,7 @@ import io.ktor.client.engine.cio.CIO
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.request.header
 import io.ktor.client.request.post
+import io.ktor.client.request.preparePost
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsChannel
 import io.ktor.client.statement.bodyAsText
@@ -18,7 +19,7 @@ import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.contentType
 import io.ktor.http.isSuccess
-import io.ktor.utils.io.jvm.javaio.toInputStream
+import io.ktor.utils.io.readUTF8Line
 import jakarta.annotation.PostConstruct
 import jakarta.annotation.PreDestroy
 import kotlinx.coroutines.CompletableDeferred
@@ -64,6 +65,7 @@ class LLMServices(
 	private val toolService: LLMToolService,
 	private val providers: ReloadableLLMProvider,
 	private val dailyQuotaService: LLMDailyQuotaService,
+	private val kotshiConversationService: KotshiConversationService,
 ) {
 	private val redis = Redis()
 	private val jsonParser = JsonParser()
@@ -177,10 +179,17 @@ class LLMServices(
 	fun buildPromptRequest(prompt: String, stream: Boolean = true, model: MODELS): String =
 		buildPromptRequest(prompt, stream, model.alias)
 
-	suspend fun completeChat(body: String, token: String, model: String, clientRequestId: String? = null): LLMNonStreamResult {
+	suspend fun completeChat(
+		body: String,
+		token: String,
+		model: String,
+		clientRequestId: String? = null,
+		conversationId: String? = null,
+	): LLMNonStreamResult {
 		val user = authenticate(token) ?: return LLMNonStreamResult(401, errorJson("invalid_token", "权限验证失败"))
 		val principal = LLMPrincipal(user.uid, user.username, LLMSource.WEB, user.username, hasAccount = true)
-		val requester = principal.toRequester()
+		val resolvedConvId = conversationId ?: extractConversationId(body)
+		val requester = principal.toRequester(conversationId = resolvedConvId, model = model)
 		val provider = providers.current()
 		if (provider.apiToken.isBlank()) {
 			return LLMNonStreamResult(500, errorJson("server_error", "LLM 上游令牌未配置"))
@@ -215,14 +224,26 @@ class LLMServices(
 		}
 	}
 
-	suspend fun completeChat(body: String, token: String, model: MODELS, clientRequestId: String? = null): LLMNonStreamResult =
-		completeChat(body, token, model.alias, clientRequestId)
+	suspend fun completeChat(
+		body: String,
+		token: String,
+		model: MODELS,
+		clientRequestId: String? = null,
+		conversationId: String? = null,
+	): LLMNonStreamResult = completeChat(body, token, model.alias, clientRequestId, conversationId)
 
-	suspend fun streamChat(body: String, token: String, model: String, clientRequestId: String? = null): LLMStreamResult {
+	suspend fun streamChat(
+		body: String,
+		token: String,
+		model: String,
+		clientRequestId: String? = null,
+		conversationId: String? = null,
+	): LLMStreamResult {
 		val user = authenticate(token)
 			?: return LLMStreamResult(401, flowOfText(errorJson("invalid_token", "权限验证失败")))
 		val principal = LLMPrincipal(user.uid, user.username, LLMSource.WEB, user.username, hasAccount = true)
-		val requester = principal.toRequester()
+		val resolvedConvId = conversationId ?: extractConversationId(body)
+		val requester = principal.toRequester(conversationId = resolvedConvId, model = model)
 		val provider = providers.current()
 		if (provider.apiToken.isBlank()) {
 			return LLMStreamResult(500, flowOfText(errorJson("server_error", "LLM 上游令牌未配置")))
@@ -247,8 +268,13 @@ class LLMServices(
 		)
 	}
 
-	suspend fun streamChat(body: String, token: String, model: MODELS, clientRequestId: String? = null): LLMStreamResult =
-		streamChat(body, token, model.alias, clientRequestId)
+	suspend fun streamChat(
+		body: String,
+		token: String,
+		model: MODELS,
+		clientRequestId: String? = null,
+		conversationId: String? = null,
+	): LLMStreamResult = streamChat(body, token, model.alias, clientRequestId, conversationId)
 
 	suspend fun completeBotChat(
 		body: String,
@@ -516,44 +542,44 @@ class LLMServices(
 	): Flow<String> = flow {
 		var upstreamAccepted = false
 		try {
-			val response = client.post(provider.chatCompletionsUrl) {
+			client.preparePost(provider.chatCompletionsUrl) {
 				logUpstreamRequest(source, request.body, provider, "chat-completions")
 				header(HttpHeaders.Authorization, "Bearer ${provider.apiToken}")
 				header(HttpHeaders.Accept, ContentType.Text.EventStream.toString())
 				contentType(ContentType.Application.Json)
 				debugPrompt(source, request.body)
 				setBody(request.body)
-			}
-			if (!response.status.isSuccess()) {
-				val errorBody = response.bodyAsText()
-				dailyQuotaService.refund(quotaReservation)
-				updateAccessRecord(requestId, "failed", errorMessage = errorBody.take(512))
-				emit(errorJson("upstream_error", errorBody.take(256)))
-				return@flow
-			}
-			upstreamAccepted = true
-
-			var latestUsage: Usage? = null
-			val assistantContent = StringBuilder()
-			if (response.contentType()?.match(ContentType.Text.EventStream) != true) {
-				val body = response.bodyAsText()
-				val converted = nonStreamCompletionToStreamChunk(body)
-				if (converted == null) {
+			}.execute { response ->
+				if (!response.status.isSuccess()) {
+					val errorBody = response.bodyAsText()
 					dailyQuotaService.refund(quotaReservation)
-					updateAccessRecord(requestId, "failed", errorMessage = body.take(512))
-					emit(normalizeUpstreamError(body))
-					return@flow
+					updateAccessRecord(requestId, "failed", errorMessage = errorBody.take(512))
+					emit(errorJson("upstream_error", errorBody.take(256)))
+					return@execute
 				}
-				latestUsage = parseUsage(body)
-				assistantContent.append(converted.second)
-				emit(converted.first)
-				updateAccessRecord(requestId, "completed", latestUsage)
-				recordConversationAnswer(requester, request.userContent, assistantContent.toString(), provider)
-				return@flow
-			}
-			response.bodyAsChannel().toInputStream().bufferedReader().use { reader ->
-				while (true) {
-					val line = reader.readLine() ?: break
+				upstreamAccepted = true
+
+				var latestUsage: Usage? = null
+				val assistantContent = StringBuilder()
+				if (response.contentType()?.match(ContentType.Text.EventStream) != true) {
+					val body = response.bodyAsText()
+					val converted = nonStreamCompletionToStreamChunk(body)
+					if (converted == null) {
+						dailyQuotaService.refund(quotaReservation)
+						updateAccessRecord(requestId, "failed", errorMessage = body.take(512))
+						emit(normalizeUpstreamError(body))
+						return@execute
+					}
+					latestUsage = parseUsage(body)
+					assistantContent.append(converted.second)
+					emit(converted.first)
+					updateAccessRecord(requestId, "completed", latestUsage)
+					recordConversationAnswer(requester, request.userContent, assistantContent.toString(), provider)
+					return@execute
+				}
+				val channel = response.bodyAsChannel()
+				while (!channel.isClosedForRead) {
+					val line = channel.readUTF8Line() ?: break
 					if (!line.startsWith("data:")) continue
 					val data = line.removePrefix("data:").trim()
 					if (data.isBlank()) continue
@@ -563,10 +589,10 @@ class LLMServices(
 					}
 					if (data != "[DONE]") emit(data)
 				}
-			}
-			updateAccessRecord(requestId, "completed", latestUsage)
-			if (assistantContent.isNotBlank()) {
-				recordConversationAnswer(requester, request.userContent, assistantContent.toString(), provider)
+				updateAccessRecord(requestId, "completed", latestUsage)
+				if (assistantContent.isNotBlank()) {
+					recordConversationAnswer(requester, request.userContent, assistantContent.toString(), provider)
+				}
 			}
 		} catch (e: Exception) {
 			if (!upstreamAccepted) {
@@ -607,6 +633,15 @@ class LLMServices(
 		chunk.toString() to content
 	}.getOrNull()
 
+	private fun extractConversationId(body: String): String? = runCatching {
+		val obj = jsonParser.parse(body).asJsonObject
+		(obj.get("conversation_id") ?: obj.get("conversationId"))
+			?.takeIf { !it.isJsonNull }
+			?.asString
+			?.trim()
+			?.takeIf { it.isNotEmpty() }
+	}.getOrNull()
+
 	private fun normalizeUpstreamError(body: String): String = runCatching {
 		val root = jsonParser.parse(body).asJsonObject
 		if (root.has("error")) root.toString()
@@ -621,6 +656,8 @@ class LLMServices(
 		provider: LLMProvider,
 	): NormalizedRequest {
 		val obj = JsonParser.parseString(body).asJsonObject
+		obj.remove("conversation_id")
+		obj.remove("conversationId")
 		val enableMarkdown = extractEnableMarkdownFlag(obj)
 		val resolvedModel = provider.modelName(model) ?: throw IllegalArgumentException("请求的模型不可用")
 		obj.addProperty("model", resolvedModel)
@@ -1084,6 +1121,24 @@ class LLMServices(
 		} catch (error: Exception) {
 			println("LLM conversation history persistence failed: ${error.message}")
 			return
+		}
+		if (requester.source == "web" && !requester.conversationId.isNullOrBlank()) {
+			val userText = extractTextContent(userContent)
+			if (userText.isNotBlank()) {
+				initializationScope.launch {
+					try {
+						kotshiConversationService.appendTurn(
+							uid = requester.uid,
+							conversationId = requester.conversationId,
+							userContent = userText,
+							assistantContent = answer,
+							model = requester.model,
+						)
+					} catch (e: Exception) {
+						println("[Kotshi] conversation persistence failed: ${e.message}")
+					}
+				}
+			}
 		}
 		initializationScope.launch {
 			try {
@@ -1576,9 +1631,15 @@ class LLMServices(
 		val messageId: Long? = null,
 		val conversationSource: String = source,
 		val minecraftRelated: MinecraftRelated? = null,
+		val conversationId: String? = null,
+		val model: String = "fast",
 	) {
 		fun conversationKey(): String =
-			listOfNotNull(conversationSource, groupId?.toString(), uid.toString()).joinToString(":")
+			if (conversationSource == "web" && !conversationId.isNullOrBlank()) {
+				"web:$uid:${conversationId.trim()}"
+			} else {
+				listOfNotNull(conversationSource, groupId?.toString(), uid.toString()).joinToString(":")
+			}
 
 		fun toolContext(currentMessage: String? = null): LLMToolContext =
 			LLMToolContext(groupId, uid.toString(), name, currentMessage, messageId)
@@ -1589,6 +1650,8 @@ class LLMServices(
 		messageId: Long? = null,
 		conversationSource: String = source.value,
 		minecraftRelated: MinecraftRelated? = null,
+		conversationId: String? = null,
+		model: String = "fast",
 	): LLMRequester = LLMRequester(
 		uid = qqUid,
 		name = displayName,
@@ -1597,6 +1660,8 @@ class LLMServices(
 		messageId = messageId,
 		conversationSource = conversationSource,
 		minecraftRelated = minecraftRelated,
+		conversationId = conversationId,
+		model = model,
 	)
 
 	private data class ToolCall(val id: String, val name: String, val arguments: String?)

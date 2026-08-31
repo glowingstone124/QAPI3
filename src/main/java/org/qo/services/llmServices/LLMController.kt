@@ -12,6 +12,9 @@ import org.springframework.http.ResponseEntity
 import org.springframework.http.codec.ServerSentEvent
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.util.PatternMatchUtils
+import org.springframework.web.bind.annotation.PathVariable
+import org.springframework.web.bind.annotation.DeleteMapping
+import org.springframework.web.bind.annotation.PatchMapping
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.RequestBody
@@ -24,9 +27,11 @@ import org.springframework.web.bind.annotation.RestController
 @RequestMapping("/qo/asking")
 class LLMController(
 	private val llmServices: LLMServices,
+	private val kotshiConversationService: KotshiConversationService,
 	@Value("\${qapi.llm.web-allowed-origin-patterns:https://*.qoriginal.vip,http://localhost:*,http://127.0.0.1:*}")
 	allowedWebOriginPatterns: String,
 ) {
+	private val gson = com.google.gson.Gson()
 	private val allowedWebOriginPatterns = allowedWebOriginPatterns
 		.split(',')
 		.map(String::trim)
@@ -39,11 +44,20 @@ class LLMController(
 		@RequestHeader(HttpHeaders.AUTHORIZATION, required = false) authorization: String?,
 		@RequestHeader(HttpHeaders.ORIGIN, required = false) origin: String?,
 		@RequestHeader("X-Request-ID", required = false) requestId: String?,
+		@RequestHeader("X-Conversation-ID", required = false) conversationIdHeader: String?,
 		@RequestParam(name = "model", required = false, defaultValue = "fast") model: String = "fast",
+		@RequestParam(name = "conversation_id", required = false) conversationIdParam: String?,
 		@RequestBody body: String,
 	): ResponseEntity<*> {
 		val requestToken = AuthTokens.resolve(token, authorization)
 			?: return jsonResponse("""{"error":{"message":"缺少或无效的令牌","type":"invalid_token","code":"invalid_token"}}""", HttpStatus.UNAUTHORIZED)
+
+		val conversationId = conversationIdParam?.takeIf { it.isNotBlank() }
+			?: conversationIdHeader?.takeIf { it.isNotBlank() }
+			?: runCatching {
+				val obj = com.google.gson.JsonParser.parseString(body).asJsonObject
+				(obj.get("conversation_id") ?: obj.get("conversationId"))?.takeIf { !it.isJsonNull }?.asString?.takeIf { it.isNotBlank() }
+			}.getOrNull()
 
 		val stream = runCatching {
 			com.google.gson.JsonParser.parseString(body).asJsonObject.get("stream")?.asBoolean == true
@@ -57,7 +71,7 @@ class LLMController(
 		val useModel = llmServices.modelPresetFromRequest(model)
 			?: return jsonResponse("""{"error":{"message":"请求的模型不存在","type":"invalid_model","code":"invalid_model"}}""", HttpStatus.BAD_REQUEST)
 		return if (stream) {
-			val result = runCatching { llmServices.streamChat(body, requestToken, useModel, requestId) }.getOrElse {
+			val result = runCatching { llmServices.streamChat(body, requestToken, useModel, requestId, conversationId) }.getOrElse {
 				LLMStreamResult(400, flowOf("""{"error":{"message":"${it.message ?: "请求格式错误"}","type":"bad_request","code":"bad_request"}}"""))
 			}
 			if (result.status >= 400) {
@@ -66,7 +80,7 @@ class LLMController(
 				streamResponse(result)
 			}
 		} else {
-			val result = runCatching { llmServices.completeChat(body, requestToken, useModel, requestId) }.getOrElse {
+			val result = runCatching { llmServices.completeChat(body, requestToken, useModel, requestId, conversationId) }.getOrElse {
 				LLMNonStreamResult(400, """{"error":{"message":"${it.message ?: "请求格式错误"}","type":"bad_request","code":"bad_request"}}""")
 			}
 			jsonResponse(result.body, HttpStatus.valueOf(result.status), result.quota)
@@ -87,6 +101,83 @@ class LLMController(
 			?: return jsonResponse("""{"error":{"message":"缺少或无效的令牌","type":"invalid_token","code":"invalid_token"}}""", HttpStatus.UNAUTHORIZED)
 		val result = llmServices.quotaStatus(requestToken)
 		return jsonResponse(result.body, HttpStatus.valueOf(result.status), result.quota)
+	}
+
+	@GetMapping("/v1/conversations", produces = [MediaType.APPLICATION_JSON_VALUE])
+	suspend fun listConversations(
+		@RequestHeader("token", required = false) token: String?,
+		@RequestHeader(HttpHeaders.AUTHORIZATION, required = false) authorization: String?,
+	): ResponseEntity<String> {
+		val requestToken = AuthTokens.resolve(token, authorization)
+			?: return jsonResponse("""{"error":{"message":"缺少或无效的令牌","type":"invalid_token","code":"invalid_token"}}""", HttpStatus.UNAUTHORIZED)
+		val user = llmServices.authenticate(requestToken)
+			?: return jsonResponse("""{"error":{"message":"权限验证失败","type":"invalid_token","code":"invalid_token"}}""", HttpStatus.UNAUTHORIZED)
+		val list = kotshiConversationService.listConversations(user.uid)
+		return ResponseEntity.ok(gson.toJson(list))
+	}
+
+	@PostMapping("/v1/conversations", produces = [MediaType.APPLICATION_JSON_VALUE])
+	suspend fun createConversation(
+		@RequestHeader("token", required = false) token: String?,
+		@RequestHeader(HttpHeaders.AUTHORIZATION, required = false) authorization: String?,
+		@RequestBody(required = false) body: String?,
+	): ResponseEntity<String> {
+		val requestToken = AuthTokens.resolve(token, authorization)
+			?: return jsonResponse("""{"error":{"message":"缺少或无效的令牌","type":"invalid_token","code":"invalid_token"}}""", HttpStatus.UNAUTHORIZED)
+		val user = llmServices.authenticate(requestToken)
+			?: return jsonResponse("""{"error":{"message":"权限验证失败","type":"invalid_token","code":"invalid_token"}}""", HttpStatus.UNAUTHORIZED)
+		val json = runCatching { com.google.gson.JsonParser.parseString(body.orEmpty()).asJsonObject }.getOrNull()
+		val title = json?.get("title")?.takeIf { !it.isJsonNull }?.asString
+		val model = json?.get("model")?.takeIf { !it.isJsonNull }?.asString ?: "fast"
+		val customId = json?.get("id")?.takeIf { !it.isJsonNull }?.asString
+		val conv = kotshiConversationService.createConversation(user.uid, title, model, customId)
+		return ResponseEntity.ok(gson.toJson(conv))
+	}
+
+	@GetMapping("/v1/conversations/{id}/messages", produces = [MediaType.APPLICATION_JSON_VALUE])
+	suspend fun getConversationMessages(
+		@RequestHeader("token", required = false) token: String?,
+		@RequestHeader(HttpHeaders.AUTHORIZATION, required = false) authorization: String?,
+		@PathVariable("id") id: String,
+	): ResponseEntity<String> {
+		val requestToken = AuthTokens.resolve(token, authorization)
+			?: return jsonResponse("""{"error":{"message":"缺少或无效的令牌","type":"invalid_token","code":"invalid_token"}}""", HttpStatus.UNAUTHORIZED)
+		val user = llmServices.authenticate(requestToken)
+			?: return jsonResponse("""{"error":{"message":"权限验证失败","type":"invalid_token","code":"invalid_token"}}""", HttpStatus.UNAUTHORIZED)
+		val messages = kotshiConversationService.getMessages(user.uid, id)
+		return ResponseEntity.ok(gson.toJson(messages))
+	}
+
+	@DeleteMapping("/v1/conversations/{id}", produces = [MediaType.APPLICATION_JSON_VALUE])
+	suspend fun deleteConversation(
+		@RequestHeader("token", required = false) token: String?,
+		@RequestHeader(HttpHeaders.AUTHORIZATION, required = false) authorization: String?,
+		@PathVariable("id") id: String,
+	): ResponseEntity<String> {
+		val requestToken = AuthTokens.resolve(token, authorization)
+			?: return jsonResponse("""{"error":{"message":"缺少或无效的令牌","type":"invalid_token","code":"invalid_token"}}""", HttpStatus.UNAUTHORIZED)
+		val user = llmServices.authenticate(requestToken)
+			?: return jsonResponse("""{"error":{"message":"权限验证失败","type":"invalid_token","code":"invalid_token"}}""", HttpStatus.UNAUTHORIZED)
+		val deleted = kotshiConversationService.deleteConversation(user.uid, id)
+		return ResponseEntity.ok("""{"success":$deleted}""")
+	}
+
+	@PatchMapping("/v1/conversations/{id}", produces = [MediaType.APPLICATION_JSON_VALUE])
+	suspend fun updateConversation(
+		@RequestHeader("token", required = false) token: String?,
+		@RequestHeader(HttpHeaders.AUTHORIZATION, required = false) authorization: String?,
+		@PathVariable("id") id: String,
+		@RequestBody body: String,
+	): ResponseEntity<String> {
+		val requestToken = AuthTokens.resolve(token, authorization)
+			?: return jsonResponse("""{"error":{"message":"缺少或无效的令牌","type":"invalid_token","code":"invalid_token"}}""", HttpStatus.UNAUTHORIZED)
+		val user = llmServices.authenticate(requestToken)
+			?: return jsonResponse("""{"error":{"message":"权限验证失败","type":"invalid_token","code":"invalid_token"}}""", HttpStatus.UNAUTHORIZED)
+		val json = runCatching { com.google.gson.JsonParser.parseString(body).asJsonObject }.getOrNull()
+		val title = json?.get("title")?.takeIf { !it.isJsonNull }?.asString
+		val model = json?.get("model")?.takeIf { !it.isJsonNull }?.asString
+		val updated = kotshiConversationService.updateConversation(user.uid, id, title, model)
+		return ResponseEntity.ok("""{"success":$updated}""")
 	}
 
 	@PostMapping("/v1/chat/completions/bot", produces = [MediaType.APPLICATION_JSON_VALUE])

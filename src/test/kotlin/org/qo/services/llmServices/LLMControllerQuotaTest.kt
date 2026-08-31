@@ -25,12 +25,15 @@ class LLMControllerQuotaTest {
     @MockitoBean
     lateinit var llmServices: LLMServices
 
+    @MockitoBean
+    lateinit var kotshiConversationService: KotshiConversationService
+
     @Test
     fun `stream quota rejection uses HTTP 429 before SSE starts`() = runBlocking {
         val quota = LLMQuotaView(50, 50, 0, 1_800_000_000L)
         Mockito.`when`(llmServices.modelPresetFromRequest("fast")).thenReturn("fast")
         Mockito.`when`(
-            llmServices.streamChat(anyString(), Mockito.eq("login-token"), Mockito.eq("fast"), Mockito.isNull()),
+            llmServices.streamChat(anyString(), Mockito.eq("login-token"), Mockito.eq("fast"), Mockito.isNull(), Mockito.isNull()),
         )
             .thenReturn(
                 LLMStreamResult(
@@ -90,5 +93,33 @@ class LLMControllerQuotaTest {
             .expectBody()
             .jsonPath("$.used").isEqualTo(17)
             .jsonPath("$.remaining").isEqualTo(33)
+    }
+
+    @Test
+    fun `stream endpoint returns ServerSentEvent flow when successful`() = runBlocking {
+        val quota = LLMQuotaView(50, 10, 40, 1_800_000_000L)
+        Mockito.`when`(llmServices.modelPresetFromRequest("fast")).thenReturn("fast")
+        Mockito.`when`(
+            llmServices.streamChat(anyString(), Mockito.eq("login-token"), Mockito.eq("fast"), Mockito.isNull(), Mockito.isNull()),
+        )
+            .thenReturn(
+                LLMStreamResult(
+                    200,
+                    flowOf("""{"id":"1","choices":[{"delta":{"content":"Hi"}}]}"""),
+                    quota,
+                ),
+            )
+
+        webTestClient.post()
+            .uri("/qo/asking/v1/chat/completions?model=fast")
+            .header("Authorization", "Bearer login-token")
+            .header("Origin", "http://localhost:8080")
+            .contentType(MediaType.APPLICATION_JSON)
+            .bodyValue("""{"stream":true,"messages":[{"role":"user","content":"hello"}]}""")
+            .exchange()
+            .expectStatus().isOk
+            .expectHeader().contentTypeCompatibleWith(MediaType.TEXT_EVENT_STREAM)
+            .expectHeader().valueEquals("X-RateLimit-Limit", "50")
+            .expectHeader().valueEquals("X-RateLimit-Remaining", "40")
     }
 }
