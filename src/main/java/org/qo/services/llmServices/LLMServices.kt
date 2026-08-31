@@ -731,10 +731,9 @@ class LLMServices(
 		val stableContextParts = mutableListOf<String>()
 		val serverMetadataParts = mutableListOf<String>()
 		val referenceContextParts = mutableListOf<String>()
-		if (isWeb) {
-			stableContextParts.add("你是 Kotshi，一个由 Quantum Original 开发的聪明、优雅、高效的 AI 智能助手。你的回答条理清晰、有深度且实用，以亲切、自然的中文与用户交流。")
-		} else {
-			stableContextParts.add(systemPrompt.current())
+		val basicPrompt = systemPrompt.current().trim()
+		if (basicPrompt.isNotBlank()) {
+			stableContextParts.add(basicPrompt)
 		}
 		modelConversationAdapter(model)?.let(stableContextParts::add)
 		if (webSearchEnabled && requester != null) {
