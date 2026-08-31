@@ -56,7 +56,7 @@ internal object LLMPromptCacheLayout {
 			val copy = message.deepCopy()
 			if (index == latestUserIndex) {
 				val original = copy.get("content")?.deepCopy() ?: JsonPrimitive("")
-				persistedUserContent = attachEnvelope(original, context)
+				persistedUserContent = if (context.sender?.source == "web") original else attachEnvelope(original, context)
 				copy.add("content", persistedUserContent.deepCopy())
 			}
 			outgoing.add(copy)

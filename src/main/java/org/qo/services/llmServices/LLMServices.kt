@@ -737,7 +737,7 @@ class LLMServices(
 			stableContextParts.add(systemPrompt.current())
 		}
 		modelConversationAdapter(model)?.let(stableContextParts::add)
-		if (webSearchEnabled && requester != null && !isWeb) {
+		if (webSearchEnabled && requester != null) {
 			stableContextParts.add(webSearchRules())
 		}
 		stableContextParts.add(hardOutputRules(enableMarkdown, isWeb))
@@ -1131,14 +1131,15 @@ class LLMServices(
 		}
 		if (requester.source == "web" && !requester.conversationId.isNullOrBlank()) {
 			val userText = extractTextContent(userContent)
-			if (userText.isNotBlank()) {
+			val cleanAnswer = sanitizeAssistantText(answer, enableMarkdown = true)
+			if (userText.isNotBlank() && cleanAnswer.isNotBlank()) {
 				initializationScope.launch {
 					try {
 						kotshiConversationService.appendTurn(
 							uid = requester.uid,
 							conversationId = requester.conversationId,
 							userContent = userText,
-							assistantContent = answer,
+							assistantContent = cleanAnswer,
 							model = requester.model,
 						)
 					} catch (e: Exception) {
@@ -1319,13 +1320,13 @@ class LLMServices(
 
 	private fun parseStreamAssistantContent(body: String): String? = runCatching {
 		val root = jsonParser.parse(body).asJsonObject
-		val delta = root.getAsJsonArray("choices")
+		root.getAsJsonArray("choices")
 			?.get(0)
 			?.asJsonObject
 			?.getAsJsonObject("delta")
-		val content = delta?.get("content")?.takeIf { !it.isJsonNull }?.asString
-		val reasoning = delta?.get("reasoning_content")?.takeIf { !it.isJsonNull }?.asString
-		content ?: reasoning
+			?.get("content")
+			?.takeIf { !it.isJsonNull }
+			?.asString
 	}.getOrNull()
 
 	private fun sanitizeResponseBody(responseBody: String, enableMarkdown: Boolean = false): String {
@@ -1356,8 +1357,11 @@ class LLMServices(
 
 	private fun sanitizeAssistantText(content: String, enableMarkdown: Boolean): String {
 		var sanitized = content
+			.replace(Regex("""<think>[\s\S]*?</think>"""), "")
 			.replace(Regex("""<[^>]*tool_calls[^>]*>[\s\S]*?</[^>]*tool_calls>"""), "")
 			.replace(Regex("""<[^>]*invoke\s+name="[^"]+"[^>]*>[\s\S]*?</[^>]*invoke>"""), "")
+			.replace(Regex("""</?[^>]*tool_call[^>]*>"""), "")
+			.replace(Regex("""</?[^>]*invoke[^>]*>"""), "")
 			.replace(Regex("""</?[^>]*DSML[^>]*>"""), "")
 		if (!enableMarkdown) {
 			sanitized = sanitized
