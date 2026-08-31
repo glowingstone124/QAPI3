@@ -294,6 +294,7 @@ Web、QQ Bot 和 Minecraft 三个入口都会在各自认证成功后归一到�
 {
   "model": "fast",
   "stream": false,
+  "enable-markdown": false,
   "messages": [
     {"role": "user", "content": "你好"}
   ]
@@ -307,6 +308,8 @@ Web、QQ Bot 和 Minecraft 三个入口都会在各自认证成功后归一到�
 - provider JSON 中配置的真实模型名
 
 `stream=false` 返回 JSON；`stream=true` 返回 SSE。非流式请求支持工具调用、群上下文、记忆、历史检索、RAG 和 Responses API。
+
+`enable-markdown` 为可选布尔值，缺省或 `false` 时保持现有纯文本输出规则；设置为 `true` 时允许模型使用标准 Markdown。该字段只控制输出提示，不会透传给上游 provider。
 
 Web 流式请求会校验 `Origin`，允许来源由 `qapi.llm.web-allowed-origin-patterns` 配置；默认允许 `https://*.qoriginal.vip` 和本地开发端口。SSE 响应包含 `X-Accel-Buffering: no` 与 `Cache-Control: no-cache, no-transform`，部署反向代理时必须保持流式转发且不得缓冲。
 

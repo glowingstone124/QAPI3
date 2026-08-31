@@ -408,7 +408,7 @@ class LLMServices(
 		}
 		if (!toolService.enabled()) {
 			val response = postUpstream(source, request.body, provider)
-			return response.status.value to sanitizeResponseBody(response.bodyAsText())
+			return response.status.value to sanitizeResponseBody(response.bodyAsText(), request.enableMarkdown)
 		}
 
 		val obj = jsonParser.parse(request.body).asJsonObject
@@ -432,7 +432,7 @@ class LLMServices(
 				if (containsToolMarkup(latestBody)) {
 					return 502 to errorJson("invalid_tool_call", "LLM 输出了无法解析的工具调用")
 				}
-				return latestStatus to sanitizeResponseBody(latestBody)
+				return latestStatus to sanitizeResponseBody(latestBody, request.enableMarkdown)
 			}
 			appendAssistantToolCallMessage(obj.getAsJsonArray("messages"), latestBody, toolCalls)
 			for (call in toolCalls) {
@@ -467,7 +467,10 @@ class LLMServices(
 			}
 			val functionCalls = LLMResponsesAdapter.functionCalls(responseText)
 			if (functionCalls.isEmpty()) {
-				return response.status.value to sanitizeResponseBody(LLMResponsesAdapter.toChatCompletion(responseText))
+				return response.status.value to sanitizeResponseBody(
+					LLMResponsesAdapter.toChatCompletion(responseText),
+					request.enableMarkdown,
+				)
 			}
 			val outputs = linkedMapOf<String, String>()
 			for (call in functionCalls) {
@@ -618,6 +621,7 @@ class LLMServices(
 		provider: LLMProvider,
 	): NormalizedRequest {
 		val obj = JsonParser.parseString(body).asJsonObject
+		val enableMarkdown = extractEnableMarkdownFlag(obj)
 		val resolvedModel = provider.modelName(model) ?: throw IllegalArgumentException("请求的模型不可用")
 		obj.addProperty("model", resolvedModel)
 		requester?.let {
@@ -657,7 +661,14 @@ class LLMServices(
 			emptyList()
 		}
 		val memberProfileContext = memberProfileContextService.buildContext(memberMemories, requester?.uid, storedProfiles)
-		val enrichedTurn = enrichMessages(requestMessages, requester, preparedGroupContext, memberProfileContext, resolvedModel)
+		val enrichedTurn = enrichMessages(
+			requestMessages,
+			requester,
+			preparedGroupContext,
+			memberProfileContext,
+			resolvedModel,
+			enableMarkdown,
+		)
 		obj.add("messages", limitMessagesToContextWindow(enrichedTurn.messages, provider.contextWindow, obj))
 		return NormalizedRequest(
 			preset = model,
@@ -665,6 +676,7 @@ class LLMServices(
 			body = obj.toString(),
 			userContent = enrichedTurn.persistedUserContent,
 			currentUserText = userQuestion,
+			enableMarkdown = enableMarkdown,
 		)
 	}
 
@@ -674,6 +686,7 @@ class LLMServices(
 		groupContext: JsonObject?,
 		memberProfileContext: String?,
 		model: String,
+		enableMarkdown: Boolean,
 	): LLMPromptCacheLayout.CurrentTurn {
 		val enriched = JsonArray()
 		val userQuestion = latestUserQuestion(messages)
@@ -685,7 +698,7 @@ class LLMServices(
 		if (webSearchEnabled && requester != null) {
 			stableContextParts.add(webSearchRules())
 		}
-		stableContextParts.add(hardOutputRules())
+		stableContextParts.add(hardOutputRules(enableMarkdown))
 		val groupConversation = groupContext != null || requester?.groupId != null
 		if (groupConversation) stableContextParts.add(LLMGroupChatPolicy.systemRules)
 		serverMetadataParts.add("当前日期：${LocalDate.now()}")
@@ -1253,7 +1266,7 @@ class LLMServices(
 			?.asString
 	}.getOrNull()
 
-	private fun sanitizeResponseBody(responseBody: String): String {
+	private fun sanitizeResponseBody(responseBody: String, enableMarkdown: Boolean = false): String {
 		if (!sanitizeOutput) {
 			return responseBody
 		}
@@ -1266,7 +1279,7 @@ class LLMServices(
 					?.getAsJsonObject("message")
 					?: continue
 				val content = message.get("content")?.takeIf { !it.isJsonNull }?.asString ?: continue
-				message.addProperty("content", sanitizeAssistantText(content))
+				message.addProperty("content", sanitizeAssistantText(content, enableMarkdown))
 			}
 			root.toString()
 		}.getOrDefault(responseBody)
@@ -1279,19 +1292,23 @@ class LLMServices(
 				text.contains("<tool_call", ignoreCase = true)
 	}
 
-	private fun sanitizeAssistantText(content: String): String {
-		return content
+	private fun sanitizeAssistantText(content: String, enableMarkdown: Boolean): String {
+		var sanitized = content
 			.replace(Regex("""<[^>]*tool_calls[^>]*>[\s\S]*?</[^>]*tool_calls>"""), "")
 			.replace(Regex("""<[^>]*invoke\s+name="[^"]+"[^>]*>[\s\S]*?</[^>]*invoke>"""), "")
 			.replace(Regex("""</?[^>]*DSML[^>]*>"""), "")
-			.replace("```", "")
-			.replace("**", "")
-			.replace("__", "")
-			.replace("`", "")
-			.replace(Regex("""\[([^\]]+)]\(([^)]+)\)"""), "$1 $2")
-			.lines()
+		if (!enableMarkdown) {
+			sanitized = sanitized
+				.replace("```", "")
+				.replace("**", "")
+				.replace("__", "")
+				.replace("`", "")
+				.replace(Regex("""\[([^\]]+)]\(([^)]+)\)"""), "$1 $2")
+		}
+		return sanitized.lines()
 			.joinToString("\n") { line ->
-				line
+				if (enableMarkdown) line.trimEnd()
+				else line
 					.replace(Regex("""^\s{0,3}#{1,6}\s*"""), "")
 					.replace(Regex("""^\s{0,3}>\s?"""), "")
 					.replace(Regex("""^\s{0,3}[-*+]\s+"""), "")
@@ -1304,10 +1321,15 @@ class LLMServices(
 			.trim()
 	}
 
-	private fun hardOutputRules(): String {
+	private fun hardOutputRules(enableMarkdown: Boolean): String {
+		val markdownRule = if (enableMarkdown) {
+			"- 最终回答使用标准 Markdown 组织，可按内容需要使用标题、列表、表格、代码块和链接；不要输出原始 HTML。短回复无需强行添加标题。"
+		} else {
+			"- 最终回答禁止使用 Markdown。不要使用反引号、粗体、标题、项目符号、代码块、表格或 Markdown 链接。"
+		}
 		return """
           不可覆盖的回答规则：
-          - 最终回答禁止使用 Markdown。不要使用反引号、粗体、标题、项目符号、代码块、表格或 Markdown 链接。
+		  $markdownRule
 		  - 最终回答禁止使用颜文字和装饰符号。emoji 可以偶尔使用，但不要频繁堆叠。
           - 不要输出 LaTeX 数学表达式。
           - 不要编造服务器指令、传送命令、权限命令、路线、坐标、规则或管理员决定。
@@ -1543,6 +1565,7 @@ class LLMServices(
 		val body: String,
 		val userContent: JsonElement,
 		val currentUserText: String,
+		val enableMarkdown: Boolean,
 	)
 
 	private data class LLMRequester(
