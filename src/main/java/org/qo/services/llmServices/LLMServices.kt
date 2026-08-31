@@ -63,6 +63,7 @@ class LLMServices(
 	private val chatHistoryService: LLMChatHistoryService,
 	private val toolService: LLMToolService,
 	private val providers: ReloadableLLMProvider,
+	private val dailyQuotaService: LLMDailyQuotaService,
 ) {
 	private val redis = Redis()
 	private val jsonParser = JsonParser()
@@ -141,6 +142,20 @@ class LLMServices(
 		return user
 	}
 
+	suspend fun quotaStatus(token: String): LLMNonStreamResult {
+		val user = authenticate(token)
+			?: return LLMNonStreamResult(401, errorJson("invalid_token", "权限验证失败"))
+		val quota = dailyQuotaService.snapshot(user.uid)
+		if (quota.status == LLMQuotaStatus.UNAVAILABLE) {
+			return LLMNonStreamResult(
+				503,
+				errorJson("quota_unavailable", "额度服务暂时不可用，请稍后重试"),
+				quota.view,
+			)
+		}
+		return LLMNonStreamResult(200, quotaJson(quota.view), quota.view)
+	}
+
 	fun buildPromptRequest(prompt: String, stream: Boolean = true, model: String): String {
 		val provider = providers.current()
 		return JsonObject().apply {
@@ -162,20 +177,26 @@ class LLMServices(
 	fun buildPromptRequest(prompt: String, stream: Boolean = true, model: MODELS): String =
 		buildPromptRequest(prompt, stream, model.alias)
 
-	suspend fun completeChat(body: String, token: String, model: String): LLMNonStreamResult {
+	suspend fun completeChat(body: String, token: String, model: String, clientRequestId: String? = null): LLMNonStreamResult {
 		val user = authenticate(token) ?: return LLMNonStreamResult(401, errorJson("invalid_token", "权限验证失败"))
-		val requester = LLMRequester(user.uid, user.username, "login")
+		val principal = LLMPrincipal(user.uid, user.username, LLMSource.WEB, user.username)
+		val requester = principal.toRequester()
 		val provider = providers.current()
+		if (provider.apiToken.isBlank()) {
+			return LLMNonStreamResult(500, errorJson("server_error", "LLM 上游令牌未配置"))
+		}
 		val request = normalizeRequest(body, false, requester, model, provider)
-		val requestId = insertAccessRecord(user.uid, user.username, request.model, false)
-		if (!reserveRequest(token)) {
+		val requestId = insertAccessRecord(principal, request.model, false)
+		if (!reserveRequest(principal.qqUid)) {
 			updateAccessRecord(requestId, "rejected", errorMessage = "duplicate request")
 			return LLMNonStreamResult(429, errorJson("rate_limited", "请求过于频繁"))
 		}
-		if (provider.apiToken.isBlank()) {
-			updateAccessRecord(requestId, "failed", errorMessage = "missing upstream token")
-			return LLMNonStreamResult(500, errorJson("server_error", "LLM 上游令牌未配置"))
+		val quota = reserveQuota(principal, clientRequestId)
+		quotaFailure(quota)?.let {
+			updateAccessRecord(requestId, "rejected", errorMessage = it.body.take(512))
+			return it
 		}
+		val reservation = requireNotNull(quota.reservation)
 
 		return try {
 			val (statusCode, text) = completeWithOptionalTools(request, requester, "chat", provider)
@@ -183,38 +204,51 @@ class LLMServices(
 			updateAccessRecord(requestId, if (statusCode in 200..299) "completed" else "failed", usage, text.take(512))
 			if (statusCode in 200..299) {
 				recordConversation(requester, request.userContent, text, provider)
+			} else {
+				dailyQuotaService.refund(reservation)
 			}
-			LLMNonStreamResult(statusCode, text)
+			LLMNonStreamResult(statusCode, text, quota.view)
 		} catch (e: Exception) {
+			dailyQuotaService.refund(reservation)
 			updateAccessRecord(requestId, "failed", errorMessage = e.message)
-			LLMNonStreamResult(502, errorJson("upstream_error", e.message ?: "LLM 上游请求失败"))
+			LLMNonStreamResult(502, errorJson("upstream_error", e.message ?: "LLM 上游请求失败"), quota.view)
 		}
 	}
 
-	suspend fun completeChat(body: String, token: String, model: MODELS): LLMNonStreamResult =
-		completeChat(body, token, model.alias)
+	suspend fun completeChat(body: String, token: String, model: MODELS, clientRequestId: String? = null): LLMNonStreamResult =
+		completeChat(body, token, model.alias, clientRequestId)
 
-	suspend fun streamChat(body: String, token: String, model: String): LLMStreamResult {
-		val user =
-			authenticate(token) ?: return LLMStreamResult(401, flowOfText(errorJson("invalid_token", "权限验证失败")))
-		val requester = LLMRequester(user.uid, user.username, "login")
+	suspend fun streamChat(body: String, token: String, model: String, clientRequestId: String? = null): LLMStreamResult {
+		val user = authenticate(token)
+			?: return LLMStreamResult(401, flowOfText(errorJson("invalid_token", "权限验证失败")))
+		val principal = LLMPrincipal(user.uid, user.username, LLMSource.WEB, user.username)
+		val requester = principal.toRequester()
 		val provider = providers.current()
+		if (provider.apiToken.isBlank()) {
+			return LLMStreamResult(500, flowOfText(errorJson("server_error", "LLM 上游令牌未配置")))
+		}
 		val request = normalizeRequest(body, true, requester, model, provider)
-		val requestId = insertAccessRecord(user.uid, user.username, request.model, true)
-		if (!reserveRequest(token)) {
+		val requestId = insertAccessRecord(principal, request.model, true)
+		if (!reserveRequest(principal.qqUid)) {
 			updateAccessRecord(requestId, "rejected", errorMessage = "duplicate request")
 			return LLMStreamResult(429, flowOfText(errorJson("rate_limited", "请求过于频繁")))
 		}
-		if (provider.apiToken.isBlank()) {
-			updateAccessRecord(requestId, "failed", errorMessage = "missing upstream token")
-			return LLMStreamResult(500, flowOfText(errorJson("server_error", "LLM 上游令牌未配置")))
+		val quota = reserveQuota(principal, clientRequestId)
+		quotaStreamFailure(quota)?.let {
+			updateAccessRecord(requestId, "rejected", errorMessage = quotaErrorMessage(quota.status))
+			return it
 		}
+		val reservation = requireNotNull(quota.reservation)
 
-		return LLMStreamResult(200, streamFromUpstream(request, requester, requestId, "stream", provider))
+		return LLMStreamResult(
+			200,
+			streamFromUpstream(request, requester, requestId, "stream", provider, reservation),
+			quota.view,
+		)
 	}
 
-	suspend fun streamChat(body: String, token: String, model: MODELS): LLMStreamResult =
-		streamChat(body, token, model.alias)
+	suspend fun streamChat(body: String, token: String, model: MODELS, clientRequestId: String? = null): LLMStreamResult =
+		streamChat(body, token, model.alias, clientRequestId)
 
 	suspend fun completeBotChat(
 		body: String,
@@ -223,7 +257,8 @@ class LLMServices(
 		qqGroupId: Long?,
 		qqName: String?,
 		qqMessageId: Long? = null,
-		model: String
+		model: String,
+		clientRequestId: String? = null,
 	): LLMNonStreamResult {
 		if (!authenticateServerToken(token)) {
 			return LLMNonStreamResult(401, errorJson("invalid_token", "Bot token 验证失败"))
@@ -232,21 +267,27 @@ class LLMServices(
 			return LLMNonStreamResult(403, errorJson("blocked_user", "该用户暂时不能使用此功能"))
 		}
 		val username = qqName?.takeIf { it.isNotBlank() }?.let { decodeHeader(it) } ?: "qq:$qqUid"
-		val requester = LLMRequester(qqUid, username, "qq", qqGroupId, qqMessageId)
+		val principal = LLMPrincipal(qqUid, username, LLMSource.QQ, qqUid.toString())
+		val requester = principal.toRequester(groupId = qqGroupId, messageId = qqMessageId)
 		val provider = providers.current()
 		val model = provider.resolvePreset(model)
 			?: return LLMNonStreamResult(400, errorJson("model_not_available", "请求的模型不可用"))
+		if (provider.apiToken.isBlank()) {
+			return LLMNonStreamResult(500, errorJson("server_error", "LLM 上游令牌未配置"))
+		}
 		val request = normalizeRequest(body, false, requester, model, provider)
-		val requestId = insertAccessRecord(qqUid, username, request.model, false)
-		if (!reserveRequest("bot:$qqUid")) {
+		val requestId = insertAccessRecord(principal, request.model, false)
+		if (!reserveRequest(principal.qqUid)) {
 			updateAccessRecord(requestId, "rejected", errorMessage = "duplicate request")
 
 			return LLMNonStreamResult(429, errorJson("rate_limited", "请求过于频繁"))
 		}
-		if (provider.apiToken.isBlank()) {
-			updateAccessRecord(requestId, "failed", errorMessage = "missing upstream token")
-			return LLMNonStreamResult(500, errorJson("server_error", "LLM 上游令牌未配置"))
+		val quota = reserveQuota(principal, clientRequestId)
+		quotaFailure(quota)?.let {
+			updateAccessRecord(requestId, "rejected", errorMessage = it.body.take(512))
+			return it
 		}
+		val reservation = requireNotNull(quota.reservation)
 
 		return try {
 			val (statusCode, text) = completeWithOptionalTools(request, requester, "bot", provider)
@@ -254,11 +295,14 @@ class LLMServices(
 			updateAccessRecord(requestId, if (statusCode in 200..299) "completed" else "failed", usage, text.take(512))
 			if (statusCode in 200..299) {
 				recordConversation(requester, request.userContent, text, provider)
+			} else {
+				dailyQuotaService.refund(reservation)
 			}
-			LLMNonStreamResult(statusCode, text)
+			LLMNonStreamResult(statusCode, text, quota.view)
 		} catch (e: Exception) {
+			dailyQuotaService.refund(reservation)
 			updateAccessRecord(requestId, "failed", errorMessage = e.message)
-			LLMNonStreamResult(502, errorJson("upstream_error", e.message ?: "LLM 上游请求失败"))
+			LLMNonStreamResult(502, errorJson("upstream_error", e.message ?: "LLM 上游请求失败"), quota.view)
 		}
 	}
 
@@ -279,7 +323,8 @@ class LLMServices(
 		minecraftName: String,
 		minecraftCoordinate: String,
 		minecraftHP: String,
-		model: String
+		model: String,
+		clientRequestId: String? = null,
 	): LLMNonStreamResult {
 		val serverId = authenticatedServerId(token)
 			?: return LLMNonStreamResult(401, errorJson("invalid_token", "Minecraft token 验证失败"))
@@ -294,28 +339,36 @@ class LLMServices(
 		}
 
 		val groupId = minecraftGroupId(serverId)
-		val requester = LLMRequester(
+		val principal = LLMPrincipal(
 			user.uid,
 			"$playerName/qq:${user.uid}",
-			"minecraft",
-			groupId,
-			conversationSource = groupId?.let { "qq" } ?: "minecraft",
+			LLMSource.MINECRAFT,
+			playerName,
+		)
+		val requester = principal.toRequester(
+			groupId = groupId,
+			conversationSource = groupId?.let { LLMSource.QQ.value } ?: LLMSource.MINECRAFT.value,
 			minecraftRelated = MinecraftRelated(
 				minecraftCoordinate,
 				minecraftHP,
 			)
 		)
 		val provider = providers.current()
+		if (provider.apiToken.isBlank()) {
+			return LLMNonStreamResult(500, errorJson("server_error", "LLM 上游令牌未配置"))
+		}
 		val request = normalizeRequest(body, false, requester, model, provider)
-		val requestId = insertAccessRecord(user.uid, playerName, request.model, false)
-		if (!reserveRequest("minecraft:$playerName")) {
+		val requestId = insertAccessRecord(principal, request.model, false)
+		if (!reserveRequest(principal.qqUid)) {
 			updateAccessRecord(requestId, "rejected", errorMessage = "duplicate request")
 			return LLMNonStreamResult(429, errorJson("rate_limited", "请求过于频繁"))
 		}
-		if (provider.apiToken.isBlank()) {
-			updateAccessRecord(requestId, "failed", errorMessage = "missing upstream token")
-			return LLMNonStreamResult(500, errorJson("server_error", "LLM 上游令牌未配置"))
+		val quota = reserveQuota(principal, clientRequestId)
+		quotaFailure(quota)?.let {
+			updateAccessRecord(requestId, "rejected", errorMessage = it.body.take(512))
+			return it
 		}
+		val reservation = requireNotNull(quota.reservation)
 
 		return try {
 			val (statusCode, text) = completeWithOptionalTools(request, requester, "minecraft", provider)
@@ -323,17 +376,23 @@ class LLMServices(
 			updateAccessRecord(requestId, if (statusCode in 200..299) "completed" else "failed", usage, text.take(512))
 			if (statusCode in 200..299) {
 				recordConversation(requester, request.userContent, text, provider)
+			} else {
+				dailyQuotaService.refund(reservation)
 			}
-			LLMNonStreamResult(statusCode, text)
+			LLMNonStreamResult(statusCode, text, quota.view)
 		} catch (e: Exception) {
+			dailyQuotaService.refund(reservation)
 			updateAccessRecord(requestId, "failed", errorMessage = e.message)
-			LLMNonStreamResult(502, errorJson("upstream_error", e.message ?: "LLM 上游请求失败"))
+			LLMNonStreamResult(502, errorJson("upstream_error", e.message ?: "LLM 上游请求失败"), quota.view)
 		}
 	}
 
 	suspend fun completeMinecraftChat(
 		body: String, token: String, minecraftName: String, minecraftCoordinate: String, minecraftHP: String, model: MODELS,
-	): LLMNonStreamResult = completeMinecraftChat(body, token, minecraftName, minecraftCoordinate, minecraftHP, model.alias)
+		clientRequestId: String? = null,
+	): LLMNonStreamResult = completeMinecraftChat(
+		body, token, minecraftName, minecraftCoordinate, minecraftHP, model.alias, clientRequestId,
+	)
 
 	private suspend fun completeWithOptionalTools(
 		request: NormalizedRequest,
@@ -447,7 +506,9 @@ class LLMServices(
 		requestId: Long,
 		source: String,
 		provider: LLMProvider,
+		quotaReservation: LLMQuotaReservation,
 	): Flow<String> = flow {
+		var upstreamAccepted = false
 		try {
 			val response = client.post(provider.chatCompletionsUrl) {
 				logUpstreamRequest(source, request.body, provider, "chat-completions")
@@ -458,10 +519,12 @@ class LLMServices(
 			}
 			if (!response.status.isSuccess()) {
 				val errorBody = response.bodyAsText()
+				dailyQuotaService.refund(quotaReservation)
 				updateAccessRecord(requestId, "failed", errorMessage = errorBody.take(512))
 				emit(errorJson("upstream_error", errorBody.take(256)))
 				return@flow
 			}
+			upstreamAccepted = true
 
 			var latestUsage: Usage? = null
 			val assistantContent = StringBuilder()
@@ -483,6 +546,9 @@ class LLMServices(
 				recordConversationAnswer(requester, request.userContent, assistantContent.toString(), provider)
 			}
 		} catch (e: Exception) {
+			if (!upstreamAccepted) {
+				dailyQuotaService.refund(quotaReservation)
+			}
 			updateAccessRecord(requestId, "failed", errorMessage = e.message)
 			emit(errorJson("upstream_error", e.message ?: "LLM 上游请求失败"))
 		}
@@ -882,10 +948,47 @@ class LLMServices(
 			.joinToString("\n")
 	}
 
-	private fun reserveRequest(token: String): Boolean {
-		return redis.setIfAbsentWithExpire("llm:req:$token", "1", DatabaseType.QO_ASSISTANT_DATABASE.value, 2)
+	private fun reserveRequest(qqUid: Long): Boolean {
+		return redis.setIfAbsentWithExpire("llm:req:$qqUid", "1", DatabaseType.QO_ASSISTANT_DATABASE.value, 2)
 			.ignoreException() ?: true
 	}
+
+	private fun reserveQuota(principal: LLMPrincipal, clientRequestId: String?): LLMQuotaDecision {
+		return if (clientRequestId.isNullOrBlank()) {
+			dailyQuotaService.reserve(principal)
+		} else {
+			dailyQuotaService.reserve(principal, clientRequestId)
+		}
+	}
+
+	private fun quotaFailure(decision: LLMQuotaDecision): LLMNonStreamResult? {
+		val (status, code) = when (decision.status) {
+			LLMQuotaStatus.ACCEPTED -> return null
+			LLMQuotaStatus.EXCEEDED -> 429 to "daily_quota_exceeded"
+			LLMQuotaStatus.DUPLICATE -> 409 to "duplicate_request"
+			LLMQuotaStatus.UNAVAILABLE -> 503 to "quota_unavailable"
+		}
+		return LLMNonStreamResult(status, errorJson(code, quotaErrorMessage(decision.status)), decision.view)
+	}
+
+	private fun quotaStreamFailure(decision: LLMQuotaDecision): LLMStreamResult? {
+		val failure = quotaFailure(decision) ?: return null
+		return LLMStreamResult(failure.status, flowOfText(failure.body), failure.quota)
+	}
+
+	private fun quotaErrorMessage(status: LLMQuotaStatus): String = when (status) {
+		LLMQuotaStatus.ACCEPTED -> ""
+		LLMQuotaStatus.EXCEEDED -> "今天的对话额度已经用完"
+		LLMQuotaStatus.DUPLICATE -> "该请求已经提交，请勿重复发送"
+		LLMQuotaStatus.UNAVAILABLE -> "额度服务暂时不可用，请稍后重试"
+	}
+
+	private fun quotaJson(view: LLMQuotaView): String = JsonObject().apply {
+		addProperty("limit", view.limit)
+		addProperty("used", view.used)
+		addProperty("remaining", view.remaining)
+		addProperty("reset_at", view.resetAtEpochSeconds)
+	}.toString()
 
 	private fun recordConversation(
 		requester: LLMRequester,
@@ -1226,9 +1329,11 @@ class LLMServices(
 				database.execute(
 					"""
                 CREATE TABLE IF NOT EXISTS llm_access_records (
-                   id BIGINT AUTO_INCREMENT PRIMARY KEY,
-                   uid BIGINT NOT NULL,
-                   username VARCHAR(128) NOT NULL,
+					   id BIGINT AUTO_INCREMENT PRIMARY KEY,
+					   uid BIGINT NOT NULL,
+					   username VARCHAR(128) NOT NULL,
+					   source VARCHAR(32) NOT NULL DEFAULT 'unknown',
+					   source_identity VARCHAR(128) NULL,
                    request_id VARCHAR(80) NOT NULL,
                    model VARCHAR(128) NOT NULL,
                    stream BOOLEAN NOT NULL,
@@ -1243,6 +1348,8 @@ class LLMServices(
                 )
                 """.trimIndent()
 				)
+				ensureAccessRecordColumn("source", "VARCHAR(32) NOT NULL DEFAULT 'unknown' AFTER username")
+				ensureAccessRecordColumn("source_identity", "VARCHAR(128) NULL AFTER source")
 				accessRecordSchemaReady.complete(Unit)
 			} catch (error: Exception) {
 				accessRecordSchemaReady.completeExceptionally(error)
@@ -1251,19 +1358,33 @@ class LLMServices(
 		}
 	}
 
-	private suspend fun insertAccessRecord(uid: Long, username: String, model: String, stream: Boolean): Long {
+	private suspend fun ensureAccessRecordColumn(name: String, definition: String) {
+		try {
+			database.execute("ALTER TABLE llm_access_records ADD COLUMN $name $definition")
+		} catch (error: Exception) {
+			if (!error.message.orEmpty().contains("duplicate", ignoreCase = true)) {
+				println("LLM access record column migration failed for $name: ${error.message}")
+			}
+		}
+	}
+
+	private suspend fun insertAccessRecord(principal: LLMPrincipal, model: String, stream: Boolean): Long {
 		val requestId = "chatcmpl-qo-${UUID.randomUUID()}"
 		return try {
 			awaitAccessRecordSchema()
 			database.inTransaction {
 				database.execute(
 					"""
-                INSERT INTO llm_access_records(uid, username, request_id, model, stream, status, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+					INSERT INTO llm_access_records(
+						uid, username, source, source_identity, request_id, model, stream, status, created_at
+					)
+					VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """.trimIndent(),
 					listOf(
-						uid,
-						username.take(128),
+						principal.qqUid,
+						principal.displayName.take(128),
+						principal.source.value,
+						principal.sourceIdentity.take(128),
 						requestId,
 						model.take(128),
 						stream,
@@ -1380,6 +1501,21 @@ class LLMServices(
 			LLMToolContext(groupId, uid.toString(), name, currentMessage, messageId)
 	}
 
+	private fun LLMPrincipal.toRequester(
+		groupId: Long? = null,
+		messageId: Long? = null,
+		conversationSource: String = source.value,
+		minecraftRelated: MinecraftRelated? = null,
+	): LLMRequester = LLMRequester(
+		uid = qqUid,
+		name = displayName,
+		source = source.value,
+		groupId = groupId,
+		messageId = messageId,
+		conversationSource = conversationSource,
+		minecraftRelated = minecraftRelated,
+	)
+
 	private data class ToolCall(val id: String, val name: String, val arguments: String?)
 	private data class Usage(
 		val promptTokens: Int?,
@@ -1390,5 +1526,14 @@ class LLMServices(
 	)
 }
 
-data class LLMNonStreamResult(val status: Int, val body: String)
-data class LLMStreamResult(val status: Int, val chunks: Flow<String>)
+data class LLMNonStreamResult(
+	val status: Int,
+	val body: String,
+	val quota: LLMQuotaView? = null,
+)
+
+data class LLMStreamResult(
+	val status: Int,
+	val chunks: Flow<String>,
+	val quota: LLMQuotaView? = null,
+)

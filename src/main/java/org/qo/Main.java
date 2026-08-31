@@ -60,7 +60,13 @@ public class Main {
         config.setAllowCredentials(Boolean.FALSE);
         Arrays.stream(allowedOrigins.split(",")).map(String::trim).filter(value -> !value.isEmpty())
                 .forEach(config::addAllowedOrigin);
-        config.setAllowedHeaders(java.util.List.of("Authorization", "Content-Type", "Token"));
+        config.setAllowedHeaders(java.util.List.of("Authorization", "Content-Type", "Token", "X-Request-ID"));
+        config.setExposedHeaders(java.util.List.of(
+                "X-RateLimit-Limit",
+                "X-RateLimit-Remaining",
+                "X-RateLimit-Reset",
+                "Retry-After"
+        ));
         config.setAllowedMethods(java.util.List.of("GET", "POST", "DELETE", "OPTIONS"));
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         if (!config.getAllowedOrigins().isEmpty()) source.registerCorsConfiguration("/**", config);

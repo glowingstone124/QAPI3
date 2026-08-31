@@ -272,6 +272,18 @@ IP 添加/删除常见返回码：`0` 成功，`1` 令牌无效，`2` 超出数�
 - 推荐 Header：`Authorization: Bearer <token>`。
 - 兼容旧 Header：`token: <token>`。
 
+### 统一每日额度
+
+Web、QQ Bot 和 Minecraft 三个入口都会在各自认证成功后归一到同一个 QQ UID，并共享该账户每天 50 轮的 LLM 额度。额度按 `Asia/Shanghai` 自然日重置，不能通过更换 token、IP 或调用入口绕过。
+
+- 可选 Header：`X-Request-ID: <client-generated-id>`，同一 source 内重复提交相同 ID 不会重复扣除额度。
+- `GET /qo/asking/v1/quota`：使用用户登录令牌查询统一额度，返回 `limit`、`used`、`remaining` 和 Unix 秒格式的 `reset_at`。
+- LLM 响应包含 `X-RateLimit-Limit`、`X-RateLimit-Remaining`、`X-RateLimit-Reset`；额度耗尽时返回 HTTP `429` 和 `Retry-After`。
+- Redis 不可用时额度受保护的 LLM 请求返回 HTTP `503`，不会 fail-open。
+- 上游在接受请求前失败会退还预留额度；上游已经接受请求或开始流式输出后，即使客户端中断也计为一轮。
+
+额度可通过 Spring property `qapi.llm.daily-limit` 调整，默认 `50`；时区可通过 `qapi.llm.quota-zone` 调整，默认 `Asia/Shanghai`。
+
 ### OpenAI Chat Completions
 
 `POST /qo/asking/v1/chat/completions`
