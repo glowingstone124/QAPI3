@@ -5,13 +5,14 @@ import org.qo.orm.UserORM
 import org.qo.services.llmServices.LLMDailyQuotaService
 import org.qo.services.llmServices.LLMQuotaStatus
 import org.qo.services.llmServices.LLMToolContext
+import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.stereotype.Component
 
 @Component
-class GetUserQuotaTool(
+class GetUserQuotaTool @Autowired constructor(
 	private val dailyQuotaService: LLMDailyQuotaService,
-	private val userORM: UserORM = UserORM(),
 ) : Tools {
+	private val userORM: UserORM = UserORM()
 
 	override val id = "get_user_quota"
 	override val definition = ToolSupport.functionTool(

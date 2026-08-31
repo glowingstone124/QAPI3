@@ -2,6 +2,7 @@ package org.qo.services.llmServices
 
 import org.qo.redis.DatabaseType
 import org.qo.redis.Redis
+import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Component
 import org.springframework.stereotype.Service
@@ -115,7 +116,7 @@ class RedisLLMQuotaStore : LLMQuotaStore {
 }
 
 @Service
-class LLMDailyQuotaService(
+class LLMDailyQuotaService @Autowired constructor(
     private val store: LLMQuotaStore,
     @Value("\${qapi.llm.daily-limit:50}") configuredDailyLimit: Int,
     @Value("\${qapi.llm.guest-daily-limit:20}") configuredGuestDailyLimit: Int = 20,
