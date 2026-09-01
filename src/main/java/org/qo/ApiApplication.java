@@ -382,7 +382,10 @@ public class ApiApplication {
         return userProcess.avatarTrans(name, publicBaseUrl).map(ri::GeneralHttpHeader);
     }
 
-    @GetMapping(value = "/qo/download/avatar/image", produces = MediaType.IMAGE_PNG_VALUE)
+    // Do not constrain content negotiation here.  The response always sets
+    // image/png explicitly, while accepting a broad request Accept header
+    // keeps image elements and API clients from receiving a 406 response.
+    @GetMapping("/qo/download/avatar/image")
     public Mono<ResponseEntity<byte[]>> avatarImage(
             @RequestParam(required = false) String name,
             @RequestParam(required = false) String key) {
