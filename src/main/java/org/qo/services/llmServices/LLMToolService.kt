@@ -28,6 +28,7 @@ class LLMToolService(
 	private val tools: List<Tools> by lazy {
 		val order = listOf(
 			"get_server_status",
+			"get_qo_player_profile",
 			"get_player_rankings",
 			"query_metro_lines",
 			"search_minecraft_knowledge",

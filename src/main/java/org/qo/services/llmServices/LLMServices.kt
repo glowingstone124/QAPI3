@@ -1454,7 +1454,7 @@ class LLMServices(
 			  ```qo-player-card
 			  {"username": "KnownPlayerName"}
 			  ```
-			  只填写 username，不要猜测或输出 QQ、在线状态、游玩时间、封禁状态、头像地址及统计数据；Kotshi 会从 QAPI 查询权威资料。若没有确定用户名，先向用户询问。
+			  输出玩家卡之前必须先调用 get_qo_player_profile 查询该用户名。只有工具返回 found=true 时才能输出；found=false 时明确说明未找到玩家，不得输出玩家卡。卡片中只填写工具确认过的 username，不要猜测或输出 QQ、在线状态、游玩时间、封禁状态、头像地址及统计数据；Kotshi 会从 QAPI 查询权威资料。若没有确定用户名，先向用户询问。
 			- 上述 fenced JSON 是 Kotshi 的展示标记，不是工具调用；除此之外仍禁止向用户暴露 JSON 工具参数。
 			""".trimIndent()
 		} else ""
