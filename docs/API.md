@@ -383,6 +383,7 @@ Body：
 非流式请求可调用：
 
 - `get_server_status`
+- `get_current_date`：查询当前日期和时间，可选传入 IANA 时区，默认使用 `Asia/Shanghai`。
 - `get_player_rankings`
 - `query_metro_lines`
 - `search_minecraft_knowledge`

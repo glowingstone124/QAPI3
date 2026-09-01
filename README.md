@@ -152,6 +152,7 @@ GET `/qo/download/registry?name=glowingstone124` ->
 The OpenAI-compatible non-stream chat endpoint can execute built-in tools before returning the final assistant message.
 
 - `get_server_status`: query Minecraft server status and player counts.
+- `get_current_date`: return the current date and time, with an optional IANA timezone (default `Asia/Shanghai`).
 - `get_player_rankings`: query mining, placement, and cumulative playtime leaderboards.
 - `query_metro_lines`: search metro lines, stations, sections, and signal coordinates.
 - `search_minecraft_knowledge`: search the configured RAG knowledge base for Minecraft/QO information.

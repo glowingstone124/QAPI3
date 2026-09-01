@@ -1417,6 +1417,7 @@ class LLMServices(
 			"search_minecraft_knowledge" -> "query" to "正在查询 Minecraft 资料…"
 			"search_memory" -> "query" to "正在查询相关记忆…"
 			"get_qo_player_profile" -> "query" to "正在查询玩家资料…"
+			"get_current_date" -> "query" to "正在查询当前日期…"
 			"get_server_status" -> "query" to "正在查询服务器状态…"
 			"get_player_rankings" -> "query" to "正在查询排行榜…"
 			"query_metro_lines" -> "query" to "正在查询线路信息…"
@@ -1567,8 +1568,9 @@ class LLMServices(
 
 	private fun webSearchRules(): String {
 		return """
-          联网检索规则：
-          - 涉及今天、当前、最新、最近、刚刚、新闻、公告、版本发布、价格、天气、赛程、活动时间、实时状态，或用户明确要求搜索网页、上网确认时，必须先使用 web search，再回答。
+		  联网检索规则：
+		  - 涉及今天、当前日期、当前时间或指定时区时间时，优先调用 get_current_date 获取准确结果，不要使用 web search 查询本机日期。
+		  - 涉及最新、最近、刚刚、新闻、公告、版本发布、价格、天气、赛程、活动时间、实时状态，或用户明确要求搜索网页、上网确认时，必须先使用 web search，再回答。
           - 涉及可能在知识截止时间后发生的外部事实、人物动态、产品信息或政策变化时，优先使用 web search 核实，不要只依赖模型记忆。
           - 如果问题是稳定的常识、数学推理、写作或仅涉及 QO 内部资料，不必为了形式而联网；这类问题优先使用知识库或其他专用工具。
           - 联网结果不足、来源相互矛盾或无法确认时，要明确说明不确定，并给出来源中的时间信息；不要把搜索结果之外的内容当成事实补全。
