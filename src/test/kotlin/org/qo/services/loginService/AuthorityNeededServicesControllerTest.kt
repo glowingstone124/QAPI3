@@ -6,6 +6,7 @@ import org.mockito.Mockito
 import org.qo.TestApiApplication
 import org.qo.datas.Nodes
 import org.qo.utils.ReturnInterface
+import org.qo.services.llmServices.KotshiAccountService
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.autoconfigure.web.reactive.AutoConfigureWebTestClient
 import org.springframework.boot.test.context.SpringBootTest
@@ -42,6 +43,9 @@ class AuthorityNeededServicesControllerTest {
 
 	@MockitoBean
 	lateinit var recentLoginService: RecentLoginService
+
+	@MockitoBean
+	lateinit var kotshiAccountService: KotshiAccountService
 
 	@Test
 	fun autoLogin_allowsRecentLoginFromSameIpForAuthenticatedServer() {

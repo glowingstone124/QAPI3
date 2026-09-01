@@ -4,12 +4,14 @@ import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import kotlinx.coroutines.reactor.awaitSingle
 import org.qo.services.llmServices.LLMToolContext
+import org.qo.services.loginService.KotshiPrivacyService
 import org.qo.utils.UserProcess
 import org.springframework.stereotype.Component
 
 @Component
 class GetQoPlayerProfileTool(
     private val userProcess: UserProcess,
+    private val kotshiPrivacyService: KotshiPrivacyService,
 ) : Tools {
     override val id = "get_qo_player_profile"
     override val definition = ToolSupport.functionTool(
@@ -31,6 +33,13 @@ class GetQoPlayerProfileTool(
             ?.trim()
             ?.takeIf { it.matches(MINECRAFT_USERNAME) }
             ?: return ToolSupport.errorResult("invalid_username", "请输入有效的 Minecraft 用户名")
+
+        if (!kotshiPrivacyService.isQueryEnabled(username)) {
+            return ToolSupport.gson.toJson(JsonObject().apply {
+                addProperty("found", false)
+                addProperty("username", username)
+            })
+        }
 
         val registry = runCatching {
             JsonParser.parseString(userProcess.queryReg(username).awaitSingle()).asJsonObject

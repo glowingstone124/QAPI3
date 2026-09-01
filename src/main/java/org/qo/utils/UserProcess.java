@@ -10,6 +10,7 @@ import org.qo.orm.AffiliatedAccountORM;
 import org.qo.services.loginService.AffiliatedAccountServices;
 import org.qo.services.loginService.AvatarRelatedImpl;
 import org.qo.services.loginService.Login;
+import org.qo.services.loginService.KotshiPrivacyService;
 import org.qo.datas.Mapping.*;
 import org.qo.services.loginService.PlayerCardCustomizationImpl;
 import org.qo.services.playerStatistics.PlayerStatisticsService;
@@ -19,6 +20,7 @@ import org.qo.server.AvatarCache;
 import org.qo.services.messageServices.Msg;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.server.reactive.ServerHttpRequest;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -58,11 +60,13 @@ public class UserProcess {
     private static final Redis redis = new Redis();
     private final UserProcessReactiveStore reactiveStore;
     private final Login login;
+    private final KotshiPrivacyService kotshiPrivacyService;
 
     @Autowired
-    public UserProcess(Login login, UserProcessReactiveStore reactiveStore) {
+    public UserProcess(Login login, UserProcessReactiveStore reactiveStore, KotshiPrivacyService kotshiPrivacyService) {
         this.login = login;
         this.reactiveStore = reactiveStore;
+        this.kotshiPrivacyService = kotshiPrivacyService;
     }
 
     public static String getServerStats() throws IOException {
@@ -155,6 +159,26 @@ public class UserProcess {
                             }
                             return responseJson.toString();
                         }));
+    }
+
+    /**
+     * Kotshi has its own lookup path so the account privacy switch cannot be
+     * bypassed by the legacy public registry endpoint.
+     */
+    public Mono<ResponseEntity<String>> queryKotshiReg(String name) {
+        String normalized = name == null ? "" : name.trim();
+        return kotshiPrivacyService.isQueryEnabledReactive(normalized)
+                .flatMap(enabled -> {
+                    if (!enabled) {
+                        return Mono.just(ri.GeneralHttpHeader(
+                                "{\"code\":3,\"message\":\"该玩家未允许在 Kotshi 中查询\"}",
+                                HttpStatus.FORBIDDEN));
+                    }
+                    return queryReg(normalized).map(ri::GeneralHttpHeader);
+                })
+                .onErrorResume(error -> Mono.just(ri.GeneralHttpHeader(
+                        "{\"code\":503,\"message\":\"Kotshi 玩家查询暂时不可用\"}",
+                        HttpStatus.SERVICE_UNAVAILABLE)));
     }
 
     public Mono<String> queryReg(long qq) {

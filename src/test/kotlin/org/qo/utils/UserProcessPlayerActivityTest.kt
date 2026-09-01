@@ -9,6 +9,7 @@ import org.mockito.Mockito
 import org.qo.datas.Mapping
 import org.qo.services.loginService.AffiliatedAccountServices
 import org.qo.services.loginService.Login
+import org.qo.services.loginService.KotshiPrivacyService
 import org.qo.services.playerStatistics.PlayerStatisticsService
 import org.springframework.test.util.ReflectionTestUtils
 import reactor.core.publisher.Mono
@@ -16,7 +17,8 @@ import reactor.core.publisher.Mono
 class UserProcessPlayerActivityTest {
 	private val login = Mockito.mock(Login::class.java)
 	private val reactiveStore = Mockito.mock(UserProcessReactiveStore::class.java)
-	private val userProcess = UserProcess(login, reactiveStore)
+	private val kotshiPrivacyService = Mockito.mock(KotshiPrivacyService::class.java)
+	private val userProcess = UserProcess(login, reactiveStore, kotshiPrivacyService)
 	private val affiliatedAccountServices = Mockito.mock(AffiliatedAccountServices::class.java)
 	private val playerStatisticsService = Mockito.mock(PlayerStatisticsService::class.java)
 

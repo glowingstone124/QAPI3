@@ -9,6 +9,7 @@ import org.qo.datas.Nodes
 import org.qo.utils.ReturnInterface
 import org.qo.utils.AuthTokens
 import org.qo.services.loginService.IPWhitelistServices.WhitelistReasons
+import org.qo.services.llmServices.KotshiAccountService
 import org.qo.orm.UserORM
 import org.qo.utils.SerializeUtils.convertToJsonArray
 import org.springframework.http.HttpHeaders
@@ -16,6 +17,7 @@ import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.DeleteMapping
+import org.springframework.web.bind.annotation.PatchMapping
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestHeader
@@ -35,7 +37,8 @@ class AuthorityNeededServicesController(
 	private val playerCardCustomizationImpl: PlayerCardCustomizationImpl,
 	private val affiliatedAccountServices: AffiliatedAccountServices,
 	private val nodes: Nodes,
-	private val recentLoginService: RecentLoginService
+	private val recentLoginService: RecentLoginService,
+	private val kotshiAccountService: KotshiAccountService,
 ) {
 	private fun resolveLoginToken(tokenHeader: String?, authorizationHeader: String?): String? {
 		return AuthTokens.resolve(tokenHeader, authorizationHeader)
@@ -76,6 +79,36 @@ class AuthorityNeededServicesController(
 	): ResponseEntity<String> {
 		val resolvedToken = resolveLoginToken(token, authorization) ?: return missingTokenResponse()
 		return ri.GeneralHttpHeader(authorityNeededServicesImpl.getAccountInfo(resolvedToken))
+	}
+
+	@GetMapping("/account/kotshi")
+	suspend fun getKotshiAccount(
+		@RequestHeader("token", required = false) token: String?,
+		@RequestHeader(HttpHeaders.AUTHORIZATION, required = false) authorization: String?
+	): ResponseEntity<String> {
+		val resolvedToken = resolveLoginToken(token, authorization) ?: return missingTokenResponse()
+		val snapshot = kotshiAccountService.snapshot(resolvedToken)
+			?: return ri.GeneralHttpHeader("{\"error\":\"Invalid token.\"}", HttpStatus.UNAUTHORIZED)
+		return ri.GeneralHttpHeader(snapshot.toJson())
+	}
+
+	@PatchMapping("/account/kotshi")
+	suspend fun updateKotshiAccount(
+		@RequestHeader("token", required = false) token: String?,
+		@RequestHeader(HttpHeaders.AUTHORIZATION, required = false) authorization: String?,
+		@RequestBody body: String,
+	): ResponseEntity<String> {
+		val resolvedToken = resolveLoginToken(token, authorization) ?: return missingTokenResponse()
+		val json = runCatching { JsonParser.parseString(body).asJsonObject }.getOrNull()
+		val enabled = (json?.get("kotshi_query_enabled") ?: json?.get("query_enabled"))
+			?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isBoolean }
+			?.asBoolean
+			?: return ri.GeneralHttpHeader("{\"error\":\"kotshi_query_enabled must be boolean\"}", HttpStatus.BAD_REQUEST)
+		val settings = kotshiAccountService.updateQueryEnabled(resolvedToken, enabled)
+			?: return ri.GeneralHttpHeader("{\"error\":\"Invalid token.\"}", HttpStatus.UNAUTHORIZED)
+		return ri.GeneralHttpHeader(JsonObject().apply {
+			addProperty("kotshi_query_enabled", settings.queryEnabled)
+		}.toString())
 	}
 
 	@PostMapping("/account/card/custom")

@@ -415,6 +415,11 @@ public class ApiApplication {
         return userProcess.queryReg(name).map(ri::GeneralHttpHeader);
     }
 
+    @GetMapping("/qo/kotshi/player")
+    public Mono<ResponseEntity<String>> queryKotshiPlayer(@RequestParam String name) {
+        return userProcess.queryKotshiReg(name);
+    }
+
     @GetMapping("/qo/webmsg/download")
     public ResponseEntity<String> returnWeb(@RequestHeader("Authorization") String authorization) {
         String token = AuthTokens.INSTANCE.resolve(null, authorization);

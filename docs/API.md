@@ -69,6 +69,8 @@
 | 方法 | 路径 | 认证 | 参数/请求体 |
 |---|---|---|---|
 | `GET` | `/qo/authorization/account` | 用户令牌 | 返回当前账户信息。 |
+| `GET` | `/qo/authorization/account/kotshi` | 用户令牌 | 返回 Kotshi 查询开关、共享额度、当日 Kotshi 使用汇总和最近调用记录。 |
+| `PATCH` | `/qo/authorization/account/kotshi` | 用户令牌 | JSON：`{"kotshi_query_enabled":true|false}`；更新是否允许 Kotshi 按玩家名查询当前账户资料。 |
 | `POST` | `/qo/authorization/account/frozen?uid=<uid>` | 管理/内部 | 冻结账户。 |
 | `GET` | `/qo/authorization/account/card?profileUuid=<uuid>` | 公开 | 查询指定玩家卡片。 |
 | `POST` | `/qo/authorization/account/card/custom` | 用户令牌 | `Mapping.CardProfile` JSON。 |
@@ -84,6 +86,7 @@
 | 方法 | 路径 | 认证 | 参数 |
 |---|---|---|---|
 | `GET` | `/qo/download/registry?name=<name>` | 公开 | 按 Minecraft 用户名查询注册信息；`last_login` 为玩家最后上线的 Unix 毫秒时间戳，未记录时为 `0` 或 `null`。 |
+| `GET` | `/qo/kotshi/player?name=<name>` | 公开 | Kotshi 专用玩家查询入口；按账户的 `kotshi_query_enabled` 设置决定是否返回资料，关闭时返回 `403`。 |
 | `POST` | `/qo/player-statistics/upload` | 生存服节点 | 上传玩家累计统计快照：移动距离、伤害、击杀与鞘翅飞行时间。挖掘、放置直接复用排行榜累计数据。 |
 
 `/qo/download/registry` 的响应包含 `statistics` 对象：`distance_cm`、`damage_dealt`（Minecraft 原始值，10 为 1 点伤害）、`mob_kills`、`blocks_mined`、`blocks_placed` 和 `elytra_flight_ticks`。
@@ -278,6 +281,9 @@ Web、QQ Bot 和 Minecraft 三个入口都会在各自认证成功后归一到�
 
 - 可选 Header：`X-Request-ID: <client-generated-id>`，同一 source 内重复提交相同 ID 不会重复扣除额度。
 - `GET /qo/asking/v1/quota`：使用用户登录令牌查询统一额度，返回 `limit`、`used`、`remaining` 和 Unix 秒格式的 `reset_at`。
+- `GET /qo/authorization/account/kotshi`：使用用户登录令牌查询 Kotshi 查询权限、统一额度、当日 Kotshi Web 使用汇总和最近调用记录。
+- `PATCH /qo/authorization/account/kotshi`：使用 `{"kotshi_query_enabled": false}` 关闭该账户在 Kotshi 中被按玩家名查询；QCommunity 原有公开查询接口不受此开关影响。
+- `GET /qo/kotshi/player?name=<name>`：Kotshi 使用的隐私感知玩家查询入口。查询开关关闭时返回 HTTP `403`，避免客户端或 LLM 工具绕过账户设置。
 - LLM 响应包含 `X-RateLimit-Limit`、`X-RateLimit-Remaining`、`X-RateLimit-Reset`；额度耗尽时返回 HTTP `429` 和 `Retry-After`。
 - Redis 不可用时额度受保护的 LLM 请求返回 HTTP `503`，不会 fail-open。
 - 上游在接受请求前失败会退还预留额度；上游已经接受请求或开始流式输出后，即使客户端中断也计为一轮。
