@@ -177,6 +177,7 @@ Related environment variables:
 - `LLM_ULTRA_BRIEF_QQ_UIDS`: comma- or space-separated QQ uids that receive one-sentence replies unless safety or factual clarification requires more.
 - `LLM_STRIP_EMOJI`: set to `true` to remove emoji from upstream answers during output sanitization. Tool-call markup and emoticons are always removed.
 - `qapi.llm.web-allowed-origin-patterns`: comma-separated origin patterns allowed to request Web SSE chat. Defaults to `https://*.qoriginal.vip,http://localhost:*,http://127.0.0.1:*`; untrusted or missing origins are rejected for `stream=true` requests.
+- `qapi.cors.allowed-origins`: comma-separated CORS origins. The default explicitly includes `https://ai.qoriginal.vip` and retains the existing wildcard for compatibility. Set `QAPI_CORS_ALLOWED_ORIGINS` in production to replace the default with an exact origin list.
 - `LLM_GROUP_SUMMARY_ENABLED`: enable per-group rolling fact summaries, default `true`. When disabled, raw history is still archived for explicit search but is not automatically injected.
 - `LLM_GROUP_SUMMARY_DIR`: persistent rolling-summary directory, default `data/llm/summaries`.
 - `LLM_GROUP_SUMMARY_MAX_CHARS`: maximum persisted summary characters per group, default `5000`.
