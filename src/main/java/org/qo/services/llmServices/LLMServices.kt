@@ -569,6 +569,15 @@ class LLMServices(
 		quotaReservation: LLMQuotaReservation,
 	): Flow<String> = flow {
 		var upstreamAccepted = false
+		var lastProgressKey: String? = null
+		suspend fun emitProgress(phase: String, label: String) {
+			val key = "$phase:$label"
+			if (key == lastProgressKey) return
+			lastProgressKey = key
+			emit(progressChunk(phase, label))
+		}
+
+		emitProgress("analyzing", "正在分析问题…")
 		try {
 			client.preparePost(provider.chatCompletionsUrl) {
 				logUpstreamRequest(source, request.body, provider, "chat-completions")
@@ -600,6 +609,7 @@ class LLMServices(
 					}
 					latestUsage = parseUsage(body)
 					assistantContent.append(converted.second)
+					emitProgress("generating", "正在生成回复…")
 					emit(converted.first)
 					updateAccessRecord(requestId, "completed", latestUsage)
 					recordConversationAnswer(requester, request.userContent, assistantContent.toString(), provider)
@@ -613,7 +623,12 @@ class LLMServices(
 					if (data.isBlank()) continue
 					if (data != "[DONE]") {
 						parseUsage(data)?.let { latestUsage = it }
-						parseStreamAssistantContent(data)?.let(assistantContent::append)
+						streamProgress(data)?.let { (phase, label) -> emitProgress(phase, label) }
+						val assistantDelta = parseStreamAssistantContent(data)
+						if (!assistantDelta.isNullOrBlank()) {
+							emitProgress("generating", "正在生成回复…")
+							assistantContent.append(assistantDelta)
+						}
 					}
 					if (data != "[DONE]") emit(data)
 				}
@@ -630,6 +645,12 @@ class LLMServices(
 			emit(errorJson("upstream_error", e.message ?: "LLM 上游请求失败"))
 		}
 	}
+
+	private fun progressChunk(phase: String, label: String): String = JsonObject().apply {
+		addProperty("object", "kotshi.status")
+		addProperty("phase", phase)
+		addProperty("label", label)
+	}.toString()
 
 	private fun nonStreamCompletionToStreamChunk(body: String): Pair<String, String>? = runCatching {
 		val root = jsonParser.parse(body).asJsonObject
@@ -1355,6 +1376,62 @@ class LLMServices(
 			?.takeIf { !it.isJsonNull }
 			?.asString
 	}.getOrNull()
+
+	/**
+	 * Converts provider metadata into a safe, user-facing phase. Only the phase
+	 * and a fixed label are sent; tool arguments and hidden reasoning are never
+	 * forwarded to the browser.
+	 */
+	private fun streamProgress(body: String): Pair<String, String>? = runCatching {
+		val root = jsonParser.parse(body).asJsonObject
+		val upstreamType = root.get("type")?.takeIf { it.isJsonPrimitive }?.asString?.lowercase().orEmpty()
+		if (upstreamType.contains("web_search")) {
+			return@runCatching "web_search" to "正在进行 Web 搜索…"
+		}
+
+		val choices = root.getAsJsonArray("choices") ?: return@runCatching null
+		if (choices.size() == 0) return@runCatching null
+		val delta = choices[0].asJsonObject.getAsJsonObject("delta") ?: return@runCatching null
+		val toolCalls = delta.get("tool_calls")
+			?.takeIf { it.isJsonArray }
+			?.asJsonArray
+		if (toolCalls != null) {
+			for (item in toolCalls) {
+				val function = item.takeIf { it.isJsonObject }
+					?.asJsonObject
+					?.getAsJsonObject("function")
+				val name = function?.get("name")?.takeIf { it.isJsonPrimitive }?.asString
+				if (!name.isNullOrBlank()) return@runCatching toolProgress(name)
+			}
+		}
+
+		val reasoning = delta.get("reasoning_content")
+			?.takeIf { it.isJsonPrimitive }
+			?.asString
+		if (!reasoning.isNullOrBlank()) "thinking" to "正在整理思路…" else null
+	}.getOrNull()
+
+	private fun toolProgress(name: String): Pair<String, String> {
+		return when (name.trim().lowercase()) {
+			"search_chat_history" -> "query" to "正在查询聊天记录…"
+			"search_minecraft_knowledge" -> "query" to "正在查询 Minecraft 资料…"
+			"search_memory" -> "query" to "正在查询相关记忆…"
+			"get_qo_player_profile" -> "query" to "正在查询玩家资料…"
+			"get_server_status" -> "query" to "正在查询服务器状态…"
+			"get_player_rankings" -> "query" to "正在查询排行榜…"
+			"query_metro_lines" -> "query" to "正在查询线路信息…"
+			else -> {
+				val normalized = name.trim().lowercase()
+				if (normalized.contains("web") && normalized.contains("search")) {
+					"web_search" to "正在进行 Web 搜索…"
+				} else if (normalized.contains("search") || normalized.contains("query") || normalized.startsWith("get_")) {
+					"query" to "正在调用查询…"
+				} else {
+					"tool" to "正在调用工具…"
+				}
+			}
+		}
+	}
 
 	private fun sanitizeResponseBody(responseBody: String, enableMarkdown: Boolean = false): String {
 		if (!sanitizeOutput) {
