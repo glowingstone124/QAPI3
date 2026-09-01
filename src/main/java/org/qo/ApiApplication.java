@@ -353,10 +353,23 @@ public class ApiApplication {
 
     @RequestMapping("/qo/download/avatar")
     public Mono<ResponseEntity<String>> avartarTrans(@RequestParam() String name, ServerHttpRequest request) {
-        String publicBaseUrl = request.getURI().getRawAuthority() == null
-                ? null
-                : request.getURI().getScheme() + "://" + request.getURI().getRawAuthority();
-        return avatarResponse(name, publicBaseUrl);
+        return avatarResponse(name, avatarPublicBaseUrl(request));
+    }
+
+    static String avatarPublicBaseUrl(ServerHttpRequest request) {
+        String authority = request.getURI().getRawAuthority();
+        if (authority == null || authority.isBlank()) {
+            return null;
+        }
+        String scheme = request.getURI().getScheme();
+        String forwardedProto = request.getHeaders().getFirst("X-Forwarded-Proto");
+        if (forwardedProto != null) {
+            String candidate = forwardedProto.split(",", 2)[0].trim().toLowerCase(java.util.Locale.ROOT);
+            if (candidate.equals("http") || candidate.equals("https")) {
+                scheme = candidate;
+            }
+        }
+        return scheme + "://" + authority;
     }
 
     private Mono<ResponseEntity<String>> avatarResponse(String name, String publicBaseUrl) {
