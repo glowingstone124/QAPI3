@@ -289,9 +289,14 @@ class LLMServices(
 		}
 		val reservation = requireNotNull(quota.reservation)
 
+		val chunks = if (provider.supportsResponses(request.preset)) {
+			streamFromResponses(request, requester, requestId, "stream", provider, reservation)
+		} else {
+			streamFromUpstream(request, requester, requestId, "stream", provider, reservation)
+		}
 		return LLMStreamResult(
 			200,
-			streamFromUpstream(request, requester, requestId, "stream", provider, reservation),
+			chunks,
 			quota.view,
 		)
 	}
@@ -512,6 +517,7 @@ class LLMServices(
 			request.body,
 			functionTools,
 			enableWebSearch = webSearchEnabled,
+			reasoningEffort = request.reasoningEffort,
 		)
 		repeat(maxToolRounds) { round ->
 			val response = postUpstream("$source/responses-round-${round + 1}", body.toString(), provider, provider.responsesUrl)
@@ -646,6 +652,165 @@ class LLMServices(
 		}
 	}
 
+	private fun streamFromResponses(
+		request: NormalizedRequest,
+		requester: LLMRequester,
+		requestId: Long,
+		source: String,
+		provider: LLMProvider,
+		quotaReservation: LLMQuotaReservation,
+	): Flow<String> = flow {
+		val functionTools = if (toolService.enabled()) toolService.definitions() else JsonArray()
+		val upstreamBody = LLMResponsesAdapter.fromChatRequest(
+			request.body,
+			functionTools,
+			enableWebSearch = webSearchEnabled,
+			reasoningEffort = request.reasoningEffort,
+			stream = true,
+		)
+		val assistantContent = StringBuilder()
+		var upstreamAccepted = false
+		var lastProgressKey: String? = null
+		suspend fun emitProgress(phase: String, label: String) {
+			val key = "$phase:$label"
+			if (key == lastProgressKey) return
+			lastProgressKey = key
+			emit(progressChunk(phase, label))
+		}
+
+		emitProgress("analyzing", "正在分析问题…")
+		try {
+			repeat(maxToolRounds) { round ->
+				var terminalResponse: JsonObject? = null
+				var upstreamError: String? = null
+				client.preparePost(provider.responsesUrl) {
+					val body = upstreamBody.toString()
+					logUpstreamRequest("$source/responses-round-${round + 1}", body, provider, "responses")
+					header(HttpHeaders.Authorization, "Bearer ${provider.apiToken}")
+					header(HttpHeaders.Accept, ContentType.Text.EventStream.toString())
+					contentType(ContentType.Application.Json)
+					debugPrompt(source, body)
+					setBody(body)
+				}.execute { response ->
+					if (!response.status.isSuccess()) {
+						upstreamError = response.bodyAsText()
+						return@execute
+					}
+					upstreamAccepted = true
+
+					val channel = response.bodyAsChannel()
+					while (!channel.isClosedForRead) {
+						val line = channel.readUTF8Line() ?: break
+						if (!line.startsWith("data:")) continue
+						val data = line.removePrefix("data:").trim()
+						if (data.isBlank()) continue
+						val event = runCatching { JsonParser.parseString(data).asJsonObject }.getOrNull() ?: continue
+						when (event.get("type")?.asString) {
+							"response.reasoning_text.delta" -> {
+								if (!event.get("delta")?.asString.isNullOrBlank()) {
+									emitProgress("thinking", "正在整理思路…")
+								}
+							}
+
+							"response.output_text.delta" -> {
+								val delta = event.get("delta")?.asString.orEmpty()
+								if (delta.isNotEmpty()) {
+									emitProgress("generating", "正在生成回复…")
+									assistantContent.append(delta)
+									emit(responsesTextDeltaChunk(delta, request.model))
+								}
+							}
+
+							"response.web_search_call.in_progress",
+							"response.web_search_call.searching",
+							"response.web_search_call.completed" ->
+								emitProgress("web_search", "正在进行 Web 搜索…")
+
+							"response.completed", "response.incomplete", "response.failed" -> {
+								terminalResponse = event.getAsJsonObject("response")
+							}
+						}
+					}
+				}
+
+				if (upstreamError != null) {
+					if (!upstreamAccepted) dailyQuotaService.refund(quotaReservation)
+					updateAccessRecord(requestId, "failed", errorMessage = upstreamError!!.take(512))
+					emit(normalizeUpstreamError(upstreamError!!))
+					return@flow
+				}
+
+				val completed = terminalResponse
+				if (completed == null) {
+					updateAccessRecord(requestId, "failed", errorMessage = "Responses stream ended without a terminal event")
+					emit(errorJson("upstream_error", "Responses API 流提前结束"))
+					return@flow
+				}
+				if (completed.get("status")?.asString == "failed") {
+					val message = completed.getAsJsonObject("error")?.get("message")?.asString
+						?: "Responses API 请求失败"
+					updateAccessRecord(requestId, "failed", errorMessage = message.take(512))
+					emit(errorJson("upstream_error", message))
+					return@flow
+				}
+
+				val completedBody = completed.toString()
+				val functionCalls = LLMResponsesAdapter.functionCalls(completedBody)
+				if (functionCalls.isEmpty()) {
+					val usage = parseUsage(completedBody)
+					if (assistantContent.isBlank()) {
+						val converted = nonStreamCompletionToStreamChunk(
+							LLMResponsesAdapter.toChatCompletion(completedBody)
+						)
+						if (converted != null && converted.second.isNotBlank()) {
+							emitProgress("generating", "正在生成回复…")
+							assistantContent.append(converted.second)
+							emit(converted.first)
+						}
+					}
+					updateAccessRecord(requestId, "completed", usage)
+					if (assistantContent.isNotBlank()) {
+						recordConversationAnswer(requester, request.userContent, assistantContent.toString(), provider)
+					}
+					return@flow
+				}
+
+				val outputs = linkedMapOf<String, String>()
+				for (call in functionCalls) {
+					val (phase, label) = toolProgress(call.name)
+					emitProgress(phase, label)
+					outputs[call.callId] = toolService.execute(
+						call.name,
+						call.arguments,
+						requester.toolContext(request.currentUserText),
+					)
+				}
+				LLMResponsesAdapter.appendToolOutputs(upstreamBody, completedBody, outputs)
+			}
+
+			updateAccessRecord(requestId, "failed", errorMessage = "Responses tool round limit exceeded")
+			emit(errorJson("tool_round_limit", "工具调用轮数超过限制，请调高 LLM_TOOL_MAX_ROUNDS"))
+		} catch (e: Exception) {
+			if (!upstreamAccepted) dailyQuotaService.refund(quotaReservation)
+			updateAccessRecord(requestId, "failed", errorMessage = e.message)
+			emit(errorJson("upstream_error", e.message ?: "LLM 上游请求失败"))
+		}
+	}
+
+	private fun responsesTextDeltaChunk(delta: String, model: String): String = JsonObject().apply {
+		addProperty("object", "chat.completion.chunk")
+		addProperty("model", model)
+		add("choices", JsonArray().apply {
+			add(JsonObject().apply {
+				addProperty("index", 0)
+				add("delta", JsonObject().apply {
+					addProperty("role", "assistant")
+					addProperty("content", delta)
+				})
+			})
+		})
+	}.toString()
+
 	private fun progressChunk(phase: String, label: String): String = JsonObject().apply {
 		addProperty("object", "kotshi.status")
 		addProperty("phase", phase)
@@ -708,8 +873,20 @@ class LLMServices(
 		obj.remove("conversation_id")
 		obj.remove("conversationId")
 		val enableMarkdown = extractEnableMarkdownFlag(obj)
+		val requesterSource = LLMSource.entries.firstOrNull { it.value == requester?.source }
+		val reasoningDefault = defaultReasoningEffort(requesterSource)
+		val reasoningEffort = extractReasoningEffort(obj, reasoningDefault)
+		if (requester?.source == LLMSource.WEB.value && reasoningEffort == LLMReasoningEffort.NONE) {
+			throw IllegalArgumentException("Web reasoning effort must be one of low, high, max")
+		}
 		val resolvedModel = provider.modelName(model) ?: throw IllegalArgumentException("请求的模型不可用")
 		obj.addProperty("model", resolvedModel)
+		if (!provider.supportsResponses(model)) {
+			obj.addProperty("reasoning_effort", reasoningEffort.wireValue)
+			obj.add("thinking", JsonObject().apply {
+				addProperty("type", if (reasoningEffort == LLMReasoningEffort.NONE) "disabled" else "enabled")
+			})
+		}
 		requester?.let {
 			obj.addProperty("user_id", it.conversationKey())
 		}
@@ -763,6 +940,7 @@ class LLMServices(
 			userContent = enrichedTurn.persistedUserContent,
 			currentUserText = userQuestion,
 			enableMarkdown = enableMarkdown,
+			reasoningEffort = reasoningEffort,
 		)
 	}
 
@@ -1788,6 +1966,7 @@ class LLMServices(
 		val userContent: JsonElement,
 		val currentUserText: String,
 		val enableMarkdown: Boolean,
+		val reasoningEffort: LLMReasoningEffort,
 	)
 
 	private data class LLMRequester(

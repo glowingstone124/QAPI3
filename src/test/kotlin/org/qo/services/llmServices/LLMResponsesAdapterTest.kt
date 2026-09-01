@@ -25,6 +25,7 @@ class LLMResponsesAdapterTest {
             """{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"today's news"}],"user_id":"qq:1"}""",
             functionTools,
             enableWebSearch = true,
+            reasoningEffort = LLMReasoningEffort.NONE,
         )
 
         assertFalse(request.has("messages"))
@@ -33,6 +34,7 @@ class LLMResponsesAdapterTest {
         assertEquals("function", request.getAsJsonArray("tools")[0].asJsonObject.get("type").asString)
         assertEquals("get_server_status", request.getAsJsonArray("tools")[0].asJsonObject.get("name").asString)
         assertEquals("web_search", request.getAsJsonArray("tools")[1].asJsonObject.get("type").asString)
+        assertEquals("none", request.getAsJsonObject("reasoning").get("effort").asString)
     }
 
     @Test
@@ -60,6 +62,8 @@ class LLMResponsesAdapterTest {
             """.trimIndent(),
             JsonArray(),
             enableWebSearch = false,
+            reasoningEffort = LLMReasoningEffort.MAX,
+            stream = true,
         )
 
         val content = request.getAsJsonArray("input")[0]
@@ -71,6 +75,8 @@ class LLMResponsesAdapterTest {
         assertEquals("input_image", content[1].asJsonObject.get("type").asString)
         assertEquals("data:image/png;base64,AQID", content[1].asJsonObject.get("image_url").asString)
         assertEquals("high", content[1].asJsonObject.get("detail").asString)
+        assertEquals("max", request.getAsJsonObject("reasoning").get("effort").asString)
+        assertTrue(request.get("stream").asBoolean)
     }
 
     @Test

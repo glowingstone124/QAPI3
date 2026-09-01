@@ -149,7 +149,7 @@ GET `/qo/download/registry?name=glowingstone124` ->
 
 ### LLM Tool Calling
 
-The OpenAI-compatible non-stream chat endpoint can execute built-in tools before returning the final assistant message.
+The OpenAI-compatible chat endpoint can execute built-in tools on Responses-backed presets in both JSON and SSE modes before returning the final assistant message.
 
 - `get_server_status`: query Minecraft server status and player counts.
 - `get_current_date`: return the current date and time, with an optional IANA timezone (default `Asia/Shanghai`).
@@ -192,7 +192,7 @@ Related environment variables:
 
 QQ group messages are archived in the `llm_chat_history` table through `POST /qo/asking/v1/chat/history`. The bot endpoint also backfills its sliding `group_context`, using stable source IDs and `INSERT IGNORE` for idempotency. The LLM can retrieve older, group-scoped records with the `search_chat_history` tool; results never cross group boundaries.
 - `LLM_TOOLS_ENABLED`: enable built-in tools, default `true`.
-- `LLM_WEB_SEARCH_ENABLED`: enable DeepSeek server-side web search for non-stream `deepseek-v4-flash` requests, default `true`.
+- `LLM_WEB_SEARCH_ENABLED`: enable DeepSeek server-side web search for Responses-backed requests, default `true`.
 - `LLM_PROVIDERS_FILE`: provider configuration JSON path, default `data/llm/providers.json`. The file is watched and the configuration (including referenced token files) is periodically reloaded; invalid updates keep the last valid provider.
 - `LLM_PROVIDER`: selected provider name. If omitted, the JSON `defaultProvider` is used and may be changed by hot-reloading the provider file. When set, this environment override remains fixed until restart.
 - `LLM_RESPONSES_API_URL`: legacy fallback Responses API endpoint. Provider JSON should use an explicit `responsesUrl`.

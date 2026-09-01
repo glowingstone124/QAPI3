@@ -301,6 +301,7 @@ Web、QQ Bot 和 Minecraft 三个入口都会在各自认证成功后归一到�
   "model": "fast",
   "stream": false,
   "enable-markdown": false,
+  "reasoning_effort": "none",
   "messages": [
     {"role": "user", "content": "你好"}
   ]
@@ -313,7 +314,9 @@ Web、QQ Bot 和 Minecraft 三个入口都会在各自认证成功后归一到�
 - `thinking`
 - provider JSON 中配置的真实模型名
 
-`stream=false` 返回 JSON；`stream=true` 返回 SSE。非流式请求支持工具调用、群上下文、记忆、历史检索、RAG 和 Responses API。
+`stream=false` 返回 JSON；`stream=true` 返回 SSE。配置在 provider `responsesModels` 中的预设会使用 Responses API，服务端把兼容层的 `reasoning_effort` 转换为上游 `reasoning.effort`。工具调用、群上下文、记忆、历史检索和 RAG 在 Responses 路径中均可用；工具轮次会完整回传上游 output item，以保留模型需要的 reasoning 上下文。
+
+`reasoning_effort` 支持 `none`、`low`、`medium`、`high`、`xhigh`、`max`；DeepSeek 映射为 `none→none`、`low→low`、`medium/high/xhigh→high`、`max→max`。QQ Bot 与 Minecraft 请求默认 `none`，Web 请求默认 `high`，Web 客户端只提供 `low/high/max`。也可传 Responses 形式的 `{"reasoning":{"effort":"high"}}`，但不可与 `reasoning_effort` 同时出现。
 
 流式 SSE 会先发送若干 `data:` JSON 状态帧（`object: "kotshi.status"`），例如
 `{"phase":"analyzing","label":"正在分析问题…"}`、
@@ -336,7 +339,7 @@ Web 流式请求会校验 `Origin`，允许来源由 `qapi.llm.web-allowed-origi
 - 可选 `X-QQ-Name: <name>`
 - 节点认证：`Authorization` 或 `token`
 
-Body 与 Chat Completions 相同。
+Body 与 Chat Completions 相同。Bot 请求未指定推理强度时默认使用 `none`。
 
 ### Minecraft 对话
 
@@ -348,6 +351,8 @@ Body 与 Chat Completions 相同。
 - `X-Minecraft-Coordinate`
 - `X-Minecraft-HP`
 - 节点认证：`Authorization` 或 `token`
+
+Minecraft 请求未指定推理强度时默认使用 `none`。
 
 ### 历史消息归档
 
@@ -386,7 +391,7 @@ Body：
 
 ### LLM 内置工具
 
-非流式请求可调用：
+Responses 路径的非流式与 SSE 请求均可调用：
 
 - `get_server_status`
 - `get_current_date`：查询当前日期和时间，可选传入 IANA 时区，默认使用 `Asia/Shanghai`。

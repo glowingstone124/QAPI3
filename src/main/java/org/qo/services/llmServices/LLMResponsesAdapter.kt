@@ -5,13 +5,22 @@ import com.google.gson.JsonElement
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 
-object LLMResponsesAdapter {
-    fun fromChatRequest(chatBody: String, functionTools: JsonArray, enableWebSearch: Boolean): JsonObject {
+internal object LLMResponsesAdapter {
+    fun fromChatRequest(
+        chatBody: String,
+        functionTools: JsonArray,
+        enableWebSearch: Boolean,
+        reasoningEffort: LLMReasoningEffort,
+        stream: Boolean = false,
+    ): JsonObject {
         val chat = JsonParser.parseString(chatBody).asJsonObject
         return JsonObject().apply {
             add("model", chat.get("model"))
             add("input", convertMessages(chat.getAsJsonArray("messages")))
-            addProperty("stream", false)
+            addProperty("stream", stream)
+            add("reasoning", JsonObject().apply {
+                addProperty("effort", reasoningEffort.wireValue)
+            })
             chat.get("temperature")?.let { add("temperature", it) }
             chat.get("top_p")?.let { add("top_p", it) }
             chat.get("max_tokens")?.let { add("max_output_tokens", it) }
