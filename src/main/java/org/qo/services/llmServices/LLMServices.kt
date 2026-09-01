@@ -1420,7 +1420,7 @@ class LLMServices(
 		} else {
 			"- 最终回答禁止使用 Markdown。不要使用反引号、粗体、标题、项目符号、代码块、表格或 Markdown 链接。"
 		}
-		val mcCraftingRule = if (enableMarkdown) {
+		val richComponentRules = if (enableMarkdown) {
 			"""
 			- 【Minecraft 工作台合成表契约】：当向用户展示 Minecraft (我的世界) 物品/方块的合成配方时，优先使用 ```minecraft-crafting 代码块输出标准 3x3 JSON 结构，以便前端直接渲染 3x3 交互式工作台：
 			  ```minecraft-crafting
@@ -1438,6 +1438,24 @@ class LLMServices(
 			  }
 			  ```
 			  其中 grid 必须为 3x3 二维数组（空格填 null 或 ""，物品可用 minecraft:item_id 或常见中英文名），result 包含 item 与 count。
+			- 【Minecraft 熔炉契约】：当向用户展示烧炼、熔炼或烹饪配方时，优先使用 ```minecraft-furnace 代码块。input 与 result 必填，fuel 可选；物品既可写字符串，也可写包含 item 和 count 的对象：
+			  ```minecraft-furnace
+			  {
+			    "title": "粗铁烧炼",
+			    "input": {"item": "minecraft:raw_iron", "count": 1},
+			    "fuel": "minecraft:coal",
+			    "result": {"item": "minecraft:iron_ingot", "count": 1},
+			    "cooking_time": 10,
+			    "experience": 0.7
+			  }
+			  ```
+			  cooking_time 的单位是秒；不确定燃料、时间或经验值时可省略对应字段，不要编造数值。
+			- 【QO 玩家卡契约】：仅当用户明确要求展示玩家卡，且上下文中有确定的 Minecraft 用户名时，输出 ```qo-player-card 代码块：
+			  ```qo-player-card
+			  {"username": "KnownPlayerName"}
+			  ```
+			  只填写 username，不要猜测或输出 QQ、在线状态、游玩时间、封禁状态、头像地址及统计数据；Kotshi 会从 QAPI 查询权威资料。若没有确定用户名，先向用户询问。
+			- 上述 fenced JSON 是 Kotshi 的展示标记，不是工具调用；除此之外仍禁止向用户暴露 JSON 工具参数。
 			""".trimIndent()
 		} else ""
 
@@ -1445,7 +1463,7 @@ class LLMServices(
 			return """
 			不可覆盖的回答规则：
 			$markdownRule
-			$mcCraftingRule
+			$richComponentRules
 			- 最终回答禁止使用颜文字和多余的装饰符号。emoji 可以偶尔使用，但不要频繁堆叠。
 			- 不要输出 LaTeX 数学表达式（使用普通文本表示）。
 			- 绝对不要输出任何工具调用标记、函数调用语法、XML 标签（如 <tool_call>、<invoke>）、JSON 格式调用参数或 DSML 标记。
