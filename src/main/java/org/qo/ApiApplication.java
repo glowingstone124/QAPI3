@@ -31,8 +31,10 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.CacheControl;
+import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.http.server.reactive.ServerHttpRequest;
 import org.springframework.web.bind.annotation.*;
+import reactor.core.publisher.Flux;
 
 import java.io.*;
 
@@ -236,8 +238,8 @@ public class ApiApplication {
         return new ResponseEntity<>(imageResource, headers, HttpStatus.OK);
     }
 
-    @GetMapping("/qo/download/status")
-    public Mono<ResponseEntity<String>> returnStatus(Integer id) {
+    @GetMapping(value = "/qo/download/status", produces = MediaType.APPLICATION_JSON_VALUE)
+    public Mono<ResponseEntity<String>> returnStatus(@RequestParam(required = false) Integer id) {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
 
@@ -245,6 +247,36 @@ public class ApiApplication {
 
         return status.downloadReactive(statusId)
                 .map(statusJson -> new ResponseEntity<>(statusJson.toString(), headers, HttpStatus.OK));
+    }
+
+    @GetMapping(value = "/qo/download/status", headers = "Accept=text/event-stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public ResponseEntity<Flux<ServerSentEvent<String>>> streamStatusSse(
+            @RequestParam(required = false) Integer id,
+            @RequestParam(required = false) String event) {
+        int statusId = (id == null) ? 1 : id;
+        HttpHeaders headers = new HttpHeaders();
+        headers.setCacheControl(CacheControl.noCache().noTransform());
+        headers.add("X-Accel-Buffering", "no");
+
+        return ResponseEntity.ok()
+                .headers(headers)
+                .contentType(MediaType.TEXT_EVENT_STREAM)
+                .body(status.streamStatusFlux(statusId, event));
+    }
+
+    @GetMapping(value = {"/qo/download/status/stream", "/qo/stream/status"})
+    public ResponseEntity<Flux<ServerSentEvent<String>>> streamStatusExplicit(
+            @RequestParam(required = false) Integer id,
+            @RequestParam(required = false) String event) {
+        int statusId = (id == null) ? 1 : id;
+        HttpHeaders headers = new HttpHeaders();
+        headers.setCacheControl(CacheControl.noCache().noTransform());
+        headers.add("X-Accel-Buffering", "no");
+
+        return ResponseEntity.ok()
+                .headers(headers)
+                .contentType(MediaType.TEXT_EVENT_STREAM)
+                .body(status.streamStatusFlux(statusId, event));
     }
 
     /**

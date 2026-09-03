@@ -40,7 +40,9 @@
 | `GET` | `/app/latest` | 公开 | 返回客户端版本和停服标志。 |
 | `GET` | `/qo/time` | 公开 | 返回服务器当前 Unix 毫秒时间戳。 |
 | `GET` | `/qo/alive/download` | 公开 | 查询主服务器存活状态，返回 `{"stat":...}`。 |
-| `GET` | `/qo/download/status?id=<id>` | 公开 | 查询服务器状态，`id` 默认 `1`。 |
+| `GET` | `/qo/download/status?id=<id>` | 公开 | 查询服务器状态（JSON），`id` 默认 `1`；若请求头带 `Accept: text/event-stream` 则自动升级为 SSE 实时流。 |
+| `GET` | `/qo/download/status/stream?id=<id>` | 公开 | 服务器状态 SSE 实时流（Server-Sent Events），`id` 默认 `1`。连接即推当前快照，节点有状态上传时立即广播，并每 15 秒发送心跳注释（`: keep-alive`）。支持可选 `event=<name>`。 |
+| `GET` | `/qo/stream/status?id=<id>` | 公开 | `/qo/download/status/stream` 的简短别名。 |
 | `GET` | `/qo/download/stats` | 公开 | 返回 `stat.json` 统计数组。 |
 | `GET` | `/qo/download/statpic` | 公开 | 返回 `image/png` 统计图。 |
 | `GET` | `/attac` | 公开/内部 | 简单请求计数探针。 |

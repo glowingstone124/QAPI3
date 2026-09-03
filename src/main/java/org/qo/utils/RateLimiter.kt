@@ -31,6 +31,7 @@ class RateLimiter {
 		Rule("/qo/download/registry", 800, 30),
 		Rule("/qo/download/name", 800, 30),
 		Rule("/qo/download/status", 9000, 10),
+		Rule("/qo/stream/status", 3000, 30),
 		Rule("/qo/download/getgametime", 60, 30),
 		Rule("/qo/download/logingreeting", 60, 60),
 		Rule("/qo/msglist/download", 600, 20),
