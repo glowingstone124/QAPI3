@@ -51,17 +51,31 @@ class InMemoryGenericMetric(
 			if (sampleCount < maxSamples) sampleCount++
 		}
 
-		@Synchronized
 		fun snapshot(name: String): MetricSnapshot {
-			val sortedSamples = samples.copyOf(sampleCount).apply { sort() }
+			// Keep the critical section limited to the ring-buffer copy. Sorting can
+			// happen concurrently with subsequent records without holding the lock.
+			val snapshot = synchronized(this) {
+				SnapshotData(
+					samples = samples.copyOf(sampleCount),
+					count = count,
+					totalNanos = totalNanos,
+				)
+			}
+			val sortedSamples = snapshot.samples.apply { sort() }
 			return MetricSnapshot(
 				name = name,
-				count = count,
-				avgMs = totalNanos.toDouble() / count / NANOS_PER_MILLISECOND,
+				count = snapshot.count,
+				avgMs = snapshot.totalNanos.toDouble() / snapshot.count / NANOS_PER_MILLISECOND,
 				p90Ms = percentileMs(sortedSamples, 0.90),
 				p99Ms = percentileMs(sortedSamples, 0.99),
 			)
 		}
+
+		private data class SnapshotData(
+			val samples: LongArray,
+			val count: Long,
+			val totalNanos: Long,
+		)
 
 		private fun percentileMs(sortedSamples: LongArray, percentile: Double): Double {
 			if (sortedSamples.isEmpty()) return 0.0
