@@ -63,6 +63,7 @@ class LLMGroupContextService() {
 				name = obj.get("name")?.takeIf { !it.isJsonNull }?.asString ?: "unknown",
 				content = content,
 				time = obj.get("time")?.takeIf { !it.isJsonNull }?.asLong ?: 0L,
+				sourceId = obj.get("source_id")?.takeIf { !it.isJsonNull }?.asString,
 			)
 		}
 	}
@@ -84,7 +85,19 @@ class LLMGroupContextService() {
 		summarize: suspend (String?, List<GroupChatEntry>) -> String?,
 	): String? = locks.computeIfAbsent(groupId) { Mutex() }.withLock {
 		val state = states.computeIfAbsent(groupId) { readState(groupId) ?: SummaryState() }
-		val pending = older.filter { it.time <= 0L || it.time > state.lastSummarizedTime }
+		val cursor = state.lastSummarizedSourceId
+		val cursorIndex = cursor?.let { id -> older.indexOfLast { it.sourceId == id } } ?: -1
+		val pending = if (cursorIndex >= 0) {
+			older.drop(cursorIndex + 1)
+		} else {
+			// Legacy summaries only have a timestamp. Include the boundary so
+			// same-timestamp messages cannot be silently lost during migration.
+			if (older.any { it.sourceId != null }) {
+				older.filter { it.time <= 0L || it.time >= state.lastSummarizedTime }
+			} else {
+				older.filter { it.time <= 0L || it.time > state.lastSummarizedTime }
+			}
+		}
 		if (pending.isNotEmpty()) {
 			val updated = runCatching { summarize(state.summary.takeIf { it.isNotBlank() }, pending) }
 				.getOrNull()
@@ -94,6 +107,7 @@ class LLMGroupContextService() {
 			if (updated != null) {
 				state.summary = updated
 				state.lastSummarizedTime = maxOf(state.lastSummarizedTime, pending.maxOfOrNull { it.time } ?: 0L)
+				pending.lastOrNull()?.sourceId?.let { state.lastSummarizedSourceId = it }
 				state.updatedAt = System.currentTimeMillis()
 				writeState(groupId, state)
 			}
@@ -124,7 +138,8 @@ class LLMGroupContextService() {
 				}
 				SummaryState(
 					summary = obj.get("summary")?.asString.orEmpty(),
-					lastSummarizedTime = obj.get("last_summarized_time")?.asLong ?: 0L,
+				lastSummarizedTime = obj.get("last_summarized_time")?.asLong ?: 0L,
+					lastSummarizedSourceId = obj.get("last_summarized_source_id")?.asString,
 					updatedAt = obj.get("updated_at")?.asLong ?: 0L,
 				)
 			}
@@ -139,6 +154,7 @@ class LLMGroupContextService() {
 			Files.writeString(temp, gson.toJson(JsonObject().apply {
 				addProperty("summary", state.summary)
 				addProperty("last_summarized_time", state.lastSummarizedTime)
+				state.lastSummarizedSourceId?.let { addProperty("last_summarized_source_id", it) }
 				addProperty("updated_at", state.updatedAt)
 				addProperty("policy_version", LLMGroupChatPolicy.SUMMARY_POLICY_VERSION)
 			}), StandardCharsets.UTF_8)
@@ -156,6 +172,7 @@ class LLMGroupContextService() {
 	private data class SummaryState(
 		var summary: String = "",
 		var lastSummarizedTime: Long = 0L,
+		var lastSummarizedSourceId: String? = null,
 		var updatedAt: Long = 0L,
 	)
 
@@ -173,4 +190,5 @@ data class GroupChatEntry(
 	val name: String,
 	val content: String,
 	val time: Long,
+	val sourceId: String? = null,
 )
