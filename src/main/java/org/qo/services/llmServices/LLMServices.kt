@@ -48,7 +48,6 @@ import org.springframework.stereotype.Service
 import java.net.URLDecoder
 import java.nio.file.Path
 import java.nio.charset.StandardCharsets
-import java.time.LocalDate
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -963,13 +962,15 @@ class LLMServices(
 			stableContextParts.add(basicPrompt)
 		}
 		modelConversationAdapter(model)?.let(stableContextParts::add)
+		if (toolService.enabled()) {
+			stableContextParts.add(LLMToolInstructions.systemRules)
+		}
 		if (webSearchEnabled && requester != null) {
 			stableContextParts.add(webSearchRules())
 		}
 		stableContextParts.add(hardOutputRules(enableMarkdown, isWeb))
 		val groupConversation = groupContext != null || requester?.groupId != null
 		if (groupConversation && !isWeb) stableContextParts.add(LLMGroupChatPolicy.systemRules)
-		serverMetadataParts.add("当前日期：${LocalDate.now()}")
 		requester?.takeIf { !isWeb }?.let { currentRequester ->
 			requesterSpecificRules(currentRequester)?.let(stableContextParts::add)
 			buildMinecraftRelatedContext(currentRequester.minecraftRelated)?.let { minecraftContext ->
@@ -1747,7 +1748,6 @@ class LLMServices(
 	private fun webSearchRules(): String {
 		return """
 		  联网检索规则：
-		  - 涉及今天、当前日期、当前时间或指定时区时间时，优先调用 get_current_date 获取准确结果，不要使用 web search 查询本机日期。
 		  - 涉及最新、最近、刚刚、新闻、公告、版本发布、价格、天气、赛程、活动时间、实时状态，或用户明确要求搜索网页、上网确认时，必须先使用 web search，再回答。
           - 涉及可能在知识截止时间后发生的外部事实、人物动态、产品信息或政策变化时，优先使用 web search 核实，不要只依赖模型记忆。
           - 如果问题是稳定的常识、数学推理、写作或仅涉及 QO 内部资料，不必为了形式而联网；这类问题优先使用知识库或其他专用工具。

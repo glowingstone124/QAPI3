@@ -16,7 +16,7 @@ class GetCurrentDateTool : Tools {
 	override val id = "get_current_date"
 	override val definition = ToolSupport.functionTool(
 		name = id,
-		description = "获取当前日期和时间。用户询问今天日期、当前时间、星期几或指定时区的当前时间时使用。默认时区为 Asia/Shanghai，不要用联网搜索查询本机当前日期。",
+		description = "获取权威的当前日期和时间。用户询问现在几点、今天日期、星期几或指定时区的当前时间时必须调用本工具，禁止根据上下文或模型知识自行推测。默认时区为 Asia/Shanghai，不要用联网搜索查询当前日期时间。",
 		properties = linkedMapOf(
 			"timezone" to ToolSupport.property(
 				type = "string",
