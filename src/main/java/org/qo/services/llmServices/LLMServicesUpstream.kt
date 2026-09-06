@@ -65,7 +65,7 @@ internal suspend fun LLMServices.completeWithOptionalTools(
 		return response.status.value to sanitizeResponseBody(response.bodyAsText(), request.enableMarkdown)
 	}
 
-	val obj = jsonParser.parse(request.body).asJsonObject
+	val obj = JsonParser.parseString(request.body).asJsonObject
 	obj.add("tools", toolService.definitions())
 	if (!obj.has("tool_choice")) {
 		obj.addProperty("tool_choice", "auto")
@@ -413,7 +413,7 @@ internal fun LLMServices.progressChunk(phase: String, label: String): String = J
 }.toString()
 
 internal fun LLMServices.nonStreamCompletionToStreamChunk(body: String): Pair<String, String>? = runCatching {
-	val root = jsonParser.parse(body).asJsonObject
+	val root = JsonParser.parseString(body).asJsonObject
 	val choice = root.getAsJsonArray("choices")?.firstOrNull()?.asJsonObject
 		?: error("upstream response has no choices")
 	val message = choice.getAsJsonObject("message")
@@ -443,7 +443,7 @@ internal fun LLMServices.nonStreamCompletionToStreamChunk(body: String): Pair<St
 }.getOrNull()
 
 internal fun LLMServices.extractConversationId(body: String): String? = runCatching {
-	val obj = jsonParser.parse(body).asJsonObject
+	val obj = JsonParser.parseString(body).asJsonObject
 	(obj.get("conversation_id") ?: obj.get("conversationId"))
 		?.takeIf { !it.isJsonNull }
 		?.asString
@@ -452,7 +452,7 @@ internal fun LLMServices.extractConversationId(body: String): String? = runCatch
 }.getOrNull()
 
 internal fun LLMServices.normalizeUpstreamError(body: String): String = runCatching {
-	val root = jsonParser.parse(body).asJsonObject
+	val root = JsonParser.parseString(body).asJsonObject
 	if (root.has("error")) root.toString()
 	else errorJson("upstream_error", body.take(256))
 }.getOrElse { errorJson("upstream_error", body.take(256)) }

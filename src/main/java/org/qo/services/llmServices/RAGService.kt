@@ -54,7 +54,6 @@ class RAGService() {
 	private val initialLoadStarted = AtomicBoolean(false)
 	private val initialLoad = CompletableDeferred<Unit>()
 	private val embeddingCache = ConcurrentHashMap<String, List<Double>>()
-	private val jsonParser = JsonParser()
 	@Volatile
 	private var chunks: List<RAGChunk> = emptyList()
 
@@ -189,7 +188,7 @@ class RAGService() {
 					setBody("""{"model":${quote(config.embeddingModel)},"input":${quote(text)}}""")
 				}
 				val body = response.bodyAsText()
-				val embedding = jsonParser.parse(body)
+				val embedding = JsonParser.parseString(body)
 					.asJsonObject
 					.getAsJsonArray("data")[0]
 					.asJsonObject

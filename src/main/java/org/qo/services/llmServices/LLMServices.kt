@@ -70,7 +70,6 @@ class LLMServices(
 	internal val kotshiConversationService: KotshiConversationService,
 ) {
 	internal val redis = Redis()
-	internal val jsonParser = JsonParser()
 	internal val webSearchEnabled = readBoolean("LLM_WEB_SEARCH_ENABLED", true)
 	internal val debugPrompt = readBoolean("LLM_DEBUG_PROMPT", false)
 	internal val debugPromptMaxChars = readInt("LLM_DEBUG_PROMPT_MAX_CHARS", 12000).coerceAtLeast(1000)
@@ -193,7 +192,7 @@ class LLMServices(
 			addProperty("model", provider.modelName(model) ?: throw IllegalArgumentException("请求的模型不可用"))
 			addProperty("stream", stream)
 			add(
-				"messages", jsonParser.parse(
+				"messages", JsonParser.parseString(
 					"""
              [
                 {"role":"system","content":"You are a helpful assistant."},

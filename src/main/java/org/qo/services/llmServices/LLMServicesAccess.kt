@@ -172,7 +172,7 @@ internal suspend fun LLMServices.updateAccessRecord(
 }
 
 internal fun LLMServices.parseUsage(body: String): LLMServices.Usage? = runCatching {
-	val obj = jsonParser.parse(body).asJsonObject
+	val obj = JsonParser.parseString(body).asJsonObject
 	val usage = obj.getAsJsonObject("usage") ?: return null
 	val promptTokens = usage.get("prompt_tokens")?.asInt ?: usage.get("input_tokens")?.asInt
 	val cachedTokens = usage.get("prompt_cache_hit_tokens")?.asInt

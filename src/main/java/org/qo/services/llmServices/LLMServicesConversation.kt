@@ -50,6 +50,7 @@ import java.nio.file.Path
 import java.nio.charset.StandardCharsets
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.time.Duration.Companion.milliseconds
 
 internal suspend fun LLMServices.summarizeConversation(
 	existingSummary: String?,
@@ -93,7 +94,7 @@ internal suspend fun LLMServices.summarizeConversation(
 			})
 		})
 	}
-	return withTimeoutOrNull(groupSummaryTimeoutMs) {
+	return withTimeoutOrNull(groupSummaryTimeoutMs.milliseconds) {
 		runCatching {
 			val response = postSummaryUpstream("conversation-compact", request.toString(), provider.summary)
 			if (!response.status.isSuccess()) return@runCatching null
@@ -105,7 +106,7 @@ internal suspend fun LLMServices.summarizeConversation(
 }
 
 internal fun LLMServices.extractToolCalls(responseBody: String): List<LLMServices.ToolCall> = runCatching {
-	val root = jsonParser.parse(responseBody).asJsonObject
+	val root = JsonParser.parseString(responseBody).asJsonObject
 	val choices = root.getAsJsonArray("choices") ?: return emptyList()
 	if (choices.size() == 0) return emptyList()
 	val message = choices[0].asJsonObject.getAsJsonObject("message") ?: return emptyList()
@@ -169,7 +170,7 @@ internal fun LLMServices.appendAssistantToolCallMessage(
 	parsedToolCalls: List<LLMServices.ToolCall>
 ) {
 	runCatching {
-		val root = jsonParser.parse(responseBody).asJsonObject
+		val root = JsonParser.parseString(responseBody).asJsonObject
 		val choices = root.getAsJsonArray("choices") ?: return
 		if (choices.size() == 0) return
 		val message = choices[0].asJsonObject.getAsJsonObject("message") ?: return
@@ -199,7 +200,7 @@ internal fun LLMServices.appendAssistantToolCallMessage(
 }
 
 internal fun LLMServices.extractAssistantContent(responseBody: String): String? = runCatching {
-	val root = jsonParser.parse(responseBody).asJsonObject
+	val root = JsonParser.parseString(responseBody).asJsonObject
 	val choices = root.getAsJsonArray("choices") ?: return null
 	if (choices.size() == 0) return null
 	choices[0].asJsonObject
@@ -211,7 +212,7 @@ internal fun LLMServices.extractAssistantContent(responseBody: String): String? 
 }.getOrNull()
 
 internal fun LLMServices.parseStreamAssistantContent(body: String): String? = runCatching {
-	val root = jsonParser.parse(body).asJsonObject
+	val root = JsonParser.parseString(body).asJsonObject
 	root.getAsJsonArray("choices")
 		?.get(0)
 		?.asJsonObject
@@ -227,7 +228,7 @@ internal fun LLMServices.parseStreamAssistantContent(body: String): String? = ru
  * forwarded to the browser.
  */
 internal fun LLMServices.streamProgress(body: String): Pair<String, String>? = runCatching {
-	val root = jsonParser.parse(body).asJsonObject
+	val root = JsonParser.parseString(body).asJsonObject
 	val upstreamType = root.get("type")?.takeIf { it.isJsonPrimitive }?.asString?.lowercase().orEmpty()
 	if (upstreamType.contains("web_search")) {
 		return@runCatching "web_search" to "正在进行 Web 搜索…"
@@ -283,7 +284,7 @@ internal fun LLMServices.sanitizeResponseBody(responseBody: String, enableMarkdo
 		return responseBody
 	}
 	return runCatching {
-		val root = jsonParser.parse(responseBody).asJsonObject
+		val root = JsonParser.parseString(responseBody).asJsonObject
 		val choices = root.getAsJsonArray("choices") ?: return responseBody
 		for (choice in choices) {
 			val message = choice.takeIf { it.isJsonObject }
