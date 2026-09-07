@@ -42,6 +42,25 @@ class LLMChatHistoryServiceTest {
 	}
 
 	@Test
+	fun `uses qquid from the archive wire format`() = runBlocking {
+		val body = JsonObject().apply {
+			add("messages", JsonArray().apply {
+				add(JsonObject().apply {
+					addProperty("sourceId", "qquid-42")
+					addProperty("qquid", 42)
+					addProperty("name", "Alice")
+					addProperty("content", "跨端身份")
+					addProperty("time", 123_456_789_000L)
+				})
+			})
+		}.toString()
+
+		service.archiveRequest(301, body)
+
+		assertEquals(42, service.search(301, "跨端").single().uid)
+	}
+
+	@Test
 	fun `blank query returns latest messages for ambiguous followups`() = runBlocking {
 		service.archiveGroupContext(400, JsonArray().apply {
 			add(message("older", 1, "Alice", "第一条", 1_700_000_000L))
@@ -86,6 +105,22 @@ class LLMChatHistoryServiceTest {
 			.filter { fromTime == null || it.time >= fromTime }
 			.filter { toTime == null || it.time <= toTime }
 			.sortedByDescending { it.time }
+			.take(limit)
+
+		override suspend fun findGroupIds(limit: Int): List<Long> = records.values
+			.map { it.groupId }
+			.distinct()
+			.take(limit)
+
+		override suspend fun findForSummary(
+			groupId: Long,
+			afterArchiveId: Long,
+			fromTime: Long,
+			limit: Int,
+		): List<LLMChatHistoryRecord> = records.values
+			.filter { it.groupId == groupId }
+			.filter { if (afterArchiveId > 0) it.archiveId > afterArchiveId else it.time >= fromTime }
+			.sortedBy { it.archiveId }
 			.take(limit)
 	}
 }

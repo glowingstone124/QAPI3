@@ -336,7 +336,7 @@ Web 流式请求会校验 `Origin`，允许来源由 `qapi.llm.web-allowed-origi
 
 必需 Header：
 
-- `X-QQ-UID: <uid>`
+- `X-QQ-UID: <qquid>`（跨 QQ、Kotshi Web 与已绑定 Minecraft 身份的唯一用户标识）
 - 可选 `X-QQ-Group-ID: <group-id>`
 - 可选 `X-QQ-Name: <name>`
 - 节点认证：`Authorization` 或 `token`
@@ -372,7 +372,7 @@ Body：
   "messages": [
     {
       "sourceId": "message-id",
-      "uid": 123,
+      "qquid": 123,
       "name": "player",
       "content": "消息内容",
       "time": 1700000000000
@@ -380,6 +380,8 @@ Body：
   ]
 }
 ```
+
+`uid` 仍作为旧 qbot 的兼容字段接受；新客户端应发送 `qquid`。归档消息由后台 summary 任务增量生成群摘要和人物画像，无需等待 Bot 对话请求。
 
 ### 旧版 SSE
 

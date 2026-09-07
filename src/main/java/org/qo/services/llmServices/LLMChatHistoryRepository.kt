@@ -14,6 +14,8 @@ import org.springframework.stereotype.Repository
 interface LLMChatHistoryRepository {
 	suspend fun insert(records: List<LLMChatHistoryRecord>): Int
 	suspend fun search(groupId: Long, query: String, uid: Long?, fromTime: Long?, toTime: Long?, limit: Int): List<LLMChatHistoryRecord>
+	suspend fun findGroupIds(limit: Int): List<Long>
+	suspend fun findForSummary(groupId: Long, afterArchiveId: Long, fromTime: Long, limit: Int): List<LLMChatHistoryRecord>
 }
 
 @Repository
@@ -134,4 +136,51 @@ class R2dbcLLMChatHistoryRepository(
 			)
 		}
 	}
+
+	override suspend fun findGroupIds(limit: Int): List<Long> {
+		schemaReady.await()
+		return database.all(
+			"""
+			SELECT group_id
+			FROM llm_chat_history
+			GROUP BY group_id
+			ORDER BY MAX(id) DESC
+			LIMIT ?
+			""".trimIndent(),
+			listOf(limit.coerceIn(1, 10_000)),
+		) { row -> row.get("group_id", java.lang.Long::class.java)!!.toLong() }
+	}
+
+	override suspend fun findForSummary(
+		groupId: Long,
+		afterArchiveId: Long,
+		fromTime: Long,
+		limit: Int,
+	): List<LLMChatHistoryRecord> {
+		schemaReady.await()
+		val cursorClause = if (afterArchiveId > 0) "id > ?" else "message_time >= ?"
+		val cursorValue = if (afterArchiveId > 0) afterArchiveId else fromTime.coerceAtLeast(0)
+		return database.all(
+			"""
+			SELECT id, source_id, group_id, uid, name, content, message_time, created_at
+			FROM llm_chat_history
+			WHERE group_id = ? AND $cursorClause
+			ORDER BY id ASC
+			LIMIT ?
+			""".trimIndent(),
+			listOf(groupId, cursorValue, limit.coerceIn(1, 2000)),
+			::toRecord,
+		)
+	}
+
+	private fun toRecord(row: io.r2dbc.spi.Row): LLMChatHistoryRecord = LLMChatHistoryRecord(
+		sourceId = row.get("source_id", String::class.java)!!,
+		groupId = row.get("group_id", java.lang.Long::class.java)!!.toLong(),
+		uid = row.get("uid", java.lang.Long::class.java)!!.toLong(),
+		name = row.get("name", String::class.java)!!,
+		content = row.get("content", String::class.java)!!,
+		time = row.get("message_time", java.lang.Long::class.java)!!.toLong(),
+		createdAt = row.get("created_at", java.lang.Long::class.java)!!.toLong(),
+		archiveId = row.get("id", java.lang.Long::class.java)?.toLong() ?: 0L,
+	)
 }

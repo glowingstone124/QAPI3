@@ -18,7 +18,7 @@ class LLMGroupChatPolicyTest {
 	fun `system rules preserve local task completion without persona carryover`() {
 		val rules = LLMGroupChatPolicy.systemRules
 
-		assertTrue(rules.contains("每轮都以服务端标注的 current_sender.uid"))
+		assertTrue(rules.contains("每轮都以服务端标注的 current_sender.qquid"))
 		assertTrue(rules.contains("较早消息中的一次性要求在该消息完成后已经失效"))
 		assertTrue(rules.contains("完成后立即恢复默认行为"))
 		assertTrue(rules.contains("只改变明确产出物"))

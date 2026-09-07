@@ -42,15 +42,53 @@ class LLMGroupContextService() {
 		currentUid: Long?,
 		summarize: suspend (existingSummary: String?, messages: List<GroupChatEntry>) -> String?,
 	): JsonObject? {
-		val parsed = parseEntries(groupContext).toMutableList()
-		removeDuplicatedCurrentQuestion(parsed, currentQuestion, currentUid)
-		if (parsed.isEmpty()) return null
 		if (groupId == null) return null
 		if (!config.summaryEnabled) return unavailableContext()
+		val parsed = parseEntries(groupContext).toMutableList()
+		removeDuplicatedCurrentQuestion(parsed, currentQuestion, currentUid)
 
-		val summary = updateSummary(groupId, parsed, summarize) ?: return unavailableContext()
+		val summary = if (parsed.isEmpty()) {
+			currentSummary(groupId)
+		} else {
+			updateSummary(groupId, parsed, summarize)
+		} ?: return unavailableContext()
 		return formatContext(summary)
 	}
+
+	suspend fun updateFromArchive(
+		groupId: Long,
+		records: List<LLMChatHistoryRecord>,
+		summarize: suspend (existingSummary: String?, messages: List<GroupChatEntry>) -> String?,
+	): String? {
+		if (!config.summaryEnabled || records.isEmpty()) return null
+		return updateSummary(
+			groupId,
+			records.map { record ->
+				GroupChatEntry(
+					uid = record.uid.toString(),
+					name = record.name,
+					content = record.content,
+					time = record.time,
+					sourceId = record.sourceId,
+					archiveId = record.archiveId,
+				)
+			},
+			summarize,
+		)
+	}
+
+	suspend fun summaryCursor(groupId: Long): GroupSummaryCursor =
+		locks.computeIfAbsent(groupId) { Mutex() }.withLock {
+			val state = states.computeIfAbsent(groupId) { readState(groupId) ?: SummaryState() }
+			GroupSummaryCursor(state.lastSummarizedArchiveId, state.lastSummarizedTime)
+		}
+
+	private suspend fun currentSummary(groupId: Long): String? =
+		locks.computeIfAbsent(groupId) { Mutex() }.withLock {
+			states.computeIfAbsent(groupId) { readState(groupId) ?: SummaryState() }
+				.summary
+				.takeIf { it.isNotBlank() }
+		}
 
 	private fun parseEntries(groupContext: JsonArray?): List<GroupChatEntry> {
 		if (groupContext == null) return emptyList()
@@ -85,9 +123,10 @@ class LLMGroupContextService() {
 		summarize: suspend (String?, List<GroupChatEntry>) -> String?,
 	): String? = locks.computeIfAbsent(groupId) { Mutex() }.withLock {
 		val state = states.computeIfAbsent(groupId) { readState(groupId) ?: SummaryState() }
-		val cursor = state.lastSummarizedSourceId
-		val cursorIndex = cursor?.let { id -> older.indexOfLast { it.sourceId == id } } ?: -1
-		val pending = if (cursorIndex >= 0) {
+		val cursorIndex = state.lastSummarizedSourceId?.let { id -> older.indexOfLast { it.sourceId == id } } ?: -1
+		val pending = if (state.lastSummarizedArchiveId > 0 && older.any { it.archiveId > 0 }) {
+			older.filter { it.archiveId > state.lastSummarizedArchiveId }
+		} else if (cursorIndex >= 0) {
 			older.drop(cursorIndex + 1)
 		} else {
 			// Legacy summaries only have a timestamp. Include the boundary so
@@ -107,6 +146,10 @@ class LLMGroupContextService() {
 			if (updated != null) {
 				state.summary = updated
 				state.lastSummarizedTime = maxOf(state.lastSummarizedTime, pending.maxOfOrNull { it.time } ?: 0L)
+				state.lastSummarizedArchiveId = maxOf(
+					state.lastSummarizedArchiveId,
+					pending.maxOfOrNull { it.archiveId } ?: 0L,
+				)
 				pending.lastOrNull()?.sourceId?.let { state.lastSummarizedSourceId = it }
 				state.updatedAt = System.currentTimeMillis()
 				writeState(groupId, state)
@@ -138,8 +181,9 @@ class LLMGroupContextService() {
 				}
 				SummaryState(
 					summary = obj.get("summary")?.asString.orEmpty(),
-				lastSummarizedTime = obj.get("last_summarized_time")?.asLong ?: 0L,
+					lastSummarizedTime = obj.get("last_summarized_time")?.asLong ?: 0L,
 					lastSummarizedSourceId = obj.get("last_summarized_source_id")?.asString,
+					lastSummarizedArchiveId = obj.get("last_summarized_archive_id")?.asLong ?: 0L,
 					updatedAt = obj.get("updated_at")?.asLong ?: 0L,
 				)
 			}
@@ -155,6 +199,7 @@ class LLMGroupContextService() {
 				addProperty("summary", state.summary)
 				addProperty("last_summarized_time", state.lastSummarizedTime)
 				state.lastSummarizedSourceId?.let { addProperty("last_summarized_source_id", it) }
+				addProperty("last_summarized_archive_id", state.lastSummarizedArchiveId)
 				addProperty("updated_at", state.updatedAt)
 				addProperty("policy_version", LLMGroupChatPolicy.SUMMARY_POLICY_VERSION)
 			}), StandardCharsets.UTF_8)
@@ -173,6 +218,7 @@ class LLMGroupContextService() {
 		var summary: String = "",
 		var lastSummarizedTime: Long = 0L,
 		var lastSummarizedSourceId: String? = null,
+		var lastSummarizedArchiveId: Long = 0L,
 		var updatedAt: Long = 0L,
 	)
 
@@ -191,4 +237,10 @@ data class GroupChatEntry(
 	val content: String,
 	val time: Long,
 	val sourceId: String? = null,
+	val archiveId: Long = 0L,
+)
+
+data class GroupSummaryCursor(
+	val archiveId: Long,
+	val messageTime: Long,
 )

@@ -60,6 +60,22 @@ class LLMGroupContextServiceTest {
 	}
 
 	@Test
+	fun `serves scheduled summary without request supplied group messages`() = runBlocking {
+		val service = service()
+		service.updateFromArchive(
+			100,
+			listOf(LLMChatHistoryRecord("m1", 100, 42, "Alice", "后台消息", 10, 10, archiveId = 7)),
+		) { _, entries -> "后台摘要 ${entries.single().content}" }
+
+		val context = service.buildContext(100, null, "现在的问题", 42) { _, _ ->
+			error("request path must not invoke the summarizer")
+		}
+
+		assertEquals("后台摘要 后台消息", context!!.get("facts").asString)
+		assertEquals(7, service.summaryCursor(100).archiveId)
+	}
+
+	@Test
 	fun `main model receives facts summary but never raw member messages`() = runBlocking {
 		val service = service()
 		val context = service.buildContext(

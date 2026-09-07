@@ -91,6 +91,32 @@ class LLMMemberProfileContextServiceTest {
 		assertTrue(context.contains("answer_length=简短"))
 	}
 
+	@Test
+	fun `injects automatically summarized profile only for matching qquid`() {
+		val alice = storedProfile(1, "偏好详细解释")
+		val bob = storedProfile(2, "偏好简短回答")
+
+		val context = service.buildContext(null, currentUid = 2, storedProfiles = listOf(alice, bob))!!
+
+		assertTrue(context.contains("qquid=2"))
+		assertTrue(context.contains("observed_summary=偏好简短回答"))
+		assertFalse(context.contains("偏好详细解释"))
+	}
+
+	private fun storedProfile(uid: Long, summary: String) = LLMStoredMemberProfile(
+		qqUid = uid,
+		profileId = "profile-$uid",
+		fields = listOf(field(
+			uid,
+			0,
+			LLMGroupChatPolicy.OBSERVED_SUMMARY_KEY,
+			summary,
+			LLMGroupChatPolicy.OBSERVED_USER_PROFILE_CATEGORY,
+		)),
+		createdAt = 1,
+		updatedAt = 2,
+	)
+
 	private fun profile(uid: Long, name: String, count: Long, fact: String): JsonObject = JsonObject().apply {
 		addProperty("uid", uid)
 		addProperty("primaryName", name)

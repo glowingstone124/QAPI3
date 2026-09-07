@@ -56,8 +56,9 @@ internal object LLMPromptCacheLayout {
 			val copy = message.deepCopy()
 			if (index == latestUserIndex) {
 				val original = copy.get("content")?.deepCopy() ?: JsonPrimitive("")
-				persistedUserContent = if (context.sender?.source == "web") original else attachEnvelope(original, context)
-				copy.add("content", persistedUserContent.deepCopy())
+				val enrichedContent = attachEnvelope(original, context)
+				persistedUserContent = if (context.sender?.source == "web") original else enrichedContent.deepCopy()
+				copy.add("content", enrichedContent)
 			}
 			outgoing.add(copy)
 		}
@@ -72,6 +73,7 @@ internal object LLMPromptCacheLayout {
 			addProperty("schema", "qapi.current_turn.v1")
 			context.sender?.let { sender ->
 				add("current_sender", JsonObject().apply {
+					addProperty("qquid", sender.uid)
 					addProperty("uid", sender.uid)
 					addProperty("nickname", sender.nickname)
 					addProperty("source", sender.source)

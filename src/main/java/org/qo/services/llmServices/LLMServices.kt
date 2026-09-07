@@ -663,6 +663,8 @@ class LLMServices(
 		val conversationId: String? = null,
 		val model: String = "fast",
 	) {
+		fun identityKey(): String = "qq:$uid"
+
 		fun conversationKey(): String =
 			if (conversationSource == "web" && !conversationId.isNullOrBlank()) {
 				"web:$uid:${conversationId.trim()}"

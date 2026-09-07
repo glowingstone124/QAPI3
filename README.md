@@ -165,9 +165,9 @@ The OpenAI-compatible chat endpoint can execute built-in tools on Responses-back
 
 Structured memories are stored in the automatically created MySQL `llm_memories` table. A memory is uniquely identified by `group_id + subject + memory_key`, so multiple facts about the same subject can coexist. On the first startup after upgrading, legacy `data/llm/rag/<groupId>/memory.txt` and `data/llm/rag/groups/<groupId>/memory.txt` files are imported once; completion is recorded in `llm_memory_migrations`. Legacy files are retained for rollback but are excluded from RAG after migration.
 
-Member profiles are stored separately in `llm_member_profiles` and `llm_member_profile_fields`. QQ `uid` is the global unique identity and receives a stable generated `profile_id`; `group_nickname` is scoped by group. Durable profile facts must be created through the explicit `/remember content` protocol. Only explicitly persisted facts belonging to the current sender are injected; other participants contribute identity metadata only.
+Member profiles are stored separately in `llm_member_profiles` and `llm_member_profile_fields`. QQ `uid` (`qquid` in LLM context) is the global unique identity shared by QQ, Kotshi Web, and linked Minecraft accounts and receives a stable generated `profile_id`; `group_nickname` remains scoped by group. Explicit `/remember content` fields and evidence-based `observed_summary` fields are injected only for the authenticated current `qquid`; other participants contribute identity metadata only.
 
-Group context is incrementally converted into a multi-member fact and dialogue-relation summary with the provider's configured `summary.model`. Raw group messages are archived but are not automatically included in the main prompt; the model retrieves a small relevant subset with `search_chat_history` when exact wording or unresolved references require it. Summaries are policy-versioned so older summaries are rebuilt after isolation-policy changes. Boolean environment variables accept only `true` and `false`.
+Archived group messages are periodically and incrementally converted into both a multi-member group summary and per-`qquid` observed profiles with the provider's configured `summary.model`; this runs without waiting for anyone to ask the bot. Raw group messages are never automatically included in the main prompt. The model receives the rolling summary and retrieves a small relevant subset with `search_chat_history` when exact wording or unresolved references require it. Kotshi Web receives the same authenticated `qquid` profile as QQ chat. Summaries are policy-versioned so older summaries are rebuilt after isolation-policy changes. Boolean environment variables accept only `true` and `false`.
 
 Related environment variables:
 
@@ -183,6 +183,12 @@ Related environment variables:
 - `LLM_GROUP_SUMMARY_DIR`: persistent rolling-summary directory, default `data/llm/summaries`.
 - `LLM_GROUP_SUMMARY_MAX_CHARS`: maximum persisted summary characters per group, default `5000`.
 - `LLM_GROUP_SUMMARY_TIMEOUT_MS`: maximum time spent updating a summary; on timeout, the previous safe summary is retained and raw history is not injected, default `15000`.
+- `LLM_PERIODIC_SUMMARY_ENABLED`: enable archive-driven group and member summarization, default `true`.
+- `LLM_PERIODIC_SUMMARY_INTERVAL_MS`: delay between background summary runs, default `60000`.
+- `LLM_PERIODIC_SUMMARY_INITIAL_DELAY_MS`: startup delay before the first background run, default `15000`.
+- `LLM_PERIODIC_SUMMARY_MAX_GROUPS`: maximum archived groups checked per run, default `1000`.
+- `LLM_PERIODIC_SUMMARY_BATCH_MESSAGES`: oldest-first message batch size per summary call, default `200`.
+- `LLM_PERIODIC_SUMMARY_MAX_BATCHES_PER_GROUP`: catch-up batches processed for one group in a run, default `4`.
 - `LLM_HISTORY_TTL_MS`: in-memory conversation lifetime, default `1800000` (30 minutes).
 - `LLM_MEMORY_CONTEXT_MAX_ITEMS`: maximum relevant memories injected into a request, default `10`.
 - `LLM_MEMORY_CONTEXT_MAX_CHARS`: maximum memory context characters, default `6000`.
@@ -190,7 +196,7 @@ Related environment variables:
 - `LLM_MEMBER_PROFILE_CONTEXT_MAX_FACTS`: maximum self-declared facts accepted from each member profile, default `16`.
 - `LLM_MEMBER_PROFILE_CONTEXT_MAX_CHARS`: maximum total qbot member-profile context characters, default `20000`.
 
-QQ group messages are archived in the `llm_chat_history` table through `POST /qo/asking/v1/chat/history`. The bot endpoint also backfills its sliding `group_context`, using stable source IDs and `INSERT IGNORE` for idempotency. The LLM can retrieve older, group-scoped records with the `search_chat_history` tool; results never cross group boundaries.
+QQ group messages are archived in the `llm_chat_history` table through `POST /qo/asking/v1/chat/history`, using stable source IDs and `INSERT IGNORE` for idempotency. The periodic summarizer consumes this archive directly, so bot completion requests no longer carry the sliding raw `group_context`. The LLM can retrieve older, group-scoped records with the `search_chat_history` tool; results never cross group boundaries.
 - `LLM_TOOLS_ENABLED`: enable built-in tools, default `true`.
 - `LLM_WEB_SEARCH_ENABLED`: enable DeepSeek server-side web search for Responses-backed requests, default `true`.
 - `LLM_PROVIDERS_FILE`: provider configuration JSON path, default `data/llm/providers.json`. The file is watched and the configuration (including referenced token files) is periodically reloaded; invalid updates keep the last valid provider.

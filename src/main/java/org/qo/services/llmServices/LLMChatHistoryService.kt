@@ -36,13 +36,22 @@ class LLMChatHistoryService(private val repository: LLMChatHistoryRepository) {
 		limit = limit.coerceIn(1, 30),
 	)
 
+	suspend fun groupIdsForSummary(limit: Int): List<Long> = repository.findGroupIds(limit)
+
+	suspend fun messagesForSummary(
+		groupId: Long,
+		afterArchiveId: Long,
+		fromTime: Long,
+		limit: Int,
+	): List<LLMChatHistoryRecord> = repository.findForSummary(groupId, afterArchiveId, fromTime, limit)
+
 	private suspend fun archive(groupId: Long, messages: JsonArray): Int {
 		val now = System.currentTimeMillis()
 		val records = messages.asSequence().mapNotNull { item ->
 			val obj = item.takeIf { it.isJsonObject }?.asJsonObject ?: return@mapNotNull null
 			val content = normalize(string(obj, "content") ?: string(obj, "message")).take(4000)
 			if (content.isBlank()) return@mapNotNull null
-			val uid = long(obj, "uid") ?: return@mapNotNull null
+			val uid = long(obj, "qquid") ?: long(obj, "uid") ?: return@mapNotNull null
 			val name = normalize(string(obj, "name")).take(160).ifBlank { "qq:$uid" }
 			val time = (long(obj, "time") ?: now).let { if (it in 1..9_999_999_999L) it * 1000 else it }
 			val suppliedSourceId = string(obj, "source_id") ?: string(obj, "sourceId")
@@ -76,4 +85,5 @@ data class LLMChatHistoryRecord(
 	val content: String,
 	val time: Long,
 	val createdAt: Long,
+	val archiveId: Long = 0L,
 )

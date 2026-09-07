@@ -69,6 +69,7 @@ class LLMPromptCacheLayoutTest {
 		val envelope = JsonParser.parseString(encoded.substringAfter('\n')).asJsonObject
 
 		assertEquals(2, envelope.getAsJsonObject("current_sender").get("uid").asLong)
+		assertEquals(2, envelope.getAsJsonObject("current_sender").get("qquid").asLong)
 		assertEquals("A 正在排查一个 Java 报错，B 尚未回应", envelope
 			.getAsJsonObject("group_history").get("facts").asString)
 		assertEquals("1+1 等于几？", envelope.getAsJsonObject("current_message")
@@ -90,6 +91,26 @@ class LLMPromptCacheLayoutTest {
 		assertEquals(1, turn.messages.size())
 		assertTrue(turn.persistedUserContent.asString.contains("explain volatile"))
 		assertTrue(!turn.persistedUserContent.asString.contains("must end with meow"))
+	}
+
+	@Test
+	fun `web request receives qquid profile context while persisted message stays clean`() {
+		val turn = LLMPromptCacheLayout.prepareCurrentTurn(
+			messages("来自 Web 的问题"),
+			LLMPromptCacheLayout.Context(
+				sender = LLMPromptCacheLayout.Sender(42, "Alice", "web", null),
+				referenceContext = listOf("observed_summary=常聊 Kotlin"),
+			),
+		)
+
+		assertEquals("来自 Web 的问题", turn.persistedUserContent.asString)
+		val outgoing = turn.messages.single().asJsonObject.get("content").asString
+		val envelope = JsonParser.parseString(outgoing.substringAfter('\n')).asJsonObject
+		assertEquals(42, envelope.getAsJsonObject("current_sender").get("qquid").asLong)
+		assertEquals(
+			"observed_summary=常聊 Kotlin",
+			envelope.getAsJsonArray("reference_context").single().asString,
+		)
 	}
 
 	@Test
