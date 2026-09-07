@@ -28,6 +28,7 @@ import org.springframework.web.bind.annotation.RestController
 class LLMController(
 	private val llmServices: LLMServices,
 	private val kotshiConversationService: KotshiConversationService,
+	private val tokenStatisticsService: LLMTokenStatisticsService? = null,
 	@Value("\${qapi.llm.web-allowed-origin-patterns:https://*.qoriginal.vip,http://localhost:*,http://127.0.0.1:*}")
 	allowedWebOriginPatterns: String,
 ) {
@@ -189,6 +190,7 @@ class LLMController(
 		@RequestHeader(HttpHeaders.AUTHORIZATION, required = false) authorization: String?,
 		@RequestHeader("X-QQ-UID") qqUid: Long,
 		@RequestHeader("X-QQ-Group-ID", required = false) qqGroupId: Long?,
+		@RequestHeader("X-QQ-Group-Name", required = false) qqGroupName: String?,
 		@RequestHeader("X-QQ-Name", required = false) qqName: String?,
 		@RequestHeader("X-QQ-Message-ID", required = false) qqMessageId: Long?,
 		@RequestHeader("X-Request-ID", required = false) requestId: String?,
@@ -199,7 +201,17 @@ class LLMController(
 			?: return jsonResponse("""{"error":{"message":"缺少或无效的令牌","type":"invalid_token","code":"invalid_token"}}""", HttpStatus.UNAUTHORIZED)
 
 		val result = runCatching {
-			llmServices.completeBotChat(body, requestToken, qqUid, qqGroupId, qqName, qqMessageId, model, requestId)
+			llmServices.completeBotChat(
+				body = body,
+				token = requestToken,
+				qqUid = qqUid,
+				qqGroupId = qqGroupId,
+				qqName = qqName,
+				qqMessageId = qqMessageId,
+				model = model,
+				clientRequestId = requestId,
+				qqGroupName = qqGroupName,
+			)
 		}.getOrElse {
 			LLMNonStreamResult(400, """{"error":{"message":"${it.message ?: "请求格式错误"}","type":"bad_request","code":"bad_request"}}""")
 		}
@@ -264,6 +276,92 @@ class LLMController(
 			return jsonResponse(result.chunks.firstOrNull().orEmpty(), HttpStatus.valueOf(result.status), result.quota)
 		}
 		return streamResponse(result)
+	}
+
+	@GetMapping("/v1/stats/tokens/groups", produces = [MediaType.APPLICATION_JSON_VALUE])
+	suspend fun listGroupTokenStats(
+		@RequestHeader("token", required = false) token: String?,
+		@RequestHeader(HttpHeaders.AUTHORIZATION, required = false) authorization: String?,
+		@RequestParam(name = "limit", required = false, defaultValue = "100") limit: Int = 100,
+	): ResponseEntity<String> {
+		val requestToken = AuthTokens.resolve(token, authorization)
+			?: return jsonResponse("""{"error":{"message":"缺少或无效的令牌","type":"invalid_token","code":"invalid_token"}}""", HttpStatus.UNAUTHORIZED)
+		if (!authenticateRequest(requestToken)) {
+			return jsonResponse("""{"error":{"message":"权限验证失败","type":"invalid_token","code":"invalid_token"}}""", HttpStatus.UNAUTHORIZED)
+		}
+		val statsService = tokenStatisticsService
+			?: return jsonResponse("""{"error":{"message":"统计服务未启用","type":"service_unavailable","code":"service_unavailable"}}""", HttpStatus.SERVICE_UNAVAILABLE)
+		val list = statsService.listGroupStats(limit.coerceIn(1, 1000))
+		return ResponseEntity.ok(gson.toJson(list))
+	}
+
+	@GetMapping("/v1/stats/tokens/groups/{groupName}", produces = [MediaType.APPLICATION_JSON_VALUE])
+	suspend fun getGroupTokenStats(
+		@RequestHeader("token", required = false) token: String?,
+		@RequestHeader(HttpHeaders.AUTHORIZATION, required = false) authorization: String?,
+		@PathVariable("groupName") groupName: String,
+	): ResponseEntity<String> {
+		val requestToken = AuthTokens.resolve(token, authorization)
+			?: return jsonResponse("""{"error":{"message":"缺少或无效的令牌","type":"invalid_token","code":"invalid_token"}}""", HttpStatus.UNAUTHORIZED)
+		if (!authenticateRequest(requestToken)) {
+			return jsonResponse("""{"error":{"message":"权限验证失败","type":"invalid_token","code":"invalid_token"}}""", HttpStatus.UNAUTHORIZED)
+		}
+		val statsService = tokenStatisticsService
+			?: return jsonResponse("""{"error":{"message":"统计服务未启用","type":"service_unavailable","code":"service_unavailable"}}""", HttpStatus.SERVICE_UNAVAILABLE)
+		val stats = statsService.getGroupStats(groupName)
+			?: return jsonResponse("""{"error":{"message":"未找到该群的统计数据","type":"not_found","code":"not_found"}}""", HttpStatus.NOT_FOUND)
+		return ResponseEntity.ok(gson.toJson(stats))
+	}
+
+	@GetMapping("/v1/stats/tokens/users", produces = [MediaType.APPLICATION_JSON_VALUE])
+	suspend fun listUserTokenStats(
+		@RequestHeader("token", required = false) token: String?,
+		@RequestHeader(HttpHeaders.AUTHORIZATION, required = false) authorization: String?,
+		@RequestParam(name = "limit", required = false, defaultValue = "100") limit: Int = 100,
+	): ResponseEntity<String> {
+		val requestToken = AuthTokens.resolve(token, authorization)
+			?: return jsonResponse("""{"error":{"message":"缺少或无效的令牌","type":"invalid_token","code":"invalid_token"}}""", HttpStatus.UNAUTHORIZED)
+		if (!authenticateRequest(requestToken)) {
+			return jsonResponse("""{"error":{"message":"权限验证失败","type":"invalid_token","code":"invalid_token"}}""", HttpStatus.UNAUTHORIZED)
+		}
+		val statsService = tokenStatisticsService
+			?: return jsonResponse("""{"error":{"message":"统计服务未启用","type":"service_unavailable","code":"service_unavailable"}}""", HttpStatus.SERVICE_UNAVAILABLE)
+		val list = statsService.listUserStats(limit.coerceIn(1, 1000))
+		return ResponseEntity.ok(gson.toJson(list))
+	}
+
+	@GetMapping("/v1/stats/tokens/users/{qqUid}", produces = [MediaType.APPLICATION_JSON_VALUE])
+	suspend fun getUserTokenStats(
+		@RequestHeader("token", required = false) token: String?,
+		@RequestHeader(HttpHeaders.AUTHORIZATION, required = false) authorization: String?,
+		@PathVariable("qqUid") qqUid: Long,
+	): ResponseEntity<String> {
+		val requestToken = AuthTokens.resolve(token, authorization)
+			?: return jsonResponse("""{"error":{"message":"缺少或无效的令牌","type":"invalid_token","code":"invalid_token"}}""", HttpStatus.UNAUTHORIZED)
+		if (!authenticateUserAccess(requestToken, qqUid)) {
+			return jsonResponse("""{"error":{"message":"权限验证失败","type":"forbidden","code":"forbidden"}}""", HttpStatus.FORBIDDEN)
+		}
+		val statsService = tokenStatisticsService
+			?: return jsonResponse("""{"error":{"message":"统计服务未启用","type":"service_unavailable","code":"service_unavailable"}}""", HttpStatus.SERVICE_UNAVAILABLE)
+		val stats = statsService.getUserStats(qqUid)
+			?: return jsonResponse("""{"error":{"message":"未找到该用户的统计数据","type":"not_found","code":"not_found"}}""", HttpStatus.NOT_FOUND)
+		return ResponseEntity.ok(gson.toJson(stats))
+	}
+
+	private suspend fun authenticateRequest(token: String): Boolean {
+		if (llmServices.authenticateServerToken(token)) return true
+		if (llmServices.authenticateWeb(token) != null) return true
+		if (llmServices.authenticate(token) != null) return true
+		return false
+	}
+
+	private suspend fun authenticateUserAccess(token: String, targetQqUid: Long): Boolean {
+		if (llmServices.authenticateServerToken(token)) return true
+		val webPrincipal = llmServices.authenticateWeb(token)
+		if (webPrincipal != null && webPrincipal.qqUid == targetQqUid) return true
+		val user = llmServices.authenticate(token)
+		if (user != null && user.uid == targetQqUid) return true
+		return false
 	}
 
 	private fun streamResponse(result: LLMStreamResult): ResponseEntity<Flow<ServerSentEvent<String>>> {

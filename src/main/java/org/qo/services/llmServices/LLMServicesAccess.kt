@@ -70,6 +70,7 @@ internal fun LLMServices.ensureAccessRecordSchemaInitialization() {
 				   username VARCHAR(128) NOT NULL,
 				   source VARCHAR(32) NOT NULL DEFAULT 'unknown',
 				   source_identity VARCHAR(128) NULL,
+				   group_name VARCHAR(128) NULL,
                    request_id VARCHAR(80) NOT NULL,
                    model VARCHAR(128) NOT NULL,
                    stream BOOLEAN NOT NULL,
@@ -77,6 +78,8 @@ internal fun LLMServices.ensureAccessRecordSchemaInitialization() {
                    prompt_tokens INT NULL,
                    completion_tokens INT NULL,
                    total_tokens INT NULL,
+                   cached_tokens INT NULL,
+                   uncached_tokens INT NULL,
                    error_message VARCHAR(512) NULL,
                    created_at BIGINT NOT NULL,
                    completed_at BIGINT NULL,
@@ -86,6 +89,9 @@ internal fun LLMServices.ensureAccessRecordSchemaInitialization() {
 			)
 			ensureAccessRecordColumn("source", "VARCHAR(32) NOT NULL DEFAULT 'unknown' AFTER username")
 			ensureAccessRecordColumn("source_identity", "VARCHAR(128) NULL AFTER source")
+			ensureAccessRecordColumn("group_name", "VARCHAR(128) NULL AFTER source_identity")
+			ensureAccessRecordColumn("cached_tokens", "INT NULL AFTER total_tokens")
+			ensureAccessRecordColumn("uncached_tokens", "INT NULL AFTER cached_tokens")
 			accessRecordSchemaReady.complete(Unit)
 		} catch (error: Exception) {
 			accessRecordSchemaReady.completeExceptionally(error)
@@ -104,7 +110,12 @@ internal suspend fun LLMServices.ensureAccessRecordColumn(name: String, definiti
 	}
 }
 
-internal suspend fun LLMServices.insertAccessRecord(principal: LLMPrincipal, model: String, stream: Boolean): Long {
+internal suspend fun LLMServices.insertAccessRecord(
+	principal: LLMPrincipal,
+	model: String,
+	stream: Boolean,
+	groupName: String? = null,
+): Long {
 	val requestId = "chatcmpl-qo-${UUID.randomUUID()}"
 	return try {
 		awaitAccessRecordSchema()
@@ -112,15 +123,16 @@ internal suspend fun LLMServices.insertAccessRecord(principal: LLMPrincipal, mod
 			database.execute(
 				"""
 				INSERT INTO llm_access_records(
-					uid, username, source, source_identity, request_id, model, stream, status, created_at
+					uid, username, source, source_identity, group_name, request_id, model, stream, status, created_at
 				)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """.trimIndent(),
 				listOf(
 					principal.qqUid,
 					principal.displayName.take(128),
 					principal.source.value,
 					principal.sourceIdentity.take(128),
+					groupName?.take(128),
 					requestId,
 					model.take(128),
 					stream,
@@ -145,15 +157,25 @@ internal suspend fun LLMServices.updateAccessRecord(
 	status: String,
 	usage: LLMServices.Usage? = null,
 	errorMessage: String? = null,
+	groupName: String? = null,
+	qqUid: Long? = null,
 ) {
 	usage?.let { logPromptCacheUsage("chat", it) }
+	val cached = usage?.cacheHitTokens
+	val prompt = usage?.promptTokens
+	val uncached = usage?.cacheMissTokens ?: prompt?.let { p -> cached?.let { (p - it).coerceAtLeast(0) } }
+
+	if (status == "completed" && usage != null) {
+		tokenStatisticsService?.recordUsage(groupName, qqUid ?: -1L, usage)
+	}
+
 	if (id <= 0) return
 	try {
 		awaitAccessRecordSchema()
 		database.execute(
 			"""
              UPDATE llm_access_records
-             SET status = ?, prompt_tokens = ?, completion_tokens = ?, total_tokens = ?, error_message = ?, completed_at = ?
+             SET status = ?, prompt_tokens = ?, completion_tokens = ?, total_tokens = ?, cached_tokens = ?, uncached_tokens = ?, error_message = ?, completed_at = ?
              WHERE id = ?
              """.trimIndent(),
 			listOf(
@@ -161,6 +183,8 @@ internal suspend fun LLMServices.updateAccessRecord(
 				usage?.promptTokens,
 				usage?.completionTokens,
 				usage?.totalTokens,
+				cached,
+				uncached,
 				errorMessage?.take(512),
 				System.currentTimeMillis(),
 				id,
