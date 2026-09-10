@@ -34,6 +34,7 @@ class LLMResponsesAdapterTest {
         assertEquals("function", request.getAsJsonArray("tools")[0].asJsonObject.get("type").asString)
         assertEquals("get_server_status", request.getAsJsonArray("tools")[0].asJsonObject.get("name").asString)
         assertEquals("web_search", request.getAsJsonArray("tools")[1].asJsonObject.get("type").asString)
+        assertEquals("web_search", request.getAsJsonObject("tool_choice").get("type").asString)
         assertEquals("none", request.getAsJsonObject("reasoning").get("effort").asString)
     }
 

@@ -46,7 +46,13 @@ internal object LLMResponsesAdapter {
             }
             if (tools.size() > 0) {
                 add("tools", tools)
-                addProperty("tool_choice", "auto")
+                if (enableWebSearch) {
+                    add("tool_choice", JsonObject().apply {
+                        addProperty("type", "web_search")
+                    })
+                } else {
+                    addProperty("tool_choice", "auto")
+                }
             }
         }
     }
