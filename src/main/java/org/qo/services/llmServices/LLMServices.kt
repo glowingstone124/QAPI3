@@ -673,7 +673,7 @@ class LLMServices(
 			}
 
 		fun toolContext(currentMessage: String? = null): LLMToolContext =
-			LLMToolContext(groupId, uid.toString(), name, currentMessage, messageId)
+			LLMToolContext(groupId, uid.toString(), name, currentMessage, messageId, source)
 	}
 
 	private fun LLMPrincipal.toRequester(

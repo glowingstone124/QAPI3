@@ -6,6 +6,28 @@ import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 
 internal object LLMResponsesAdapter {
+    fun outputSummary(responseBody: String): String {
+        return runCatching {
+            val response = JsonParser.parseString(responseBody).asJsonObject
+            val status = response.get("status")?.asString ?: "unknown"
+            val output = response.getAsJsonArray("output")
+                ?.map { item ->
+                    val obj = item.takeIf { it.isJsonObject }?.asJsonObject
+                        ?: return@map "unknown"
+                    val type = obj.get("type")?.asString ?: "unknown"
+                    val itemStatus = obj.get("status")?.asString
+                    val name = obj.get("name")?.asString
+                    buildString {
+                        append(type)
+                        name?.let { append("(name=").append(it).append(')') }
+                        itemStatus?.let { append("[").append(it).append(']') }
+                    }
+                }
+                .orEmpty()
+            "status=$status output=${output.joinToString(",", prefix = "[", postfix = "]")}"
+        }.getOrElse { "unparseable_response" }
+    }
+
     fun fromChatRequest(
         chatBody: String,
         functionTools: JsonArray,

@@ -206,7 +206,7 @@ internal suspend fun LLMServices.enrichMessages(
 internal fun LLMServices.requesterSpecificRules(requester: LLMServices.LLMRequester): String? = when {
 	requester.uid in ultraBriefQqUids ->
 		"当前用户需要最简短回答：除非必须澄清安全或事实风险，否则只用一句自然的话回答。"
-	qoGroupId != null && requester.groupId != qoGroupId ->
+	requester.source != LLMSource.MINECRAFT.value && qoGroupId != null && requester.groupId != qoGroupId ->
 		"本条消息不来自 QO 唯一官方群。不要提及、检索、推断或泄露 QO 服务器的内部资料、规则、账号、状态、指令或群聊历史；普通知识和日常聊天仍可正常回答。"
 	else -> null
 }

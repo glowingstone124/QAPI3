@@ -117,6 +117,9 @@ internal suspend fun LLMServices.completeWithResponsesApi(
 	repeat(maxToolRounds) { round ->
 		val response = postUpstream("$source/responses-round-${round + 1}", body.toString(), provider, provider.responsesUrl)
 		val responseText = response.bodyAsText()
+		if (debugPrompt) {
+			println("[LLM] responses result source=$source round=${round + 1} ${LLMResponsesAdapter.outputSummary(responseText)}")
+		}
 		if (!response.status.isSuccess()) {
 			return response.status.value to responseText
 		}

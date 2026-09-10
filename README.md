@@ -173,7 +173,7 @@ Related environment variables:
 
 - `LLM_SYSTEM_PROMPT`: fixed system prompt text. When set, it takes precedence over the prompt file.
 - `LLM_SYSTEM_PROMPT_FILE`: system prompt file. Linux inotify events, atomic replacements, Docker bind mounts, and Kubernetes ConfigMap/Secret-style replacements are reloaded without restarting the API; invalid or blank updates keep the previous valid prompt.
-- `LLM_QO_GROUP_ID`: QQ group allowed to access QO server knowledge and server tools. If omitted, QO RAG and server tools remain unavailable.
+- `LLM_QO_GROUP_ID`: QQ group allowed to access QO server knowledge and server tools. This restriction applies to QQ/Web requests; Minecraft requests may use all registered tools regardless of group mapping. If omitted, QO RAG and server tools remain unavailable to QQ/Web requests.
 - `LLM_BLOCKED_QQ_UIDS`: comma- or space-separated QQ uids denied before any LLM request. If omitted, no user is blocked by this rule.
 - `LLM_ULTRA_BRIEF_QQ_UIDS`: comma- or space-separated QQ uids that receive one-sentence replies unless safety or factual clarification requires more.
 - `LLM_STRIP_EMOJI`: set to `true` to remove emoji from upstream answers during output sanitization. Tool-call markup and emoticons are always removed.

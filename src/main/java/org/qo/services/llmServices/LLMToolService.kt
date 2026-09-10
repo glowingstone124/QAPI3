@@ -55,7 +55,8 @@ class LLMToolService(
 	}
 
 	suspend fun execute(name: String, rawArguments: String?, context: LLMToolContext): String {
-		if (name in qoScopedToolIds && (qoGroupId == null || context.groupId != qoGroupId)) {
+		val isMinecraftRequest = context.source == LLMSource.MINECRAFT.value
+		if (name in qoScopedToolIds && !isMinecraftRequest && (qoGroupId == null || context.groupId != qoGroupId)) {
 			val result = errorResult("qo_group_required", "该工具只能在 QO 官方群中使用")
 			logFailure(name, rawArguments, context, result)
 			return result
@@ -124,4 +125,5 @@ data class LLMToolContext(
 	val name: String?,
 	val currentMessage: String? = null,
 	val currentMessageId: Long? = null,
+	val source: String? = null,
 )

@@ -10,6 +10,20 @@ import kotlin.test.assertTrue
 
 class LLMResponsesAdapterTest {
     @Test
+    fun `summarizes responses output without response contents`() {
+        val summary = LLMResponsesAdapter.outputSummary(
+            """{"status":"completed","output":[{"type":"web_search_call","status":"completed","action":{"type":"search","query":"private query"}},{"type":"function_call","status":"completed","name":"get_current_date","arguments":"{}"},{"type":"message","status":"completed","content":[{"type":"output_text","text":"private answer"}]}]}"""
+        )
+
+        assertEquals(
+            "status=completed output=[web_search_call[completed],function_call(name=get_current_date)[completed],message[completed]]",
+            summary,
+        )
+        assertFalse(summary.contains("private query"))
+        assertFalse(summary.contains("private answer"))
+    }
+
+    @Test
     fun `converts chat request and enables server web search`() {
         val functionTools = JsonArray().apply {
             add(JsonObject().apply {
