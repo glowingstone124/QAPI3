@@ -36,9 +36,8 @@ class LLMResponsesAdapterTest {
             })
         }
         val request = LLMResponsesAdapter.fromChatRequest(
-            """{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"today's news"}],"user_id":"qq:1"}""",
+            """{"model":"provider-model","messages":[{"role":"user","content":"today's news"}],"user_id":"qq:1"}""",
             functionTools,
-            enableWebSearch = true,
             reasoningEffort = LLMReasoningEffort.NONE,
         )
 
@@ -48,7 +47,7 @@ class LLMResponsesAdapterTest {
         assertEquals("function", request.getAsJsonArray("tools")[0].asJsonObject.get("type").asString)
         assertEquals("get_server_status", request.getAsJsonArray("tools")[0].asJsonObject.get("name").asString)
         assertEquals("web_search", request.getAsJsonArray("tools")[1].asJsonObject.get("type").asString)
-        assertEquals("web_search", request.getAsJsonObject("tool_choice").get("type").asString)
+        assertEquals("auto", request.get("tool_choice").asString)
         assertEquals("none", request.getAsJsonObject("reasoning").get("effort").asString)
     }
 
@@ -57,7 +56,7 @@ class LLMResponsesAdapterTest {
         val request = LLMResponsesAdapter.fromChatRequest(
             """
             {
-              "model":"deepseek-v4-flash",
+              "model":"provider-model",
               "messages":[
                 {
                   "role":"user",
@@ -76,7 +75,6 @@ class LLMResponsesAdapterTest {
             }
             """.trimIndent(),
             JsonArray(),
-            enableWebSearch = false,
             reasoningEffort = LLMReasoningEffort.MAX,
             stream = true,
         )
@@ -92,6 +90,8 @@ class LLMResponsesAdapterTest {
         assertEquals("high", content[1].asJsonObject.get("detail").asString)
         assertEquals("max", request.getAsJsonObject("reasoning").get("effort").asString)
         assertTrue(request.get("stream").asBoolean)
+		assertEquals("web_search", request.getAsJsonArray("tools").single().asJsonObject.get("type").asString)
+		assertEquals("auto", request.get("tool_choice").asString)
     }
 
     @Test

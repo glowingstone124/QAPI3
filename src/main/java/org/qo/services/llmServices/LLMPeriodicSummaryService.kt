@@ -20,13 +20,15 @@ class LLMPeriodicSummaryService(
 	private val enabled = readBoolean("LLM_PERIODIC_SUMMARY_ENABLED", true)
 	private val maxGroupsPerRun = readInt("LLM_PERIODIC_SUMMARY_MAX_GROUPS", 1000).coerceIn(1, 10_000)
 	private val batchSize = readInt("LLM_PERIODIC_SUMMARY_BATCH_MESSAGES", 200).coerceIn(10, 2000)
-	private val maxBatchesPerGroup = readInt("LLM_PERIODIC_SUMMARY_MAX_BATCHES_PER_GROUP", 4).coerceIn(1, 100)
+	private val minPendingMessages = readInt("LLM_PERIODIC_SUMMARY_MIN_MESSAGES", 40).coerceIn(1, batchSize)
+	private val maxPendingWaitMs = readLong("LLM_PERIODIC_SUMMARY_MAX_WAIT_MS", 3_600_000L).coerceAtLeast(60_000L)
+	private val maxBatchesPerGroup = readInt("LLM_PERIODIC_SUMMARY_MAX_BATCHES_PER_GROUP", 1).coerceIn(1, 100)
 	private val running = AtomicBoolean(false)
 	private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
 	@Scheduled(
-		fixedDelayString = "\${LLM_PERIODIC_SUMMARY_INTERVAL_MS:60000}",
-		initialDelayString = "\${LLM_PERIODIC_SUMMARY_INITIAL_DELAY_MS:15000}",
+		fixedDelayString = "\${LLM_PERIODIC_SUMMARY_INTERVAL_MS:600000}",
+		initialDelayString = "\${LLM_PERIODIC_SUMMARY_INITIAL_DELAY_MS:120000}",
 	)
 	fun summarizeArchivedChats() {
 		if (!enabled || !running.compareAndSet(false, true)) return
@@ -61,6 +63,7 @@ class LLMPeriodicSummaryService(
 				limit = batchSize,
 			)
 			if (records.isEmpty()) return
+			if (!shouldSummarizePeriodicBatch(records, batchSize, minPendingMessages, maxPendingWaitMs)) return
 			groupContextService.updateFromArchive(groupId, records) { existingGroupSummary, pending ->
 				val latestIdentityByUid = pending.asReversed()
 					.mapNotNull { entry -> entry.uid.toLongOrNull()?.takeIf { it > 0 }?.let { it to entry.name } }
@@ -94,7 +97,11 @@ class LLMPeriodicSummaryService(
 				result.groupSummary
 			}
 			val after = groupContextService.summaryCursor(groupId)
-			if (after.archiveId <= before.archiveId || records.size < batchSize) return
+			if (after.archiveId <= before.archiveId) {
+				println("[LLM] periodic summary made no progress for group $groupId; retry deferred until the next run")
+				return
+			}
+			if (records.size < batchSize) return
 		}
 	}
 
@@ -107,7 +114,23 @@ class LLMPeriodicSummaryService(
 		fun readInt(name: String, defaultValue: Int): Int =
 			System.getenv(name)?.trim()?.toIntOrNull() ?: defaultValue
 
+		fun readLong(name: String, defaultValue: Long): Long =
+			System.getenv(name)?.trim()?.toLongOrNull() ?: defaultValue
+
 		fun readBoolean(name: String, defaultValue: Boolean): Boolean =
 			System.getenv(name)?.trim()?.lowercase()?.toBooleanStrictOrNull() ?: defaultValue
 	}
+}
+
+internal fun shouldSummarizePeriodicBatch(
+	records: List<LLMChatHistoryRecord>,
+	batchSize: Int,
+	minPendingMessages: Int,
+	maxPendingWaitMs: Long,
+	now: Long = System.currentTimeMillis(),
+): Boolean {
+	if (records.isEmpty()) return false
+	if (records.size >= batchSize || records.size >= minPendingMessages) return true
+	val oldestCreatedAt = records.minOf { it.createdAt }
+	return now >= oldestCreatedAt && now - oldestCreatedAt >= maxPendingWaitMs
 }

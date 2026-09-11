@@ -182,13 +182,15 @@ Related environment variables:
 - `LLM_GROUP_SUMMARY_ENABLED`: enable per-group rolling fact summaries, default `true`. When disabled, raw history is still archived for explicit search but is not automatically injected.
 - `LLM_GROUP_SUMMARY_DIR`: persistent rolling-summary directory, default `data/llm/summaries`.
 - `LLM_GROUP_SUMMARY_MAX_CHARS`: maximum persisted summary characters per group, default `5000`.
-- `LLM_GROUP_SUMMARY_TIMEOUT_MS`: maximum time spent updating a summary; on timeout, the previous safe summary is retained and raw history is not injected, default `15000`.
+- `LLM_GROUP_SUMMARY_TIMEOUT_MS`: maximum time spent updating a summary; on timeout, the previous safe summary is retained and raw history is not injected, default `30000`.
 - `LLM_PERIODIC_SUMMARY_ENABLED`: enable archive-driven group and member summarization, default `true`.
-- `LLM_PERIODIC_SUMMARY_INTERVAL_MS`: delay between background summary runs, default `60000`.
-- `LLM_PERIODIC_SUMMARY_INITIAL_DELAY_MS`: startup delay before the first background run, default `15000`.
+- `LLM_PERIODIC_SUMMARY_INTERVAL_MS`: delay between background summary runs, default `600000` (10 minutes).
+- `LLM_PERIODIC_SUMMARY_INITIAL_DELAY_MS`: startup delay before the first background run, default `120000` (2 minutes).
 - `LLM_PERIODIC_SUMMARY_MAX_GROUPS`: maximum archived groups checked per run, default `1000`.
 - `LLM_PERIODIC_SUMMARY_BATCH_MESSAGES`: oldest-first message batch size per summary call, default `200`.
-- `LLM_PERIODIC_SUMMARY_MAX_BATCHES_PER_GROUP`: catch-up batches processed for one group in a run, default `4`.
+- `LLM_PERIODIC_SUMMARY_MIN_MESSAGES`: minimum pending messages before a partial batch is summarized, default `40`.
+- `LLM_PERIODIC_SUMMARY_MAX_WAIT_MS`: maximum time the oldest message in a partial batch may wait before it is summarized even below the message threshold, default `3600000` (1 hour).
+- `LLM_PERIODIC_SUMMARY_MAX_BATCHES_PER_GROUP`: catch-up batches processed for one group in a run, default `1`.
 - `LLM_HISTORY_TTL_MS`: in-memory conversation lifetime, default `1800000` (30 minutes).
 - `LLM_MEMORY_CONTEXT_MAX_ITEMS`: maximum relevant memories injected into a request, default `10`.
 - `LLM_MEMORY_CONTEXT_MAX_CHARS`: maximum memory context characters, default `6000`.
@@ -197,8 +199,8 @@ Related environment variables:
 - `LLM_MEMBER_PROFILE_CONTEXT_MAX_CHARS`: maximum total qbot member-profile context characters, default `20000`.
 
 QQ group messages are archived in the `llm_chat_history` table through `POST /qo/asking/v1/chat/history`, using stable source IDs and `INSERT IGNORE` for idempotency. The periodic summarizer consumes this archive directly, so bot completion requests no longer carry the sliding raw `group_context`. The LLM can retrieve older, group-scoped records with the `search_chat_history` tool; results never cross group boundaries.
-- `LLM_TOOLS_ENABLED`: enable built-in tools, default `true`.
-- `LLM_WEB_SEARCH_ENABLED`: enable DeepSeek server-side web search for Responses-backed requests, default `true`.
+- `LLM_TOOLS_ENABLED`: enable QAPI's local function tools, default `true`; provider-hosted Web Search is unaffected.
+- Provider-hosted Web Search is always available for interactive requests and cannot be disabled with an environment variable. Responses requests use the standard `web_search` tool with `tool_choice: auto`; Chat Completions requests use standard `web_search_options` while local function tools retain `tool_choice: auto`.
 - `LLM_PROVIDERS_FILE`: provider configuration JSON path, default `data/llm/providers.json`. The file is watched and the configuration (including referenced token files) is periodically reloaded; invalid updates keep the last valid provider.
 - `LLM_PROVIDER`: selected provider name. If omitted, the JSON `defaultProvider` is used and may be changed by hot-reloading the provider file. When set, this environment override remains fixed until restart.
 - `LLM_RESPONSES_API_URL`: legacy fallback Responses API endpoint. Provider JSON should use an explicit `responsesUrl`.
@@ -264,8 +266,9 @@ Provider configuration example (`data/llm/providers.json`):
 
 `responsesUrl` is always used as written and is never derived from or truncated from
 `chatCompletionsUrl`. Set `LLM_PROVIDER=another-provider` to switch providers.
-`responsesModels` controls which model aliases use the Responses API; `LLM_WEB_SEARCH_ENABLED`
-only controls whether the Responses request includes web search.
+`responsesModels` controls which model aliases use the Responses API. The integration follows the
+Responses API wire format first and does not special-case DeepSeek. Chat Completions uses its separate
+`web_search_options` compatibility path.
 
 `contextWindow` is the main model's context-window size in tokens (default `524288`). The API keeps the
 system prompt and newest user messages, then drops the oldest history when the estimated

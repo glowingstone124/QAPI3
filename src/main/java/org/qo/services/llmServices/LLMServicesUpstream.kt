@@ -60,16 +60,8 @@ internal suspend fun LLMServices.completeWithOptionalTools(
 	if (provider.supportsResponses(request.preset)) {
 		return completeWithResponsesApi(request, requester, source, provider)
 	}
-	if (!toolService.enabled()) {
-		val response = postUpstream(source, request.body, provider)
-		return response.status.value to sanitizeResponseBody(response.bodyAsText(), request.enableMarkdown)
-	}
-
-	val obj = JsonParser.parseString(request.body).asJsonObject
-	obj.add("tools", toolService.definitions())
-	if (!obj.has("tool_choice")) {
-		obj.addProperty("tool_choice", "auto")
-	}
+	val functionTools = if (toolService.enabled()) toolService.definitions() else JsonArray()
+	val obj = LLMWebSearchAdapter.enableChatCompletions(request.body, functionTools)
 
 	var latestStatus = 502
 	var latestBody = ""
@@ -111,7 +103,6 @@ internal suspend fun LLMServices.completeWithResponsesApi(
 	val body = LLMResponsesAdapter.fromChatRequest(
 		request.body,
 		functionTools,
-		enableWebSearch = webSearchEnabled,
 		reasoningEffort = request.reasoningEffort,
 	)
 	repeat(maxToolRounds) { round ->
@@ -171,6 +162,8 @@ internal fun LLMServices.streamFromUpstream(
 	provider: LLMProvider,
 	quotaReservation: LLMQuotaReservation,
 ): Flow<String> = flow {
+	val functionTools = if (toolService.enabled()) toolService.definitions() else JsonArray()
+	val upstreamBody = LLMWebSearchAdapter.enableChatCompletions(request.body, functionTools).toString()
 	var upstreamAccepted = false
 	var lastProgressKey: String? = null
 	suspend fun emitProgress(phase: String, label: String) {
@@ -183,12 +176,12 @@ internal fun LLMServices.streamFromUpstream(
 	emitProgress("analyzing", "正在分析问题…")
 	try {
 		client.preparePost(provider.chatCompletionsUrl) {
-			logUpstreamRequest(source, request.body, provider, "chat-completions")
+			logUpstreamRequest(source, upstreamBody, provider, "chat-completions")
 			header(HttpHeaders.Authorization, "Bearer ${provider.apiToken}")
 			header(HttpHeaders.Accept, ContentType.Text.EventStream.toString())
 			contentType(ContentType.Application.Json)
-			debugPrompt(source, request.body)
-			setBody(request.body)
+			debugPrompt(source, upstreamBody)
+			setBody(upstreamBody)
 		}.execute { response ->
 			if (!response.status.isSuccess()) {
 				val errorBody = response.bodyAsText()
@@ -261,7 +254,6 @@ internal fun LLMServices.streamFromResponses(
 	val upstreamBody = LLMResponsesAdapter.fromChatRequest(
 		request.body,
 		functionTools,
-		enableWebSearch = webSearchEnabled,
 		reasoningEffort = request.reasoningEffort,
 		stream = true,
 	)

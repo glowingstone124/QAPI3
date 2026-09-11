@@ -155,7 +155,7 @@ internal suspend fun LLMServices.enrichMessages(
 	if (toolService.enabled()) {
 		stableContextParts.add(LLMToolInstructions.systemRules)
 	}
-	if (webSearchEnabled && requester != null) {
+	if (requester != null) {
 		stableContextParts.add(webSearchRules())
 	}
 	stableContextParts.add(LLMServices.hardOutputRules(enableMarkdown, isWeb))

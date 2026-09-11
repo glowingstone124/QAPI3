@@ -71,11 +71,10 @@ class LLMServices(
 	internal val tokenStatisticsService: LLMTokenStatisticsService? = null,
 ) {
 	internal val redis = Redis()
-	internal val webSearchEnabled = readBoolean("LLM_WEB_SEARCH_ENABLED", true)
 	internal val debugPrompt = readBoolean("LLM_DEBUG_PROMPT", false)
 	internal val debugPromptMaxChars = readInt("LLM_DEBUG_PROMPT_MAX_CHARS", 12000).coerceAtLeast(1000)
 	internal val maxToolRounds = readInt("LLM_TOOL_MAX_ROUNDS", 3).coerceIn(1, 8)
-	internal val groupSummaryTimeoutMs = readLong("LLM_GROUP_SUMMARY_TIMEOUT_MS", 15_000L).coerceIn(1000L, 30_000L)
+	internal val groupSummaryTimeoutMs = readLong("LLM_GROUP_SUMMARY_TIMEOUT_MS", 30_000L).coerceIn(1000L, 30_000L)
 	internal val sanitizeOutput = readBoolean("LLM_SANITIZE_OUTPUT", true)
 	internal val stripEmoji = System.getenv("LLM_STRIP_EMOJI")?.trim()?.lowercase()?.toBooleanStrictOrNull() == true
 	internal val qoGroupId = System.getenv("LLM_QO_GROUP_ID")?.trim()?.toLongOrNull()

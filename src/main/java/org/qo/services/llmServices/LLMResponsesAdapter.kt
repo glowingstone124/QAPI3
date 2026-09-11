@@ -31,7 +31,6 @@ internal object LLMResponsesAdapter {
     fun fromChatRequest(
         chatBody: String,
         functionTools: JsonArray,
-        enableWebSearch: Boolean,
         reasoningEffort: LLMReasoningEffort,
         stream: Boolean = false,
     ): JsonObject {
@@ -63,19 +62,9 @@ internal object LLMResponsesAdapter {
                     function.get("parameters")?.let { add("parameters", it) }
                 })
             }
-            if (enableWebSearch) {
-                tools.add(JsonObject().apply { addProperty("type", "web_search") })
-            }
-            if (tools.size() > 0) {
-                add("tools", tools)
-                if (enableWebSearch) {
-                    add("tool_choice", JsonObject().apply {
-                        addProperty("type", "web_search")
-                    })
-                } else {
-                    addProperty("tool_choice", "auto")
-                }
-            }
+            tools.add(JsonObject().apply { addProperty("type", "web_search") })
+            add("tools", tools)
+            addProperty("tool_choice", "auto")
         }
     }
 
@@ -212,7 +201,7 @@ internal object LLMResponsesAdapter {
         val cacheMissTokens = usage?.get("prompt_cache_miss_tokens")?.asInt
             ?: cachedTokens?.let { (promptTokens - it).coerceAtLeast(0) }
         return JsonObject().apply {
-            addProperty("id", response.get("id")?.asString ?: "resp-deepseek")
+            addProperty("id", response.get("id")?.asString ?: "resp-provider")
             addProperty("object", "chat.completion")
             add("model", response.get("model"))
             add("choices", JsonArray().apply {
