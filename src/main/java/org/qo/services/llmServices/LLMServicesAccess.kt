@@ -62,50 +62,11 @@ internal fun LLMServices.ensureAccessRecordSchemaInitialization() {
 	}
 	initializationScope.launch {
 		try {
-			database.execute(
-				"""
-                CREATE TABLE IF NOT EXISTS llm_access_records (
-				   id BIGINT AUTO_INCREMENT PRIMARY KEY,
-				   uid BIGINT NOT NULL,
-				   username VARCHAR(128) NOT NULL,
-				   source VARCHAR(32) NOT NULL DEFAULT 'unknown',
-				   source_identity VARCHAR(128) NULL,
-				   group_name VARCHAR(128) NULL,
-                   request_id VARCHAR(80) NOT NULL,
-                   model VARCHAR(128) NOT NULL,
-                   stream BOOLEAN NOT NULL,
-                   status VARCHAR(32) NOT NULL,
-                   prompt_tokens INT NULL,
-                   completion_tokens INT NULL,
-                   total_tokens INT NULL,
-                   cached_tokens INT NULL,
-                   uncached_tokens INT NULL,
-                   error_message VARCHAR(512) NULL,
-                   created_at BIGINT NOT NULL,
-                   completed_at BIGINT NULL,
-                   INDEX idx_llm_access_uid_created (uid, created_at)
-                )
-                """.trimIndent()
-			)
-			ensureAccessRecordColumn("source", "VARCHAR(32) NOT NULL DEFAULT 'unknown' AFTER username")
-			ensureAccessRecordColumn("source_identity", "VARCHAR(128) NULL AFTER source")
-			ensureAccessRecordColumn("group_name", "VARCHAR(128) NULL AFTER source_identity")
-			ensureAccessRecordColumn("cached_tokens", "INT NULL AFTER total_tokens")
-			ensureAccessRecordColumn("uncached_tokens", "INT NULL AFTER cached_tokens")
+			accessRecordSchema.ensure()
 			accessRecordSchemaReady.complete(Unit)
 		} catch (error: Exception) {
 			accessRecordSchemaReady.completeExceptionally(error)
-			println("LLM access record table init failed: ${error.message}")
-		}
-	}
-}
-
-internal suspend fun LLMServices.ensureAccessRecordColumn(name: String, definition: String) {
-	try {
-		database.execute("ALTER TABLE llm_access_records ADD COLUMN $name $definition")
-	} catch (error: Exception) {
-		if (!error.message.orEmpty().contains("duplicate", ignoreCase = true)) {
-			println("LLM access record column migration failed for $name: ${error.message}")
+			println("LLM access record table init failed: ${error.message}; cause=${accessRecordSchemaErrorDetail(error)}")
 		}
 	}
 }

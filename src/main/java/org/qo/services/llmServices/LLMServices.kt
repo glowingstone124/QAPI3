@@ -57,6 +57,7 @@ class LLMServices(
 	internal val login: Login,
 	internal val nodes: Nodes,
 	internal val database: ReactiveDatabase,
+	internal val accessRecordSchema: LLMAccessRecordSchema,
 	internal val ragService: RAGService,
 	internal val memoryService: LLMMemoryService,
 	internal val conversationService: LLMConversationService,

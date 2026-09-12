@@ -2,8 +2,6 @@ package org.qo.services.llmServices
 
 import com.google.gson.JsonArray
 import com.google.gson.JsonObject
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import org.qo.datas.ReactiveDatabase
 import org.qo.orm.UserORM
 import org.qo.services.loginService.KotshiPrivacyService
@@ -74,11 +72,9 @@ class KotshiAccountService(
 	private val privacyService: KotshiPrivacyService,
 	private val dailyQuotaService: LLMDailyQuotaService,
 	private val database: ReactiveDatabase,
+	private val accessRecordSchema: LLMAccessRecordSchema,
 ) {
 	private val userORM = UserORM()
-	private val schemaMutex = Mutex()
-	@Volatile
-	private var schemaReady = false
 	private val quotaZone = ZoneId.of("Asia/Shanghai")
 
 	suspend fun snapshot(token: String): KotshiAccountSnapshot? {
@@ -113,7 +109,7 @@ class KotshiAccountService(
 
 	private suspend fun loadUsage(uid: Long): Pair<KotshiUsageSummary, List<KotshiUsageRecord>> {
 		return runCatching {
-			ensureSchema()
+			accessRecordSchema.ensure()
 			val dayStart = LocalDate.now(quotaZone)
 				.atStartOfDay(quotaZone)
 				.toInstant()
@@ -163,52 +159,6 @@ class KotshiAccountService(
 			println("[Kotshi] usage lookup failed: ${error.message}")
 			KotshiUsageSummary() to emptyList()
 		}
-	}
-
-	private suspend fun ensureSchema() {
-		if (schemaReady) return
-		schemaMutex.withLock {
-			if (schemaReady) return
-			database.execute(
-				"""
-				CREATE TABLE IF NOT EXISTS llm_access_records (
-					id BIGINT AUTO_INCREMENT PRIMARY KEY,
-					uid BIGINT NOT NULL,
-					username VARCHAR(128) NOT NULL,
-					source VARCHAR(32) NOT NULL DEFAULT 'unknown',
-					source_identity VARCHAR(128) NULL,
-					request_id VARCHAR(80) NOT NULL,
-					model VARCHAR(128) NOT NULL,
-					stream BOOLEAN NOT NULL,
-					status VARCHAR(32) NOT NULL,
-					prompt_tokens INT NULL,
-					completion_tokens INT NULL,
-					total_tokens INT NULL,
-					error_message VARCHAR(512) NULL,
-					created_at BIGINT NOT NULL,
-					completed_at BIGINT NULL,
-					INDEX idx_llm_access_uid_created (uid, created_at)
-				)
-				""".trimIndent(),
-			)
-			ensureColumn("source", "VARCHAR(32) NOT NULL DEFAULT 'unknown'")
-			ensureColumn("source_identity", "VARCHAR(128) NULL")
-			schemaReady = true
-		}
-	}
-
-	private suspend fun ensureColumn(name: String, definition: String) {
-		val exists = database.one(
-			"""
-			SELECT 1 FROM information_schema.columns
-			WHERE (table_schema = DATABASE() OR table_catalog = DATABASE())
-			  AND LOWER(table_name) = 'llm_access_records'
-			  AND LOWER(column_name) = LOWER(?)
-			LIMIT 1
-			""".trimIndent(),
-			listOf(name),
-		) { true } != null
-		if (!exists) database.execute("ALTER TABLE llm_access_records ADD COLUMN $name $definition")
 	}
 
 	private fun number(value: Any?): Long = when (value) {
