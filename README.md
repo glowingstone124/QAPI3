@@ -200,32 +200,41 @@ Related environment variables:
 
 QQ group messages are archived in the `llm_chat_history` table through `POST /qo/asking/v1/chat/history`, using stable source IDs and `INSERT IGNORE` for idempotency. The periodic summarizer consumes this archive directly, so bot completion requests no longer carry the sliding raw `group_context`. The LLM can retrieve older, group-scoped records with the `search_chat_history` tool; results never cross group boundaries.
 - `LLM_TOOLS_ENABLED`: enable QAPI's local function tools, default `true`; provider-hosted Web Search is unaffected.
-- Provider-hosted Web Search is always available for interactive requests and cannot be disabled with an environment variable. Responses requests use the standard `web_search` tool with `tool_choice: auto`; Chat Completions requests use standard `web_search_options` while local function tools retain `tool_choice: auto`.
+- Provider-hosted Web Search is enabled for every interactive request, including when local tools are disabled. Responses uses `web_search`; Chat Completions uses `web_search_options`; Anthropic uses `web_search_20250305`. The selected upstream must support its protocol’s hosted search feature and have search enabled for the account. Search errors are not silently retried without search. Anthropic handles `pause_turn` continuation and exposes source links in answers.
 - `LLM_PROVIDERS_FILE`: provider configuration JSON path, default `data/llm/providers.json`. The file is watched and the configuration (including referenced token files) is periodically reloaded; invalid updates keep the last valid provider.
 - `LLM_PROVIDER`: selected provider name. If omitted, the JSON `defaultProvider` is used and may be changed by hot-reloading the provider file. When set, this environment override remains fixed until restart.
-- `LLM_RESPONSES_API_URL`: legacy fallback Responses API endpoint. Provider JSON should use an explicit `responsesUrl`.
-- `LLM_RESPONSES_MODELS`: legacy comma-separated Responses model aliases. Provider JSON should use `responsesModels`.
 - `LLM_TOOL_MAX_ROUNDS`: maximum tool-call loops per request, default `3`.
 - `LLM_TOOL_METRO_MAX_RESULTS`: maximum metro search results returned to the model, default `12`.
 
-Provider configuration example (`data/llm/providers.json`):
+Provider configuration example (`data/llm/providers.json`; replace example URLs and model IDs with those supported by your upstream):
 
 ```json
 {
-  "defaultProvider": "deepseek",
+  "defaultProvider": "gateway",
   "providers": {
-    "deepseek": {
-      "chatCompletionsUrl": "https://api.deepseek.com/v1/chat/completions",
-      "responsesUrl": "https://api.deepseek.com/v1/responses",
+    "gateway": {
+      "chatCompletionsUrl": "https://gateway.example/v1/chat/completions",
+      "responsesUrl": "https://gateway.example/v1/responses",
+      "anthropicUrl": "https://gateway.example/v1/messages",
       "tokenFile": "LLMAPITOKEN",
       "contextWindow": 524288,
       "models": {
-        "fast": "deepseek-v4-flash",
-        "thinking": "deepseek-v4-pro",
-        "quality": "deepseek-v4-pro"
+        "fast": {
+          "model": "provider-fast-model",
+          "protocol": "responses"
+        },
+        "thinking": {
+          "model": "provider-thinking-model",
+          "protocol": "chat-completions"
+        },
+        "quality": {
+          "model": "provider-claude-model",
+          "protocol": "anthropic",
+          "thinkingMode": "adaptive"
+        }
       },
       "summary": {
-        "provider": "another-provider",
+        "provider": "anthropic",
         "model": "fast",
         "contextWindow": 32768
       },
@@ -235,46 +244,60 @@ Provider configuration example (`data/llm/providers.json`):
         "triggerPercent": 70,
         "keepTurns": 4,
         "maxSummaryChars": 8000
-      },
-      "responsesModels": ["fast"]
+      }
     },
-    "another-provider": {
-      "chatCompletionsUrl": "https://example.com/v1/chat/completions",
-      "responsesUrl": "https://example.com/v1/responses",
-      "tokenFile": "data/llm/another-provider.token",
-      "contextWindow": 524288,
+    "anthropic": {
+      "chatCompletionsUrl": "unavaliable",
+      "responsesUrl": "unavaliable",
+      "anthropicUrl": "https://api.anthropic.com/v1/messages",
+      "tokenFile": "data/llm/anthropic.token",
+      "contextWindow": 200000,
       "models": {
-        "fast": "provider-fast-model",
-        "thinking": "provider-thinking-model"
+        "fast": {
+          "model": "your-fast-claude-model-id",
+          "protocol": "anthropic"
+        },
+        "thinking": {
+          "model": "your-thinking-claude-model-id",
+          "protocol": "anthropic",
+          "thinkingMode": "adaptive"
+        },
+        "compact": {
+          "model": "your-summary-claude-model-id",
+          "protocol": "anthropic"
+        }
       },
       "summary": {
-        "model": "provider-summary-model",
+        "model": "compact",
         "contextWindow": 32768
-      },
-      "compact": {
-        "enabled": true,
-        "triggerTurns": 12,
-        "triggerPercent": 70,
-        "keepTurns": 4,
-        "maxSummaryChars": 8000
-      },
-      "responsesModels": ["fast", "thinking"]
+      }
     }
   }
 }
 ```
 
-`responsesUrl` is always used as written and is never derived from or truncated from
-`chatCompletionsUrl`. Set `LLM_PROVIDER=another-provider` to switch providers.
-`responsesModels` controls which model aliases use the Responses API. The integration follows the
-Responses API wire format first and does not special-case DeepSeek. Chat Completions uses its separate
-`web_search_options` compatibility path.
+Every provider must declare all three endpoint fields, even when unused. Set an unsupported
+endpoint to the literal `"unavaliable"` (`"unavailable"` is also accepted). Endpoints are used exactly
+as configured; QAPI never derives one endpoint from another or falls back to a different protocol.
+Every `models.<preset>` entry must explicitly declare `model` and `protocol`, with protocol one of
+`responses`, `chat-completions`, or `anthropic`. A model selecting an unavailable endpoint makes
+the configuration invalid. All providers are validated, including inactive ones.
+
+For migration, replace string model entries with these objects, remove `responsesModels`, and
+add `anthropicUrl`. There is no implicit protocol default. The spelling aliases `antrophicUrl`
+and protocol `antrophic` are accepted. `balanceUrl` is optional.
+
+Anthropic requests use `x-api-key` and `anthropic-version: 2023-06-01`. Optional per-model
+`thinkingMode` is `enabled` (default; manual token budget), `adaptive` (effort-based thinking),
+or `disabled`; choose a mode supported by the upstream model. Anthropic tool/search continuation
+preserves original content blocks and thinking signatures. Streaming responses keep QAPI’s
+Chat Completion chunks, `kotshi.status` events, and final `[DONE]`.
 
 `contextWindow` is the main model's context-window size in tokens (default `524288`). The API keeps the
 system prompt and newest user messages, then drops the oldest history when the estimated
 input would exceed that window. `models` accepts arbitrary preset names; request the `quality`
 preset with `?model=quality`. `summary.provider` may reference any configured provider, while
-`summary.model` may be any preset of that provider or a provider model name. `summary.contextWindow`
+`summary.model` may be any preset of that provider or a model name declared in its `models` object. The summary request uses that model’s explicit protocol. `summary.contextWindow`
 independently limits the summary request. Summary settings default to the selected provider's
 `fast` model and the main `contextWindow`.
 Conversation autocompact uses the same summary configuration. Its provider-local `compact`

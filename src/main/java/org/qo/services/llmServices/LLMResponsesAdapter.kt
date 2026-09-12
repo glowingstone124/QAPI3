@@ -33,6 +33,7 @@ internal object LLMResponsesAdapter {
         functionTools: JsonArray,
         reasoningEffort: LLMReasoningEffort,
         stream: Boolean = false,
+        webSearch: Boolean = true,
     ): JsonObject {
         val chat = JsonParser.parseString(chatBody).asJsonObject
         return JsonObject().apply {
@@ -62,9 +63,11 @@ internal object LLMResponsesAdapter {
                     function.get("parameters")?.let { add("parameters", it) }
                 })
             }
-            tools.add(JsonObject().apply { addProperty("type", "web_search") })
-            add("tools", tools)
-            addProperty("tool_choice", "auto")
+            if (webSearch) tools.add(JsonObject().apply { addProperty("type", "web_search") })
+            if (tools.size() > 0) {
+                add("tools", tools)
+                addProperty("tool_choice", "auto")
+            }
         }
     }
 

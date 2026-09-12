@@ -96,9 +96,8 @@ internal suspend fun LLMServices.summarizeConversation(
 	}
 	return withTimeoutOrNull(groupSummaryTimeoutMs.milliseconds) {
 		runCatching {
-			val response = postSummaryUpstream("conversation-compact", request.toString(), provider.summary)
-			if (!response.status.isSuccess()) return@runCatching null
-			val body = response.bodyAsText()
+			val (status, body) = postSummaryUpstream("conversation-compact", request.toString(), provider.summary)
+			if (status !in 200..299) return@runCatching null
 			parseUsage(body)?.let { logPromptCacheUsage("conversation-compact", it) }
 			extractAssistantContent(body)
 		}.getOrNull()

@@ -316,7 +316,7 @@ Web、QQ Bot 和 Minecraft 三个入口都会在各自认证成功后归一到�
 - `thinking`
 - provider JSON 中配置的真实模型名
 
-`stream=false` 返回 JSON；`stream=true` 返回 SSE。配置在 provider `responsesModels` 中的预设会使用 Responses API，服务端把兼容层的 `reasoning_effort` 转换为上游 `reasoning.effort`。工具调用、群上下文、记忆、历史检索和 RAG 在 Responses 路径中均可用；工具轮次会完整回传上游 output item，以保留模型需要的 reasoning 上下文。
+`stream=false` 返回 JSON；`stream=true` 返回 SSE。每个预设通过 provider `models.<preset>.protocol` 显式选择 `responses`、`chat-completions` 或 `anthropic`。Responses 路径把 `reasoning_effort` 转为 `reasoning.effort`；Anthropic 路径按模型 `thinkingMode` 转为 thinking budget 或 `output_config.effort`，并保持对外 Chat Completion 格式。三个协议的交互请求均启用上游 Web Search；Anthropic 支持 `pause_turn` 续接、搜索与本地工具混用，并返回来源链接。上游需要支持对应搜索功能且账户已启用；Anthropic 搜索失败会返回错误，不会悄悄移除搜索继续请求。工具调用、群上下文、记忆、历史检索和 RAG 在 Responses 路径中均可用；工具轮次会完整回传上游 output item，以保留模型需要的 reasoning 上下文。
 
 `reasoning_effort` 支持 `none`、`low`、`medium`、`high`、`xhigh`、`max`；DeepSeek 映射为 `none→none`、`low→low`、`medium/high/xhigh→high`、`max→max`。QQ Bot 与 Minecraft 请求默认 `none`，Web 请求默认 `high`，Web 客户端只提供 `low/high/max`。也可传 Responses 形式的 `{"reasoning":{"effort":"high"}}`，但不可与 `reasoning_effort` 同时出现。
 
@@ -415,13 +415,17 @@ Responses 路径的非流式与 SSE 请求均可调用：
 
 ### LLM 配置
 
-provider 配置文件默认为 `data/llm/providers.json`，可由 `LLM_PROVIDERS_FILE` 覆盖；通过 `LLM_PROVIDER` 选择 provider。每个 provider 可显式配置：
+provider 配置文件默认为 `data/llm/providers.json`，可由 `LLM_PROVIDERS_FILE` 覆盖；通过 `LLM_PROVIDER` 选择 provider。每个 provider 必须声明三个端点，每个模型必须显式配置名称和协议：
 
 - `chatCompletionsUrl`
 - `responsesUrl`
+- `anthropicUrl`（兼容拼写 `antrophicUrl`）
 - `token` 或 `tokenFile`
 - `contextWindow`
-- `models.<preset>`（任意预设名，至少需配置 `fast` 和 `thinking`）
+- `models.<preset>.model`（上游模型名，任意预设名，至少需配置 `fast` 和 `thinking`）
+- `models.<preset>.protocol`（`responses` / `chat-completions` / `anthropic`，无默认值；兼容 `antrophic`）
+- `models.<preset>.thinkingMode`（Anthropic 可选：`enabled` / `adaptive` / `disabled`，默认 `enabled`）
+- `balanceUrl`（可选）
 - `summary.provider`
 - `summary.model`
 - `summary.contextWindow`
@@ -430,14 +434,15 @@ provider 配置文件默认为 `data/llm/providers.json`，可由 `LLM_PROVIDERS
 - `compact.triggerPercent`
 - `compact.keepTurns`
 - `compact.maxSummaryChars`
-- `responsesModels`
 
 会话历史自动压缩由当前 provider 的 `compact` 对象控制：超过 `compact.triggerTurns`
 （默认 `12`）或估算 token 达到 `compact.triggerPercent`（默认主窗口的 `70%`）时，较早轮次会使用
 `summary.model` 生成滚动摘要，保留最新 `compact.keepTurns`（默认 `4`）轮原文。设置
 `compact.enabled=false` 可关闭。
 
-`responsesUrl` 按 JSON 原值使用，不会从 Chat URL 推导。
+三个端点均按 JSON 原值使用，不会相互推导。不可用端点填写字符串 `"unavaliable"`（也接受 `"unavailable"`）；缺少端点或模型选择不可用端点均视为非法配置。旧的字符串模型配置和 `responsesModels` 必须迁移为模型对象。配置加载时校验所有 provider；非法热更新保留上一个有效快照。
+
+`summary.model` 必须引用对应 provider 中已声明的预设或模型名，摘要按该模型配置的协议调用；未指定时使用 `fast`。摘要和会话压缩不启用联网搜索或本地工具。
 
 ## 11. GitHub Webhook
 

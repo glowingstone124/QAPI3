@@ -5,6 +5,28 @@ import com.google.gson.JsonParser
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.Locale
+import java.net.URI
+
+enum class LLMProtocol(val wireValue: String, val endpointKey: String) {
+	CHAT_COMPLETIONS("chat-completions", "chatCompletionsUrl"),
+	RESPONSES("responses", "responsesUrl"),
+	ANTHROPIC("anthropic", "anthropicUrl");
+
+	companion object {
+		fun parse(value: String): LLMProtocol = when (value.trim().lowercase(Locale.ROOT)) {
+			"chat-completions", "chat_completions" -> CHAT_COMPLETIONS
+			"responses" -> RESPONSES
+			"anthropic", "antrophic" -> ANTHROPIC
+			else -> throw IllegalArgumentException("Unknown LLM protocol '$value'")
+		}
+	}
+}
+
+data class LLMModelConfig(
+	val model: String,
+	val protocol: LLMProtocol,
+	val thinkingMode: String = "enabled",
+)
 
 enum class BalanceStructParse(val provider: String) {
 	DEEPSEEK("deepseek"),
@@ -31,10 +53,12 @@ data class BalanceRelated(
 
 data class LLMSummaryConfig(
 	val providerName: String,
-	val chatCompletionsUrl: String,
+	val endpointUrl: String,
 	val apiToken: String,
 	val model: String,
 	val contextWindow: Int,
+	val protocol: LLMProtocol,
+	val thinkingMode: String,
 )
 
 data class LLMCompactConfig(
@@ -49,14 +73,14 @@ data class LLMProvider(
 	val name: String,
 	val chatCompletionsUrl: String,
 	val responsesUrl: String,
+	val anthropicUrl: String,
 	val apiToken: String,
-	val models: Map<String, String>,
+	val models: Map<String, LLMModelConfig>,
 	val fastModel: String,
 	val thinkingModel: String,
 	val contextWindow: Int,
 	val summary: LLMSummaryConfig,
 	val compact: LLMCompactConfig,
-	val responsesModels: Set<String>,
 	val balanceRelated: BalanceRelated,
 ) {
 	val mainContextWindow: Int
@@ -73,17 +97,27 @@ data class LLMProvider(
 		LLMServices.MODELS.THINKING -> thinkingModel
 	}
 
-	fun modelName(preset: String): String? = models[preset.lowercase(Locale.ROOT)]
+	fun modelName(preset: String): String? = models[preset.lowercase(Locale.ROOT)]?.model
+
+	fun modelConfig(preset: String): LLMModelConfig = models.getValue(preset.lowercase(Locale.ROOT))
+
+	fun protocol(preset: String): LLMProtocol = modelConfig(preset).protocol
+
+	fun endpoint(protocol: LLMProtocol): String = when (protocol) {
+		LLMProtocol.CHAT_COMPLETIONS -> chatCompletionsUrl
+		LLMProtocol.RESPONSES -> responsesUrl
+		LLMProtocol.ANTHROPIC -> anthropicUrl
+	}.also { require(!isUnavailable(it)) { "${protocol.wireValue} endpoint is unavailable for provider '$name'" } }
 
 	fun resolvePreset(value: String): String? {
 		val normalized = value.trim().lowercase(Locale.ROOT)
 		return models.keys.firstOrNull { it.equals(normalized, ignoreCase = true) }
-			?: models.entries.firstOrNull { it.value.equals(value.trim(), ignoreCase = true) }?.key
+			?: models.entries.firstOrNull { it.value.model.equals(value.trim(), ignoreCase = true) }?.key
 	}
 
 	fun supportsResponses(model: LLMServices.MODELS): Boolean = supportsResponses(model.alias)
 
-	fun supportsResponses(preset: String): Boolean = preset.lowercase(Locale.ROOT) in responsesModels
+	fun supportsResponses(preset: String): Boolean = protocol(preset) == LLMProtocol.RESPONSES
 
 	companion object {
 		fun fromEnvironment(): LLMProvider {
@@ -95,6 +129,11 @@ data class LLMProvider(
 		fun fromConfig(configPath: Path, explicitlySelected: String? = null): LLMProvider {
 			val root = readConfig(configPath)
 			val providers = root?.getAsJsonObject("providers")
+			// Validate every provider, including those that are not currently selected.
+			providers?.entrySet()?.forEach { (name, value) ->
+				require(value.isJsonObject) { "provider '$name' must be an object" }
+				readModels(value.asJsonObject, name)
+			}
 			val selectedName = explicitlySelected
 				?: root?.get("defaultProvider")?.asString?.takeIf { it.isNotBlank() }
 				?: providers?.keySet()?.firstOrNull() ?: throw Exception("provider not found")
@@ -103,11 +142,12 @@ data class LLMProvider(
 				error("LLM provider '$selectedName' is not defined in $configPath")
 			}
 			val token = readToken(configured, selectedName)
-			val balanceUrl = configured.get("balanceUrl").asString ?: throw Exception("$selectedName balanceUrl not defined in $configPath")
+			val balanceUrl = configured.get("balanceUrl")?.takeIf { !it.isJsonNull }?.asString
+				?.takeUnless(::isUnavailable)
 			val models = readModels(configured, selectedName)
-			val fastModel = models["fast"]
+			val fastModel = models["fast"]?.model
 				?: throw Exception("fastModel not defined in $configPath")
-			val thinkingModel = models["thinking"]
+			val thinkingModel = models["thinking"]?.model
 				?: throw Exception("thinkingModel not defined in $configPath")
 			val contextWindow = readContextWindow(configured, "contextWindow", DEFAULT_CONTEXT_WINDOW)
 			val summary = readSummaryConfig(configured, providers, selectedName, contextWindow)
@@ -115,8 +155,9 @@ data class LLMProvider(
 
 			return LLMProvider(
 				name = selectedName,
-				chatCompletionsUrl = configured.get("chatCompletionsUrl")?.asString ?: throw Exception("chatCompletionsUrl not defined in $configPath"),
-				responsesUrl = configured.get("responsesUrl")?.asString ?: throw Exception("responsesUrl not defined in $configPath"),
+				chatCompletionsUrl = readEndpoint(configured, selectedName, LLMProtocol.CHAT_COMPLETIONS),
+				responsesUrl = readEndpoint(configured, selectedName, LLMProtocol.RESPONSES),
+				anthropicUrl = readEndpoint(configured, selectedName, LLMProtocol.ANTHROPIC),
 				apiToken = token,
 				models = models,
 				fastModel = fastModel,
@@ -124,7 +165,6 @@ data class LLMProvider(
 				contextWindow = contextWindow,
 				summary = summary,
 				compact = compact,
-				responsesModels = readResponsesModels(configured),
 				balanceRelated = BalanceRelated(
 					balanceUrl = balanceUrl,
 					balanceStruct = BalanceStructParse.fromProvider(selectedName),
@@ -144,23 +184,62 @@ data class LLMProvider(
 				?: throw IllegalArgumentException("summary provider '$providerName' is not defined")
 			val models = readModels(summaryProvider, providerName)
 			val configuredModel = summary?.get("model")?.asString?.trim()?.takeIf { it.isNotBlank() }
-			val model = configuredModel?.let { models[it.lowercase(Locale.ROOT)] ?: it } ?: models.getValue("fast")
+			val model = configuredModel?.let { requested ->
+				models[requested.lowercase(Locale.ROOT)]
+					?: models.values.firstOrNull { it.model == requested }
+					?: throw IllegalArgumentException("summary model '$requested' must be declared in provider '$providerName' models")
+			} ?: models.getValue("fast")
 			return LLMSummaryConfig(
 				providerName = providerName,
-				chatCompletionsUrl = summaryProvider.get("chatCompletionsUrl")?.asString
-					?: throw IllegalArgumentException("chatCompletionsUrl not defined in summary provider '$providerName'"),
+				endpointUrl = readEndpoint(summaryProvider, providerName, model.protocol),
 				apiToken = readToken(summaryProvider, providerName),
-				model = model,
+				model = model.model,
 				contextWindow = readContextWindow(summary, "contextWindow", mainContextWindow),
+				protocol = model.protocol,
+				thinkingMode = model.thinkingMode,
 			)
 		}
 
-		private fun readModels(configured: JsonObject, providerName: String): Map<String, String> {
+		private fun readModels(configured: JsonObject, providerName: String): Map<String, LLMModelConfig> {
+			val endpoints = LLMProtocol.entries.associateWith { readEndpoint(configured, providerName, it) }
+			require(!configured.has("responsesModels")) { "provider '$providerName': replace responsesModels with models.<preset>.protocol" }
 			val models = configured.getAsJsonObject("models")
 				?: throw IllegalArgumentException("models not defined in provider '$providerName'")
 			return models.entrySet().associate { (alias, value) ->
-				alias.trim().lowercase(Locale.ROOT) to value.asString.trim()
-			}.filterValues { it.isNotBlank() }
+				require(value.isJsonObject) { "provider '$providerName' model '$alias' must declare model and protocol" }
+				val obj = value.asJsonObject
+				val model = obj.get("model")?.asString?.trim().orEmpty()
+				require(model.isNotBlank()) { "provider '$providerName' model '$alias' has no model name" }
+				val protocol = LLMProtocol.parse(obj.get("protocol")?.asString
+					?: throw IllegalArgumentException("provider '$providerName' model '$alias' has no protocol"))
+				require(!isUnavailable(endpoints.getValue(protocol))) {
+					"provider '$providerName' model '$alias' selects unavailable ${protocol.endpointKey}"
+				}
+				val thinkingMode = obj.get("thinkingMode")?.asString ?: "enabled"
+				require(thinkingMode in setOf("enabled", "adaptive", "disabled")) { "Invalid thinkingMode for '$providerName/$alias'" }
+				val normalized = alias.trim().lowercase(Locale.ROOT)
+				require(normalized.isNotBlank()) { "Empty model preset in provider '$providerName'" }
+				normalized to LLMModelConfig(model, protocol, thinkingMode)
+			}.also {
+				require(it.containsKey("fast") && it.containsKey("thinking")) { "provider '$providerName' must declare fast and thinking models" }
+				require(it.size == models.size()) { "Duplicate normalized model presets in provider '$providerName'" }
+			}
+		}
+
+		fun isUnavailable(value: String): Boolean = value.trim().lowercase(Locale.ROOT) in setOf("unavaliable", "unavailable")
+
+		private fun readEndpoint(configured: JsonObject, providerName: String, protocol: LLMProtocol): String {
+			val value = (configured.get(protocol.endpointKey)
+				?: if (protocol == LLMProtocol.ANTHROPIC) configured.get("antrophicUrl") else null)
+				?.asString?.trim()
+				?: throw IllegalArgumentException("${protocol.endpointKey} not defined in provider '$providerName'")
+			if (!isUnavailable(value)) {
+				val uri = runCatching { URI(value) }.getOrNull()
+				require(uri != null && uri.scheme in setOf("http", "https") && !uri.host.isNullOrBlank()) {
+					"Invalid ${protocol.endpointKey} in provider '$providerName'; use an HTTP URL or unavaliable"
+				}
+			}
+			return value
 		}
 
 		private fun readToken(configured: JsonObject, providerName: String): String =
@@ -223,13 +302,5 @@ data class LLMProvider(
 			}
 		}
 
-		private fun readResponsesModels(configured: JsonObject?): Set<String> {
-			val values = configured?.getAsJsonArray("responsesModels")
-				?: return setOf("fast")
-			return values.mapNotNull { item ->
-				val normalized = item.asString.trim().lowercase(Locale.ROOT)
-				normalized.takeIf { it.isNotBlank() }
-			}.toSet()
-		}
 	}
 }

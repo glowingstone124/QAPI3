@@ -57,6 +57,9 @@ internal suspend fun LLMServices.completeWithOptionalTools(
 	source: String,
 	provider: LLMProvider,
 ): Pair<Int, String> {
+	if (provider.protocol(request.preset) == LLMProtocol.ANTHROPIC) {
+		return completeWithAnthropicApi(request, requester, source, provider)
+	}
 	if (provider.supportsResponses(request.preset)) {
 		return completeWithResponsesApi(request, requester, source, provider)
 	}
@@ -139,15 +142,41 @@ internal suspend fun LLMServices.postUpstream(source: String, body: String, prov
 		setBody(body)
 	}
 
-internal suspend fun LLMServices.postSummaryUpstream(source: String, body: String, summary: LLMSummaryConfig) =
-	client.post(summary.chatCompletionsUrl) {
-		val model = runCatching { JsonParser.parseString(body).asJsonObject.get("model")?.asString }.getOrNull() ?: "unknown"
-		println("[LLM] upstream request source=$source provider=${summary.providerName} model=$model api=chat-completions")
+internal suspend fun LLMServices.postSummaryUpstream(source: String, body: String, summary: LLMSummaryConfig): Pair<Int, String> =
+	runSummaryUpstream(client, body, summary) { outgoing ->
+		println("[LLM] upstream request source=$source provider=${summary.providerName} model=${summary.model} api=${summary.protocol.wireValue}")
+		debugPrompt(source, outgoing)
+	}
+
+internal suspend fun runSummaryUpstream(
+	client: HttpClient,
+	body: String,
+	summary: LLMSummaryConfig,
+	onRequest: (String) -> Unit = {},
+): Pair<Int, String> {
+	if (summary.protocol == LLMProtocol.ANTHROPIC) {
+		return runAnthropicUpstream(
+			client, summary.endpointUrl, summary.apiToken,
+			LLMAnthropicAdapter.fromChatRequest(body, JsonArray(), LLMReasoningEffort.NONE, webSearch = false, thinkingMode = summary.thinkingMode),
+			maxToolRounds = 0,
+			executeTool = { error("Summary requests cannot execute local tools") },
+			onRequest = onRequest,
+		)
+	}
+	val outgoing = if (summary.protocol == LLMProtocol.RESPONSES) {
+		LLMResponsesAdapter.fromChatRequest(body, JsonArray(), LLMReasoningEffort.NONE, webSearch = false).toString()
+	} else body
+	onRequest(outgoing)
+	val response = client.post(summary.endpointUrl) {
 		header(HttpHeaders.Authorization, "Bearer ${summary.apiToken}")
 		contentType(ContentType.Application.Json)
-		debugPrompt(source, body)
-		setBody(body)
+		setBody(outgoing)
 	}
+	val responseBody = response.bodyAsText()
+	return response.status.value to if (response.status.isSuccess() && summary.protocol == LLMProtocol.RESPONSES) {
+		LLMResponsesAdapter.toChatCompletion(responseBody)
+	} else responseBody
+}
 
 internal fun LLMServices.authenticatedServerId(token: String): Int? = nodes.getServerFromToken(token).takeIf { it >= 0 }
 internal fun LLMServices.decodeHeader(value: String): String = runCatching {

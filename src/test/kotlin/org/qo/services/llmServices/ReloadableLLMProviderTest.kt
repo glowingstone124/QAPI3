@@ -47,12 +47,12 @@ class ReloadableLLMProviderTest {
 			  "providers": {
 			    "first": {
 			      "chatCompletionsUrl": "https://first.example/chat",
-			      "responsesUrl": "https://first.example/responses",
+			      "responsesUrl": "https://first.example/responses", "anthropicUrl": "unavaliable",
 			      "token": "first-token",
 			      "balanceUrl": "https://first.example/balance",
 			      "contextWindow": 65536,
-			      "models": { "fast": "first-fast", "thinking": "first-thinking" },
-			      "summary": { "model": "first-summary", "contextWindow": 8192 },
+			      "models": { "fast": { "model": "first-fast", "protocol": "chat-completions" }, "thinking": { "model": "first-thinking", "protocol": "chat-completions" }, "summary-model": { "model": "first-summary", "protocol": "responses" } },
+			      "summary": { "model": "summary-model", "contextWindow": 8192 },
 			      "compact": {
 			        "enabled": true,
 			        "triggerTurns": 10,
@@ -82,15 +82,15 @@ class ReloadableLLMProviderTest {
 			  "defaultProvider": "main",
 			  "providers": {
 			    "main": {
-			      "chatCompletionsUrl": "https://main.example/chat", "responsesUrl": "https://main.example/responses",
+			      "chatCompletionsUrl": "https://main.example/chat", "responsesUrl": "https://main.example/responses", "anthropicUrl": "unavaliable",
 			      "token": "main-token", "balanceUrl": "https://main.example/balance",
-			      "models": { "fast": "main-fast", "thinking": "main-thinking" },
+			      "models": { "fast": { "model": "main-fast", "protocol": "chat-completions" }, "thinking": { "model": "main-thinking", "protocol": "chat-completions" } },
 			      "summary": { "provider": "summary", "model": "compact", "contextWindow": 4096 }
 			    },
 			    "summary": {
-			      "chatCompletionsUrl": "https://summary.example/chat", "responsesUrl": "https://summary.example/responses",
+			      "chatCompletionsUrl": "https://summary.example/chat", "responsesUrl": "https://summary.example/responses", "anthropicUrl": "unavaliable",
 			      "token": "summary-token", "balanceUrl": "https://summary.example/balance",
-			      "models": { "fast": "summary-fast", "thinking": "summary-thinking", "compact": "summary-compact" }
+			      "models": { "fast": { "model": "summary-fast", "protocol": "chat-completions" }, "thinking": { "model": "summary-thinking", "protocol": "chat-completions" }, "compact": { "model": "summary-compact", "protocol": "chat-completions" } }
 			    }
 			  }
 			}
@@ -99,7 +99,7 @@ class ReloadableLLMProviderTest {
 		val provider = LLMProvider.fromConfig(file)
 
 		assertEquals("summary", provider.summary.providerName)
-		assertEquals("https://summary.example/chat", provider.summary.chatCompletionsUrl)
+		assertEquals("https://summary.example/chat", provider.summary.endpointUrl)
 		assertEquals("summary-compact", provider.summaryModel)
 	}
 
@@ -110,17 +110,17 @@ class ReloadableLLMProviderTest {
 		  "providers": {
 		    "first": {
 		      "chatCompletionsUrl": "https://first.example/chat",
-		      "responsesUrl": "https://first.example/responses",
+		      "responsesUrl": "https://first.example/responses", "anthropicUrl": "unavaliable",
 		      "token": "first-token",
 		      "balanceUrl": "https://first.example/balance",
-		      "models": { "fast": "first-fast", "thinking": "first-thinking" }
+		      "models": { "fast": { "model": "first-fast", "protocol": "chat-completions" }, "thinking": { "model": "first-thinking", "protocol": "chat-completions" } }
 		    },
 		    "second": {
 		      "chatCompletionsUrl": "https://second.example/chat",
-		      "responsesUrl": "https://second.example/responses",
+		      "responsesUrl": "https://second.example/responses", "anthropicUrl": "unavaliable",
 		      "token": "second-token",
 		      "balanceUrl": "https://second.example/balance",
-		      "models": { "fast": "second-fast", "thinking": "second-thinking" }
+		      "models": { "fast": { "model": "second-fast", "protocol": "chat-completions" }, "thinking": { "model": "second-thinking", "protocol": "chat-completions" } }
 		    }
 		  }
 		}

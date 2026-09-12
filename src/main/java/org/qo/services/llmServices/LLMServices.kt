@@ -302,10 +302,10 @@ class LLMServices(
 		}
 		val reservation = requireNotNull(quota.reservation)
 
-		val chunks = if (provider.supportsResponses(request.preset)) {
-			streamFromResponses(request, requester, requestId, "stream", provider, reservation)
-		} else {
-			streamFromUpstream(request, requester, requestId, "stream", provider, reservation)
+		val chunks = when (provider.protocol(request.preset)) {
+			LLMProtocol.RESPONSES -> streamFromResponses(request, requester, requestId, "stream", provider, reservation)
+			LLMProtocol.ANTHROPIC -> streamFromAnthropic(request, requester, requestId, "stream", provider, reservation)
+			LLMProtocol.CHAT_COMPLETIONS -> streamFromUpstream(request, requester, requestId, "stream", provider, reservation)
 		}
 		return LLMStreamResult(
 			200,

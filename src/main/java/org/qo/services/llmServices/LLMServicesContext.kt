@@ -70,10 +70,19 @@ internal suspend fun LLMServices.normalizeRequest(
 	}
 	val resolvedModel = provider.modelName(model) ?: throw IllegalArgumentException("请求的模型不可用")
 	obj.addProperty("model", resolvedModel)
-	if (!provider.supportsResponses(model)) {
+	if (provider.protocol(model) == LLMProtocol.CHAT_COMPLETIONS) {
 		obj.addProperty("reasoning_effort", reasoningEffort.wireValue)
 		obj.add("thinking", JsonObject().apply {
 			addProperty("type", if (reasoningEffort == LLMReasoningEffort.NONE) "disabled" else "enabled")
+		})
+	}
+	if (provider.protocol(model) == LLMProtocol.ANTHROPIC &&
+		listOf("max_tokens", "max_completion_tokens", "max_output_tokens").none(obj::has)) {
+		val thinking = reasoningEffort != LLMReasoningEffort.NONE && provider.modelConfig(model).thinkingMode != "disabled"
+		obj.addProperty("max_tokens", if (!thinking) 4096 else when (reasoningEffort) {
+			LLMReasoningEffort.MAX -> 16384
+			LLMReasoningEffort.HIGH -> 8192
+			else -> 4096
 		})
 	}
 	requester?.let {
@@ -254,7 +263,7 @@ internal fun LLMServices.limitMessagesToContextWindow(messages: JsonArray, conte
 }
 
 internal fun LLMServices.requestedOutputTokens(request: JsonObject, contextWindow: Int): Int {
-	val explicit = listOf("max_tokens", "max_output_tokens").firstNotNullOfOrNull { key ->
+	val explicit = listOf("max_tokens", "max_completion_tokens", "max_output_tokens").firstNotNullOfOrNull { key ->
 		request.get(key)?.let { runCatching { it.asInt }.getOrNull() }
 	}
 	return (explicit ?: minOf(4096, contextWindow / 4)).coerceAtLeast(0)
@@ -371,9 +380,8 @@ internal suspend fun LLMServices.summarizeGroupContext(existingSummary: String?,
 	}
 	return withTimeoutOrNull(groupSummaryTimeoutMs) {
 		runCatching {
-			val response = postSummaryUpstream("group-summary", request.toString(), provider.summary)
-			if (!response.status.isSuccess()) return@runCatching null
-			val body = response.bodyAsText()
+			val (status, body) = postSummaryUpstream("group-summary", request.toString(), provider.summary)
+			if (status !in 200..299) return@runCatching null
 			parseUsage(body)?.let { logPromptCacheUsage("group-summary", it) }
 			extractAssistantContent(body)
 		}.getOrNull()
@@ -436,9 +444,8 @@ internal suspend fun LLMServices.summarizeGroupAndMemberProfiles(
 	}
 	return withTimeoutOrNull(groupSummaryTimeoutMs) {
 		runCatching {
-			val response = postSummaryUpstream("periodic-group-profile-summary", request.toString(), provider.summary)
-			if (!response.status.isSuccess()) return@runCatching null
-			val body = response.bodyAsText()
+			val (status, body) = postSummaryUpstream("periodic-group-profile-summary", request.toString(), provider.summary)
+			if (status !in 200..299) return@runCatching null
 			parseUsage(body)?.let { logPromptCacheUsage("periodic-group-profile-summary", it) }
 			val content = extractAssistantContent(body) ?: return@runCatching null
 			parseGroupAndMemberSummary(content, allowedQqUids)
