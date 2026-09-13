@@ -296,6 +296,7 @@ Web、QQ Bot 和 Minecraft 在认证后归一到同一个 QQ UID，共享 Weekly
 
 - `POST /qo/asking/v1/credits/purchase`：Bearer 登录令牌，body `{"amount":5}`、`10` 或 `20`。分别获得 350、800、1800 Credits。服务端创建购买意向，返回 `purchase_intent`、`checkout_url`、`credits`。
 - `POST /hooks/afdian`：固定公开回调端点。先对 `data.sign` 做 RSA/SHA256 验签，再通过 `query-order` 查询官方订单；实际 SKU、数量、金额、成功状态、`custom_order_id` 全部以查询结果为准。
+- 连通性通知和普通赞助回调直接确认收达，不充值。已验签但官方暂时查不到的商品订单持久化到 `ai_afdian_pending_order` 后返回 `ec:200`，后台重试核验；持久化失败仍返回 503。查不到订单不会发放 Credits。
 - `POST /qo/asking/v1/credits/reconcile`：Bearer 登录令牌，重试本人的已知 Usage 待结算记录，返回 `settled` 数量。Usage 缺失和进程崩溃留下的预留需要运营核对，不自动猜测收费或退款。
 - `UNIQUE(provider,out_trade_no)` 与 `UNIQUE(intent_id)` 确保重复通知、重复订单和一个购买意向的多次支付不会重复充值。
 

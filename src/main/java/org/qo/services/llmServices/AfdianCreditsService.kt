@@ -97,6 +97,7 @@ class AfdianCreditsService(private val db: ReactiveDatabase, private val quota: 
     config: AfdianConfig,
 ) {
     val packs = config.packs
+    private val logger = LoggerFactory.getLogger(AfdianCreditsService::class.java)
     suspend fun intent(uid: Long, amount: Int): JsonObject {
         val pack = packs.singleOrNull { it.amount==amount } ?: throw IllegalArgumentException("Invalid credit pack")
         check(pack.skuId.isNotBlank() && pack.checkoutUrl.isNotBlank()) { "Credit pack is not configured" }
@@ -130,7 +131,41 @@ class AfdianCreditsService(private val db: ReactiveDatabase, private val quota: 
         require(AfdianSignature.verify(order,data.get("sign")?.asString ?: "")) { "Invalid webhook signature" }
         val no = order.get("out_trade_no").asString
         require(no.matches(Regex("[A-Za-z0-9_-]{1,64}")))
-        applyVerified(query.query(no))
+        processVerifiedNotification(no)
+    }
+    /** Called only after webhook verification; an absent official order is never a payment. */
+    internal suspend fun processVerifiedNotification(orderNo: String) {
+        try {
+            applyVerified(query.query(orderNo))
+        } catch (_: AfdianOrderNotFoundException) {
+            quota.schema()
+            val now = Instant.now().epochSecond
+            db.execute("INSERT INTO ai_afdian_pending_order (out_trade_no,status,attempts,next_attempt_at,last_error,created_at) VALUES (?,'pending',0,?,'order_not_found',?) ON DUPLICATE KEY UPDATE out_trade_no=out_trade_no",
+                listOf(orderNo,now+30,now))
+            logger.warn("Verified Afdian notification deferred: official order not found; durable retry queued")
+        }
+    }
+    internal suspend fun retryPendingOrders(now: Long = Instant.now().epochSecond): Int {
+        quota.schema()
+        val pending = db.all("SELECT out_trade_no,attempts FROM ai_afdian_pending_order WHERE status='pending' AND next_attempt_at<=? ORDER BY next_attempt_at LIMIT 10",listOf(now)) {
+            it.get("out_trade_no",String::class.java)!! to (it.get("attempts") as Number).toInt()
+        }
+        var completed = 0
+        for ((orderNo,attempts) in pending) {
+            try {
+                applyVerified(query.query(orderNo))
+                db.execute("DELETE FROM ai_afdian_pending_order WHERE out_trade_no=?",listOf(orderNo))
+                completed++
+            } catch (error: Exception) {
+                if (error is kotlinx.coroutines.CancellationException) throw error
+                val delay = minOf(3600L,30L shl attempts.coerceIn(0,7))
+                val status = if (error is IllegalArgumentException) "review" else "pending"
+                db.execute("UPDATE ai_afdian_pending_order SET attempts=attempts+1,next_attempt_at=?,last_error=?,status=? WHERE out_trade_no=? AND status='pending'",
+                    listOf(now+delay,error.javaClass.simpleName.take(64),status,orderNo))
+                if (status=="review") logger.warn("Pending Afdian order requires review: verified order failed purchase validation")
+            }
+        }
+        return completed
     }
     /** Only a trusted server query can call this boundary. No webhook SKU or identity is used. */
     internal suspend fun applyVerified(order: JsonObject) {

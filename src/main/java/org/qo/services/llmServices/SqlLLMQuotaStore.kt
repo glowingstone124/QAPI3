@@ -205,6 +205,7 @@ class SqlLLMQuotaStore(private val db: ReactiveDatabase) : LLMQuotaStore {
             "CREATE TABLE IF NOT EXISTS ai_usage (request_key VARCHAR(128) PRIMARY KEY,user_id BIGINT NOT NULL,conversation_id VARCHAR(128),input_tokens BIGINT NOT NULL,output_tokens BIGINT NOT NULL,cached_tokens BIGINT NOT NULL,reasoning_tokens BIGINT,actual_cost DECIMAL(20,12) NOT NULL,charged_units INT NOT NULL,weekly_units INT NOT NULL,paid_units INT NOT NULL,created_at BIGINT NOT NULL)",
             "CREATE TABLE IF NOT EXISTS ai_credit_ledger (id BIGINT AUTO_INCREMENT PRIMARY KEY,user_id BIGINT NOT NULL,reference_id VARCHAR(128) NOT NULL,delta INT NOT NULL,kind VARCHAR(16) NOT NULL,created_at BIGINT NOT NULL)",
             "CREATE TABLE IF NOT EXISTS ai_purchase_intent (id VARCHAR(64) PRIMARY KEY,user_id BIGINT NOT NULL,sku_id VARCHAR(64) NOT NULL,amount DECIMAL(10,2) NOT NULL,credits INT NOT NULL,status VARCHAR(16) NOT NULL,created_at BIGINT NOT NULL)",
+            "CREATE TABLE IF NOT EXISTS ai_afdian_pending_order (out_trade_no VARCHAR(64) PRIMARY KEY,status VARCHAR(16) NOT NULL,attempts INT NOT NULL,next_attempt_at BIGINT NOT NULL,last_error VARCHAR(64),created_at BIGINT NOT NULL)",
             "CREATE TABLE IF NOT EXISTS ai_payment_order (id BIGINT AUTO_INCREMENT PRIMARY KEY,provider VARCHAR(32) NOT NULL,out_trade_no VARCHAR(64) NOT NULL,intent_id VARCHAR(64) NOT NULL UNIQUE,user_id BIGINT NOT NULL,amount DECIMAL(10,2) NOT NULL,credits INT NOT NULL,created_at BIGINT NOT NULL,UNIQUE(provider,out_trade_no))"
         )
     }

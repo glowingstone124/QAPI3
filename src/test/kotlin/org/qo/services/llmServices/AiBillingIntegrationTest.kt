@@ -27,7 +27,7 @@ class AiBillingIntegrationTest {
     private val now=Instant.now()
     @BeforeEach fun setup() = runBlocking {
         store=SqlLLMQuotaStore(db); store.schema(); service=LLMDailyQuotaService(store,90,30,"Asia/Shanghai")
-        for(table in listOf("ai_system_usage","ai_usage","ai_credit_ledger","ai_payment_order","ai_purchase_intent","ai_quota_reservation","ai_weekly_usage","ai_quota_account","ai_free_budget")) db.execute("DELETE FROM $table")
+        for(table in listOf("ai_afdian_pending_order","ai_system_usage","ai_usage","ai_credit_ledger","ai_payment_order","ai_purchase_intent","ai_quota_reservation","ai_weekly_usage","ai_quota_account","ai_free_budget")) db.execute("DELETE FROM $table")
     }
     private fun usage(units: Int)=AiQuotaUsage(10,20,0,5,BigDecimal("0.005")*BigDecimal(units),units)
     @Test fun `reserve and actual settle span weekly and paid pools exactly once`() = runBlocking {
@@ -95,6 +95,77 @@ class AiBillingIntegrationTest {
         order.addProperty("total_amount","9.00")
         assertFailsWith<IllegalArgumentException> { payments.applyVerified(order) }
         assertEquals(800,store.balance(principal.qqUid))
+    }
+
+    @Test fun `missing official orders survive service restart and later grant credits exactly once`() = runBlocking {
+        var available = false
+        lateinit var order: com.google.gson.JsonObject
+        val query = object : AfdianOrderQuery {
+            override suspend fun query(orderNo: String): com.google.gson.JsonObject {
+                if (!available) throw AfdianOrderNotFoundException()
+                return order
+            }
+        }
+        val config = AfdianConfig(packs = listOf(CreditPack(10,800,"sku10","https://ifdian.net/order")))
+        val payments = AfdianCreditsService(db,store,query,config)
+        val id = payments.intent(principal.qqUid,10).get("purchase_intent").asString
+        order = JsonParser.parseString("""{"status":2,"product_type":1,"out_trade_no":"delayed-order","custom_order_id":"$id","total_amount":"10.00","sku_detail":[{"sku_id":"sku10","count":1}]}""").asJsonObject
+        repeat(5) { payments.processVerifiedNotification("delayed-order") }
+        assertEquals(1,db.one("SELECT COUNT(*) AS n FROM ai_afdian_pending_order") { (it.get("n") as Number).toInt() })
+        assertEquals(0,store.balance(principal.qqUid))
+        assertEquals(0,db.one("SELECT COUNT(*) AS n FROM ai_payment_order") { (it.get("n") as Number).toInt() })
+        val restarted = AfdianCreditsService(db,SqlLLMQuotaStore(db),query,config)
+        available = true
+        assertEquals(1,restarted.retryPendingOrders(Instant.now().epochSecond+31))
+        assertEquals(800,store.balance(principal.qqUid))
+        assertEquals(0,restarted.retryPendingOrders(Long.MAX_VALUE))
+        restarted.processVerifiedNotification("delayed-order")
+        assertEquals(800,store.balance(principal.qqUid))
+        assertEquals(1,db.one("SELECT COUNT(*) AS n FROM ai_payment_order") { (it.get("n") as Number).toInt() })
+        assertEquals(1,db.one("SELECT COUNT(*) AS n FROM ai_credit_ledger WHERE kind='purchase'") { (it.get("n") as Number).toInt() })
+    }
+
+    @Test fun `missing official orders retry only when due with capped backoff and no credits`() = runBlocking {
+        var queries = 0
+        val payments = AfdianCreditsService(db,store,object : AfdianOrderQuery {
+            override suspend fun query(orderNo: String): com.google.gson.JsonObject {
+                queries++
+                throw AfdianOrderNotFoundException()
+            }
+        },AfdianConfig())
+        payments.processVerifiedNotification("missing-order")
+        assertEquals(0,payments.retryPendingOrders(0))
+        assertEquals(1,queries)
+        val due = db.one("SELECT next_attempt_at FROM ai_afdian_pending_order") { (it.get("next_attempt_at") as Number).toLong() }!!
+        assertEquals(0,payments.retryPendingOrders(due))
+        assertEquals(2,queries)
+        assertEquals(due+30,db.one("SELECT next_attempt_at FROM ai_afdian_pending_order") { (it.get("next_attempt_at") as Number).toLong() })
+        assertEquals(0,payments.retryPendingOrders(due+29))
+        assertEquals(2,queries)
+        db.execute("UPDATE ai_afdian_pending_order SET attempts=20,next_attempt_at=0")
+        payments.retryPendingOrders(due+30)
+        assertEquals(due+3630,db.one("SELECT next_attempt_at FROM ai_afdian_pending_order") { (it.get("next_attempt_at") as Number).toLong() })
+        assertEquals(0,db.one("SELECT COUNT(*) AS n FROM ai_credit_ledger") { (it.get("n") as Number).toInt() })
+    }
+
+    @Test fun `deferred orders with invalid purchase amount require review without granting credits`() = runBlocking {
+        var available = false
+        lateinit var order: com.google.gson.JsonObject
+        val payments = AfdianCreditsService(db,store,object : AfdianOrderQuery {
+            override suspend fun query(orderNo: String): com.google.gson.JsonObject {
+                if (!available) throw AfdianOrderNotFoundException()
+                return order
+            }
+        },AfdianConfig(packs=listOf(CreditPack(10,800,"sku10","https://ifdian.net/order"))))
+        val id = payments.intent(principal.qqUid,10).get("purchase_intent").asString
+        payments.processVerifiedNotification("invalid-order")
+        order = JsonParser.parseString("""{"status":2,"product_type":1,"out_trade_no":"invalid-order","custom_order_id":"$id","total_amount":"9.00","sku_detail":[{"sku_id":"sku10","count":1}]}""").asJsonObject
+        available = true
+        assertEquals(0,payments.retryPendingOrders(Instant.now().epochSecond+31))
+        assertEquals("review",db.one("SELECT status FROM ai_afdian_pending_order") { it.get("status",String::class.java) })
+        assertEquals(0,payments.retryPendingOrders(Long.MAX_VALUE))
+        assertEquals(0,store.balance(principal.qqUid))
+        assertEquals(0,db.one("SELECT COUNT(*) AS n FROM ai_payment_order") { (it.get("n") as Number).toInt() })
     }
 
     @Test fun `connectivity notifications acknowledge receipt without querying or granting credits`() = runBlocking {
