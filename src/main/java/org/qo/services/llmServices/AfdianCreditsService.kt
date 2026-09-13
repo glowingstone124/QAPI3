@@ -16,6 +16,7 @@ import org.springframework.stereotype.Service
 import org.springframework.web.bind.annotation.*
 import org.springframework.http.HttpStatus
 import org.springframework.web.server.ResponseStatusException
+import org.slf4j.LoggerFactory
 import java.math.BigDecimal
 import java.net.URI
 import java.net.URLEncoder
@@ -107,9 +108,16 @@ class AfdianCreditsService(private val db: ReactiveDatabase, private val quota: 
     }
     suspend fun reconcile(uid: Long): Int = quota.reconcileKnownUsage(uid)
     suspend fun webhook(body: JsonObject) {
-        val data = body.getAsJsonObject("data")
+        val dataElement = body.get("data")
+        // Connectivity notifications carry no order and must never alter balances.
+        if (dataElement == null || dataElement.isJsonNull) return
+        require(dataElement.isJsonObject) { "Invalid webhook data" }
+        val data = dataElement.asJsonObject
+        val orderElement = data.get("order")
+        if (orderElement == null || orderElement.isJsonNull) return
+        require(orderElement.isJsonObject) { "Invalid webhook order" }
         require(data.get("type")?.asString=="order")
-        val order = data.getAsJsonObject("order")
+        val order = orderElement.asJsonObject
         require(AfdianSignature.verify(order,data.get("sign")?.asString ?: "")) { "Invalid webhook signature" }
         val no = order.get("out_trade_no").asString
         require(no.matches(Regex("[A-Za-z0-9_-]{1,64}")))
@@ -169,12 +177,26 @@ class AfdianCreditsController(private val llm: LLMServices, private val credits:
 
 @RestController
 class AfdianWebhookController(private val credits: AfdianCreditsService) {
+    private val logger = LoggerFactory.getLogger(AfdianWebhookController::class.java)
     @PostMapping("/hooks/afdian",produces=["application/json"])
     suspend fun webhook(@RequestBody body: String): String {
         if(body.length>16384) throw ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE)
-        try { credits.webhook(JsonParser.parseString(body).asJsonObject) }
-        catch (_: IllegalArgumentException) { throw ResponseStatusException(HttpStatus.BAD_REQUEST,"Order verification failed") }
-        catch (_: Exception) { throw ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,"Order verification unavailable") }
+        try {
+            val payload = runCatching { JsonParser.parseString(body) }
+                .getOrElse { throw IllegalArgumentException("Invalid webhook JSON") }
+            require(payload.isJsonObject) { "Invalid webhook payload" }
+            credits.webhook(payload.asJsonObject)
+        }
+        catch (_: IllegalArgumentException) {
+            logger.warn("Afdian webhook rejected: invalid payload or signature")
+            throw ResponseStatusException(HttpStatus.BAD_REQUEST,"Order verification failed")
+        }
+        catch (error: Exception) {
+            if (error is kotlinx.coroutines.CancellationException) throw error
+            // Do not log payloads, credentials, or upstream responses.
+            logger.warn("Afdian order verification unavailable ({})", error.javaClass.simpleName)
+            throw ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,"Order verification unavailable")
+        }
         return """{"ec":200,"em":""}"""
     }
 }

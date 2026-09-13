@@ -96,6 +96,42 @@ class AiBillingIntegrationTest {
         assertFailsWith<IllegalArgumentException> { payments.applyVerified(order) }
         assertEquals(800,store.balance(principal.qqUid))
     }
+
+    @Test fun `connectivity notifications acknowledge receipt without querying or granting credits`() = runBlocking {
+        var queried = false
+        val payments = AfdianCreditsService(db, store, object : AfdianOrderQuery {
+            override suspend fun query(orderNo: String): com.google.gson.JsonObject {
+                queried = true
+                error("Connectivity notification must not query orders")
+            }
+        }, AfdianConfig())
+        val controller = AfdianWebhookController(payments)
+        for (body in listOf("{}", """{"ec":200,"em":"ok"}""", """{"data":{"type":"test"}}""")) {
+            assertEquals(200, JsonParser.parseString(controller.webhook(body)).asJsonObject.get("ec").asInt)
+        }
+        assertFalse(queried)
+        assertEquals(0, db.one("SELECT COUNT(*) AS n FROM ai_credit_ledger") { (it.get("n") as Number).toInt() })
+        assertEquals(0, db.one("SELECT COUNT(*) AS n FROM ai_payment_order") { (it.get("n") as Number).toInt() })
+        assertEquals(0, db.one("SELECT COUNT(*) AS n FROM ai_quota_account") { (it.get("n") as Number).toInt() })
+    }
+
+    @Test fun `an order cannot masquerade as a connectivity notification to bypass verification`() = runBlocking {
+        var queried = false
+        val payments = AfdianCreditsService(db, store, object : AfdianOrderQuery {
+            override suspend fun query(orderNo: String): com.google.gson.JsonObject {
+                queried = true
+                error("Invalid signatures must not query orders")
+            }
+        }, AfdianConfig())
+        val controller = AfdianWebhookController(payments)
+        for (body in listOf("""{"data":{"type":"order","order":{"out_trade_no":"fake"}}}""",
+            """{"data":{"type":"test","order":{}}}""", """{"data":{"order":"invalid"}}""", "[]", "null", "not-json")) {
+            val error = assertFailsWith<org.springframework.web.server.ResponseStatusException> { controller.webhook(body) }
+            assertEquals(400, error.statusCode.value())
+        }
+        assertFalse(queried)
+        assertEquals(0, db.one("SELECT COUNT(*) AS n FROM ai_credit_ledger") { (it.get("n") as Number).toInt() })
+    }
     @Test fun `cost counts cache and reasoning output once and unit conversion rounds up`() {
         val price=LLMModelPricing(BigDecimal("1"),BigDecimal("2"),BigDecimal("0.1"))
         assertEquals(BigDecimal("0.00031"),price.cost(100,150,100))
