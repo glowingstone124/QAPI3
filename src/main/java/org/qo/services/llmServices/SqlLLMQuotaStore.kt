@@ -56,8 +56,7 @@ class SqlLLMQuotaStore(private val db: ReactiveDatabase) : LLMQuotaStore {
                 return@inTransaction LLMQuotaStoreDecision(LLMQuotaStatus.DUPLICATE, used, paid)
             val now = Instant.now().epochSecond
             val active = db.one("SELECT COUNT(*) AS n FROM ai_quota_reservation WHERE user_id=? AND status IN ('reserved','pending')", listOf(uid)) { number(it,"n") }!!
-            val rpm = db.one("SELECT COUNT(*) AS n FROM ai_quota_reservation WHERE user_id=? AND created_at>?", listOf(uid, now-60)) { number(it,"n") }!!
-            if (active >= (if (principal.hasAccount) 2 else 1) || rpm >= (if (principal.hasAccount) 6 else 3))
+            if (active >= (if (principal.hasAccount) 10 else 5))
                 return@inTransaction LLMQuotaStoreDecision(LLMQuotaStatus.RATE_LIMITED, used, paid)
             val month = Instant.now().atZone(ZoneId.of("Asia/Shanghai")).toLocalDate().withDayOfMonth(1).toString()
             db.execute("INSERT INTO ai_free_budget (period, actual_cost, reserved_cost) VALUES (?, 0, 0) ON DUPLICATE KEY UPDATE period=period", listOf(month))

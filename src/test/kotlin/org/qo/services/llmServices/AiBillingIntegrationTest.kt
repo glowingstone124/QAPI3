@@ -63,13 +63,23 @@ class AiBillingIntegrationTest {
         assertEquals(80,service.snapshot(principal.qqUid,true).view.remaining)
         assertEquals(LLMQuotaStatus.DUPLICATE,service.reserve(principal,"shared").status)
     }
-    @Test fun `database admission enforces real concurrency and rpm`() = runBlocking {
-        val results=(1..3).map { i -> async { service.reserve(principal,"concurrent-$i") } }.awaitAll()
-        assertEquals(2,results.count { it.status==LLMQuotaStatus.ACCEPTED })
+    @Test fun `database admission enforces account-specific concurrency without request-rate cap`() = runBlocking {
+        val results=(1..11).map { i -> async { service.reserve(principal,"concurrent-$i") } }.awaitAll()
+        assertEquals(10,results.count { it.status==LLMQuotaStatus.ACCEPTED })
         assertEquals(1,results.count { it.status==LLMQuotaStatus.RATE_LIMITED })
         results.mapNotNull { it.reservation }.forEach { service.refund(it) }
-        for(i in 4..7) service.reserve(principal,"rpm-$i").reservation?.let { service.refund(it) }
-        assertEquals(LLMQuotaStatus.RATE_LIMITED,service.reserve(principal,"rpm-blocked").status)
+
+        val guest = principal.copy(hasAccount=false)
+        val guestResults=(1..6).map { i -> async { service.reserve(guest,"guest-concurrent-$i") } }.awaitAll()
+        assertEquals(5,guestResults.count { it.status==LLMQuotaStatus.ACCEPTED })
+        assertEquals(1,guestResults.count { it.status==LLMQuotaStatus.RATE_LIMITED })
+        guestResults.mapNotNull { it.reservation }.forEach { service.refund(it) }
+
+        repeat(20) { i ->
+            val result = service.reserve(principal,"repeated-request-$i")
+            assertEquals(LLMQuotaStatus.ACCEPTED,result.status)
+            result.reservation?.let { service.refund(it) }
+        }
     }
     @Test fun `paid calls remain available when free thinking subsidy is gated`() = runBlocking {
         val month=now.atZone(java.time.ZoneId.of("Asia/Shanghai")).toLocalDate().withDayOfMonth(1).toString()

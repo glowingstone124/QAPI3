@@ -279,14 +279,14 @@ IP 添加/删除常见返回码：`0` 成功，`1` 令牌无效，`2` 超出数�
 
 ### Weekly Limits 与 Paid Credits
 
-Web、QQ Bot 和 Minecraft 在认证后归一到同一个 QQ UID，共享 Weekly Units 与永久 Paid Credits。QQ 身份默认每周 80 Units、1 并发、3 RPM；QO 账户每周 120 Units、2 并发、6 RPM。注册提升同一身份的上限，保留本周已用额度。每周一北京时间 00:00 切换周账本，无定时扫描、不累积。
+Web、QQ Bot 和 Minecraft 在认证后归一到同一个 QQ UID，共享 Weekly Units 与永久 Paid Credits。QQ 身份默认每周 80 Units、最多 5 个并发请求；QO 账户每周 120 Units、最多 10 个并发请求。注册提升同一身份的上限，保留本周已用额度。每周一北京时间 00:00 切换周账本，无定时扫描、不累积。
 
 - 前端只选择 `fast / thinking`。请求 body 的 `model` 字段生效；兼容 query 参数。具体 provider、model 和计价由服务端配置。
 - `GET /qo/asking/v1/quota` 返回 `limit`、`used`、`remaining`、Unix 秒 `reset_at`、`paid_credits`、`period: weekly`。
 - `X-Request-ID` 在同一 QQ 身份的所有入口之间防重复，即使跨周也不能重用。
 - 请求按照配置的人民币计价预留；获得所有工具轮次的真实 Usage 后，按 `max(1, ceil(actualCostCny / 0.005))` 结算。优先 Weekly，不足部分使用 Paid Credits，同一请求可跨池扣费。
 - 成功响应包含 `quota`，其中 `charged_units` 表示本次实际消耗。流式结算事件在 `[DONE]` 前发送。流式响应头是预留时的快照，最终余额以结算事件或额度查询为准。
-- HTTP 429 `weekly_quota_exceeded` 表示额度或免费补贴不足；`rate_limited` 表示并发/RPM 限制。数据库不可用返回 503，阻止未记账的调用。
+- HTTP 429 `weekly_quota_exceeded` 表示额度或免费补贴不足；`rate_limited` 表示并发限制。数据库不可用返回 503，阻止未记账的调用。
 - 请求失败、流提前结束、客户端取消会退款。成功后缺失真实 Usage 或结算失败，预留转为 `pending`，保留余额并等待对账。
 - `GET /qo/authorization/account/kotshi` 提供账户额度（每周免费余额与独立 `paid_credits`）、所有渠道的今日汇总和最近 20 条调用记录（不限今日）。记录返回 `source`、状态、token 用量和时间，不返回具体 `model` 或 `mode`；查询仅限当前登录用户。玩家资料的隐私开关与原接口保持兼容。
 

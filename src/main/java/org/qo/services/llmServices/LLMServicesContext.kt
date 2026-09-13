@@ -644,7 +644,7 @@ internal fun LLMServices.quotaErrorMessage(status: LLMQuotaStatus, principal: LL
 	} else {
 		"本周 QQ 额度为 ${dailyQuotaService.guestWeeklyLimit} Units，注册后同一身份提升至 ${dailyQuotaService.weeklyLimit} Units；可购买 Credits 继续使用"
 	}
-	LLMQuotaStatus.RATE_LIMITED -> "请求过于频繁或达到并发限制，请稍后重试"
+	LLMQuotaStatus.RATE_LIMITED -> "已达到并发限制，请稍后重试"
 	LLMQuotaStatus.DUPLICATE -> "该请求已经提交，请勿重复发送"
 	LLMQuotaStatus.UNAVAILABLE -> "额度服务暂时不可用，请稍后重试"
 	LLMQuotaStatus.PRICING_UNAVAILABLE -> "模型计价未配置，请联系管理员"
