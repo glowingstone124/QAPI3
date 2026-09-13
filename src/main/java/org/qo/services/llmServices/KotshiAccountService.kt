@@ -9,7 +9,7 @@ import org.qo.services.loginService.KotshiPrivacySettings
 import org.qo.services.loginService.Login
 import org.qo.services.loginService.QqLoginService
 import org.springframework.stereotype.Service
-import java.time.LocalDate
+import java.time.Instant
 import java.time.ZoneId
 
 data class KotshiUsageSummary(
@@ -22,7 +22,7 @@ data class KotshiUsageSummary(
 )
 
 data class KotshiUsageRecord(
-	val model: String,
+	val source: String,
 	val status: String,
 	val totalTokens: Long,
 	val createdAt: Long,
@@ -56,8 +56,7 @@ data class KotshiAccountSnapshot(
 		add("recent_usage", JsonArray().apply {
 			recentUsage.forEach { record ->
 				add(JsonObject().apply {
-					addProperty("model", record.model)
-					addProperty("mode", record.model.takeIf { it in setOf("fast", "thinking") })
+					addProperty("source", record.source)
 					addProperty("status", record.status)
 					addProperty("total_tokens", record.totalTokens)
 					addProperty("created_at", record.createdAt)
@@ -68,7 +67,7 @@ data class KotshiAccountSnapshot(
 	}.toString()
 }
 
-/** Aggregates only the authenticated user's Kotshi/Web requests and shared quota. */
+/** Aggregates the authenticated user's requests across all channels and shared quota. */
 @Service
 class KotshiAccountService(
 	private val login: Login,
@@ -110,10 +109,10 @@ class KotshiAccountService(
 		return user?.takeIf { it.frozen != true }
 	}
 
-	private suspend fun loadUsage(uid: Long): Pair<KotshiUsageSummary, List<KotshiUsageRecord>> {
+	internal suspend fun loadUsage(uid: Long, now: Instant = Instant.now()): Pair<KotshiUsageSummary, List<KotshiUsageRecord>> {
 		return runCatching {
 			accessRecordSchema.ensure()
-			val dayStart = LocalDate.now(quotaZone)
+			val dayStart = now.atZone(quotaZone).toLocalDate()
 				.atStartOfDay(quotaZone)
 				.toInstant()
 				.toEpochMilli()
@@ -126,7 +125,7 @@ class KotshiAccountService(
 				       COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
 				       COALESCE(SUM(total_tokens), 0) AS total_tokens
 				FROM llm_access_records
-				WHERE uid = ? AND source = 'web' AND created_at >= ?
+				WHERE uid = ? AND created_at >= ?
 				""".trimIndent(),
 				listOf(uid, dayStart),
 			) { row ->
@@ -141,16 +140,16 @@ class KotshiAccountService(
 			} ?: KotshiUsageSummary()
 			val recent = database.all(
 				"""
-				SELECT model, status, total_tokens, created_at, completed_at
+				SELECT source, status, total_tokens, created_at, completed_at
 				FROM llm_access_records
-				WHERE uid = ? AND source = 'web' AND created_at >= ?
+				WHERE uid = ?
 				ORDER BY created_at DESC
 				LIMIT 20
 				""".trimIndent(),
-				listOf(uid, dayStart),
+				listOf(uid),
 			) { row ->
 				KotshiUsageRecord(
-					model = row.get("model", String::class.java) ?: "fast",
+					source = row.get("source", String::class.java) ?: "unknown",
 					status = row.get("status", String::class.java) ?: "unknown",
 					totalTokens = number(row.get("total_tokens")),
 					createdAt = number(row.get("created_at")),
@@ -159,6 +158,7 @@ class KotshiAccountService(
 			}
 			summary to recent
 		}.getOrElse { error ->
+			if (error is kotlinx.coroutines.CancellationException) throw error
 			println("[Kotshi] usage lookup failed: ${error.message}")
 			KotshiUsageSummary() to emptyList()
 		}

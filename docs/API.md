@@ -71,7 +71,7 @@
 | 方法 | 路径 | 认证 | 参数/请求体 |
 |---|---|---|---|
 | `GET` | `/qo/authorization/account` | 用户令牌 | 返回当前账户信息。 |
-| `GET` | `/qo/authorization/account/kotshi` | 用户令牌 | 返回 Kotshi 查询开关、共享额度、当日 Kotshi 使用汇总和最近调用记录。 |
+| `GET` | `/qo/authorization/account/kotshi` | 用户令牌 | 返回 Kotshi 查询开关、共享额度、所有渠道的当日使用汇总和最近 20 条调用记录。 |
 | `PATCH` | `/qo/authorization/account/kotshi` | 用户令牌 | JSON：`{"kotshi_query_enabled":true|false}`；更新是否允许 Kotshi 按玩家名查询当前账户资料。 |
 | `POST` | `/qo/authorization/account/frozen?uid=<uid>` | 管理/内部 | 冻结账户。 |
 | `GET` | `/qo/authorization/account/card?profileUuid=<uuid>` | 公开 | 查询指定玩家卡片。 |
@@ -288,7 +288,7 @@ Web、QQ Bot 和 Minecraft 在认证后归一到同一个 QQ UID，共享 Weekly
 - 成功响应包含 `quota`，其中 `charged_units` 表示本次实际消耗。流式结算事件在 `[DONE]` 前发送。流式响应头是预留时的快照，最终余额以结算事件或额度查询为准。
 - HTTP 429 `weekly_quota_exceeded` 表示额度或免费补贴不足；`rate_limited` 表示并发/RPM 限制。数据库不可用返回 503，阻止未记账的调用。
 - 请求失败、流提前结束、客户端取消会退款。成功后缺失真实 Usage 或结算失败，预留转为 `pending`，保留余额并等待对账。
-- `GET /qo/authorization/account/kotshi` 提供账户额度和 Web 调用记录。玩家资料的隐私开关与原接口保持兼容。
+- `GET /qo/authorization/account/kotshi` 提供账户额度（每周免费余额与独立 `paid_credits`）、所有渠道的今日汇总和最近 20 条调用记录（不限今日）。记录返回 `source`、状态、token 用量和时间，不返回具体 `model` 或 `mode`；查询仅限当前登录用户。玩家资料的隐私开关与原接口保持兼容。
 
 配置项为 `qapi.llm.weekly-limit`（120）、`qapi.llm.guest-weekly-limit`（80），周界限使用北京时间。数据库表自动按需创建，旧 Redis 每日计数不迁移为 Paid Credits。模型缺失计价返回 503 `pricing_unavailable`，数据库扣额失败返回 503 `quota_unavailable`。
 
