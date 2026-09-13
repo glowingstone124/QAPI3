@@ -3,11 +3,39 @@ package org.qo.services.llmServices
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import java.math.BigDecimal
+import java.time.Instant
+import java.time.LocalTime
+import java.time.ZoneId
+
+data class LLMPricingSchedule(val zone: ZoneId, val weekdays: Set<Int>,
+    val windows: List<Pair<LocalTime,LocalTime>>, val multiplier: BigDecimal) {
+    init {
+        require(weekdays.isNotEmpty() && weekdays.all { it in 1..7 })
+        require(windows.isNotEmpty() && windows.all { it.first < it.second })
+        require(multiplier.signum() > 0)
+    }
+    fun applies(at: Instant): Boolean {
+        val local = at.atZone(zone)
+        return local.dayOfWeek.value in weekdays && windows.any { local.toLocalTime() >= it.first && local.toLocalTime() < it.second }
+    }
+    companion object {
+        fun fromJson(obj: JsonObject) = LLMPricingSchedule(ZoneId.of(obj.get("zone").asString),
+            obj.getAsJsonArray("weekdays").map { it.asInt }.toSet(),
+            obj.getAsJsonArray("windows").map { LocalTime.parse(it.asJsonArray[0].asString) to LocalTime.parse(it.asJsonArray[1].asString) },
+            obj.get("multiplier").asBigDecimal)
+    }
+}
 
 /** All prices are CNY, including reasoning in billable output tokens; cache is counted once. */
 data class LLMModelPricing(val inputCnyPerMillion: BigDecimal, val outputCnyPerMillion: BigDecimal,
-    val cachedInputCnyPerMillion: BigDecimal, val callCostCny: BigDecimal = BigDecimal.ZERO) {
+    val cachedInputCnyPerMillion: BigDecimal, val callCostCny: BigDecimal = BigDecimal.ZERO,
+    val schedule: LLMPricingSchedule? = null) {
     init { require(listOf(inputCnyPerMillion,outputCnyPerMillion,cachedInputCnyPerMillion,callCostCny).all { it.signum() >= 0 }) }
+    fun at(at: Instant): LLMModelPricing {
+        val factor = if (schedule?.applies(at) == true) schedule.multiplier else BigDecimal.ONE
+        return copy(inputCnyPerMillion=inputCnyPerMillion*factor,outputCnyPerMillion=outputCnyPerMillion*factor,
+            cachedInputCnyPerMillion=cachedInputCnyPerMillion*factor,schedule=null)
+    }
     fun cost(input: Long, output: Long, cached: Long, calls: Int = 1): BigDecimal {
         require(input >= 0 && output >= 0 && cached in 0..input && calls > 0)
         return (inputCnyPerMillion * BigDecimal(input-cached) + cachedInputCnyPerMillion * BigDecimal(cached) +
@@ -17,7 +45,8 @@ data class LLMModelPricing(val inputCnyPerMillion: BigDecimal, val outputCnyPerM
         fun fromJson(obj: JsonObject) = LLMModelPricing(obj.get("inputCnyPerMillion").asBigDecimal,
             obj.get("outputCnyPerMillion").asBigDecimal,
             obj.get("cachedInputCnyPerMillion")?.asBigDecimal ?: obj.get("inputCnyPerMillion").asBigDecimal,
-            obj.get("callCostCny")?.asBigDecimal ?: BigDecimal.ZERO)
+            obj.get("callCostCny")?.asBigDecimal ?: BigDecimal.ZERO,
+            obj.getAsJsonObject("schedule")?.let(LLMPricingSchedule::fromJson))
     }
 }
 
@@ -32,7 +61,7 @@ internal suspend fun LLMServices.settleUsage(reservation: LLMQuotaReservation, u
         val input = usage.promptTokens.toLong()
         val output = usage.completionTokens.toLong()
         val cache = (usage.cacheHitTokens ?: 0).toLong()
-        val cost = requireNotNull(provider.modelConfig(request.preset).pricing).cost(input,output,cache,usage.apiCalls)
+        val cost = requireNotNull(request.pricing ?: provider.modelConfig(request.preset).pricing?.at(Instant.now())).cost(input,output,cache,usage.apiCalls)
         charged = AiQuotaUsage(input,output,cache,usage.reasoningTokens,cost,LLMDailyQuotaService.units(cost),conversationId)
         return dailyQuotaService.settle(reservation,charged)
     } catch (error: Exception) {
@@ -70,7 +99,7 @@ internal fun withUsage(body: String, usage: LLMServices.Usage?): String = if(usa
 internal suspend fun LLMServices.refundUsage(reservation: LLMQuotaReservation, usage: LLMServices.Usage?,
     request: LLMServices.NormalizedRequest, provider: LLMProvider, conversationId: String?) {
     val recorded = if (usage?.promptTokens!=null && usage.completionTokens!=null) {
-        val cost=requireNotNull(provider.modelConfig(request.preset).pricing).cost(usage.promptTokens.toLong(),usage.completionTokens.toLong(),(usage.cacheHitTokens ?: 0).toLong(),usage.apiCalls)
+        val cost=requireNotNull(request.pricing ?: provider.modelConfig(request.preset).pricing?.at(Instant.now())).cost(usage.promptTokens.toLong(),usage.completionTokens.toLong(),(usage.cacheHitTokens ?: 0).toLong(),usage.apiCalls)
         AiQuotaUsage(usage.promptTokens.toLong(),usage.completionTokens.toLong(),(usage.cacheHitTokens ?: 0).toLong(),usage.reasoningTokens,cost,0,conversationId)
     } else null
     dailyQuotaService.refundUsage(reservation,recorded)

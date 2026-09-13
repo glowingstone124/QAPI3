@@ -11,6 +11,20 @@ import kotlin.test.assertTrue
 
 class LLMDailyQuotaServiceTest {
     @Test
+    fun `QQ default is eighty units and QO upgrade retains usage within one hundred twenty units`(): Unit = runBlocking {
+        val service = LLMDailyQuotaService(InMemoryQuotaStore(),120,"Asia/Shanghai")
+        val now = Instant.parse("2026-09-13T04:00:00Z")
+        val guest = principal(LLMSource.QQ).copy(hasAccount=false)
+        repeat(40) { service.reserve(guest,"guest-$it",now) }
+        assertEquals(80,service.snapshot(guest.qqUid,false,now).view.limit)
+        assertEquals(40,service.snapshot(guest.qqUid,false,now).view.remaining)
+        val registered = service.snapshot(guest.qqUid,true,now).view
+        assertEquals(120,registered.limit)
+        assertEquals(40,registered.used)
+        assertEquals(80,registered.remaining)
+    }
+
+    @Test
     fun `web qq and minecraft share one qq uid quota`() = runBlocking {
         val service = LLMDailyQuotaService(InMemoryQuotaStore(), 50, "Asia/Shanghai")
         val now = Instant.parse("2026-08-31T08:00:00Z")

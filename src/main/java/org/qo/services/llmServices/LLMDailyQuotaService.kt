@@ -29,6 +29,7 @@ enum class LLMQuotaStatus {
     EXCEEDED,
     DUPLICATE,
     UNAVAILABLE,
+    PRICING_UNAVAILABLE,
     RATE_LIMITED,
 }
 
@@ -81,15 +82,15 @@ interface LLMQuotaStore {
 @Service
 class LLMDailyQuotaService @Autowired constructor(
     private val store: LLMQuotaStore,
-    @Value("\${qapi.llm.weekly-limit:90}") configuredDailyLimit: Int,
-    @Value("\${qapi.llm.guest-weekly-limit:30}") configuredGuestDailyLimit: Int = 30,
+    @Value("\${qapi.llm.weekly-limit:120}") configuredDailyLimit: Int,
+    @Value("\${qapi.llm.guest-weekly-limit:80}") configuredGuestDailyLimit: Int = 80,
     @Value("\${qapi.llm.quota-zone:Asia/Shanghai}") quotaZoneName: String = "Asia/Shanghai",
 ) {
     val weeklyLimit = configuredDailyLimit.coerceAtLeast(1)
     val guestWeeklyLimit = configuredGuestDailyLimit.coerceAtLeast(1)
     private val quotaZone = ZoneId.of(quotaZoneName)
     constructor(store: LLMQuotaStore, configuredDailyLimit: Int, quotaZoneName: String) :
-        this(store, configuredDailyLimit, 30, quotaZoneName)
+        this(store, configuredDailyLimit, 80, quotaZoneName)
     fun effectiveLimit(hasAccount: Boolean): Int = if (hasAccount) weeklyLimit else guestWeeklyLimit
 
     suspend fun reserve(principal: LLMPrincipal, requestId: String = UUID.randomUUID().toString(),

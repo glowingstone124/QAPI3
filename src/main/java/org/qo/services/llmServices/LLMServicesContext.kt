@@ -139,6 +139,7 @@ internal suspend fun LLMServices.normalizeRequest(
 		currentUserText = userQuestion,
 		enableMarkdown = enableMarkdown,
 		reasoningEffort = reasoningEffort,
+		pricing = provider.modelConfig(model).pricing?.at(java.time.Instant.now()),
 	)
 }
 
@@ -596,16 +597,25 @@ internal fun LLMServices.reserveRequest(qqUid: Long): Boolean {
 }
 
 internal suspend fun LLMServices.reserveQuota(principal: LLMPrincipal, clientRequestId: String?, request: LLMServices.NormalizedRequest, provider: LLMProvider): LLMQuotaDecision {
-    val pricing = provider.modelConfig(request.preset).pricing
-        ?: return LLMQuotaDecision(LLMQuotaStatus.UNAVAILABLE, dailyQuotaService.snapshot(principal.qqUid, principal.hasAccount).view)
-    val obj = JsonParser.parseString(request.body).asJsonObject
-    val output = obj.get("max_tokens")?.asInt ?: 2048
-    val estimated = pricing.cost(request.body.toByteArray(StandardCharsets.UTF_8).size.toLong(), output.toLong(), 0)
+    val logger = org.slf4j.LoggerFactory.getLogger(LLMServices::class.java)
     return try {
+        val pricing = request.pricing ?: provider.modelConfig(request.preset).pricing?.at(java.time.Instant.now())
+        if (pricing == null) {
+            logger.error("AI model pricing missing: provider={}, mode={}, model={}; configure models.{}.pricing in providers.json",
+                provider.name,request.preset,request.model,request.preset)
+            return LLMQuotaDecision(LLMQuotaStatus.PRICING_UNAVAILABLE, dailyQuotaService.snapshot(principal.qqUid, principal.hasAccount).view)
+        }
+        val obj = JsonParser.parseString(request.body).asJsonObject
+        val output = obj.get("max_tokens")?.asInt ?: 2048
+        val estimated = pricing.cost(request.body.toByteArray(StandardCharsets.UTF_8).size.toLong(), output.toLong(), 0)
         dailyQuotaService.reserve(principal, clientRequestId?.takeIf { it.isNotBlank() } ?: java.util.UUID.randomUUID().toString(),
             estimatedUnits = LLMDailyQuotaService.units(estimated), mode = request.preset,
             provider = provider.name, model = request.model, estimatedCost = estimated)
-    } catch (_: Exception) {
+    } catch (error: Exception) {
+        if (error is kotlinx.coroutines.CancellationException) throw error
+        val sqlError = generateSequence<Throwable>(error) { it.cause }.filterIsInstance<io.r2dbc.spi.R2dbcException>().firstOrNull()
+        logger.warn("AI quota reservation failed: source={}, uid={}, provider={}, mode={}, error={}, sqlState={}, sqlCode={}",
+            principal.source.value,principal.qqUid,provider.name,request.preset,error.javaClass.simpleName,sqlError?.sqlState,sqlError?.errorCode)
         LLMQuotaDecision(LLMQuotaStatus.UNAVAILABLE, dailyQuotaService.snapshot(principal.qqUid, principal.hasAccount).view)
     }
 }
@@ -617,6 +627,7 @@ internal fun LLMServices.quotaFailure(decision: LLMQuotaDecision, principal: LLM
 		LLMQuotaStatus.RATE_LIMITED -> 429 to "rate_limited"
 		LLMQuotaStatus.DUPLICATE -> 409 to "duplicate_request"
 		LLMQuotaStatus.UNAVAILABLE -> 503 to "quota_unavailable"
+		LLMQuotaStatus.PRICING_UNAVAILABLE -> 503 to "pricing_unavailable"
 	}
 	return LLMNonStreamResult(status, errorJson(code, quotaErrorMessage(decision.status, principal)), decision.view)
 }
@@ -631,11 +642,12 @@ internal fun LLMServices.quotaErrorMessage(status: LLMQuotaStatus, principal: LL
 	LLMQuotaStatus.EXCEEDED -> if (principal.hasAccount) {
 		"本周额度和 Paid Credits 不足，可购买 Credits 继续使用"
 	} else {
-		"本周 QQ 额度为 30 Units，注册后同一身份提升至 90 Units；可购买 Credits 继续使用"
+		"本周 QQ 额度为 ${dailyQuotaService.guestWeeklyLimit} Units，注册后同一身份提升至 ${dailyQuotaService.weeklyLimit} Units；可购买 Credits 继续使用"
 	}
 	LLMQuotaStatus.RATE_LIMITED -> "请求过于频繁或达到并发限制，请稍后重试"
 	LLMQuotaStatus.DUPLICATE -> "该请求已经提交，请勿重复发送"
 	LLMQuotaStatus.UNAVAILABLE -> "额度服务暂时不可用，请稍后重试"
+	LLMQuotaStatus.PRICING_UNAVAILABLE -> "模型计价未配置，请联系管理员"
 }
 
 internal fun LLMServices.quotaJson(view: LLMQuotaView): String = JsonObject().apply {

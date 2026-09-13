@@ -279,7 +279,7 @@ IP 添加/删除常见返回码：`0` 成功，`1` 令牌无效，`2` 超出数�
 
 ### Weekly Limits 与 Paid Credits
 
-Web、QQ Bot 和 Minecraft 在认证后归一到同一个 QQ UID，共享 Weekly Units 与永久 Paid Credits。QQ 身份默认每周 30 Units、1 并发、3 RPM；注册账户每周 90 Units、2 并发、6 RPM。注册提升同一身份的上限，保留本周已用额度。每周一北京时间 00:00 切换周账本，无定时扫描、不累积。
+Web、QQ Bot 和 Minecraft 在认证后归一到同一个 QQ UID，共享 Weekly Units 与永久 Paid Credits。QQ 身份默认每周 80 Units、1 并发、3 RPM；QO 账户每周 120 Units、2 并发、6 RPM。注册提升同一身份的上限，保留本周已用额度。每周一北京时间 00:00 切换周账本，无定时扫描、不累积。
 
 - 前端只选择 `fast / thinking`。请求 body 的 `model` 字段生效；兼容 query 参数。具体 provider、model 和计价由服务端配置。
 - `GET /qo/asking/v1/quota` 返回 `limit`、`used`、`remaining`、Unix 秒 `reset_at`、`paid_credits`、`period: weekly`。
@@ -290,7 +290,7 @@ Web、QQ Bot 和 Minecraft 在认证后归一到同一个 QQ UID，共享 Weekly
 - 请求失败、流提前结束、客户端取消会退款。成功后缺失真实 Usage 或结算失败，预留转为 `pending`，保留余额并等待对账。
 - `GET /qo/authorization/account/kotshi` 提供账户额度和 Web 调用记录。玩家资料的隐私开关与原接口保持兼容。
 
-配置项为 `qapi.llm.weekly-limit`（90）、`qapi.llm.guest-weekly-limit`（30），周界限使用北京时间。数据库表自动按需创建，旧 Redis 每日计数不迁移为 Paid Credits。
+配置项为 `qapi.llm.weekly-limit`（120）、`qapi.llm.guest-weekly-limit`（80），周界限使用北京时间。数据库表自动按需创建，旧 Redis 每日计数不迁移为 Paid Credits。模型缺失计价返回 503 `pricing_unavailable`，数据库扣额失败返回 503 `quota_unavailable`。
 
 爱发电：
 

@@ -1,0 +1,50 @@
+{
+  "fast": {
+    "model": "deepseek-flash",
+    "protocol": "anthropic",
+    "pricing": {
+      "inputCnyPerMillion": 1,
+      "outputCnyPerMillion": 4,
+      "cachedInputCnyPerMillion": 0.02,
+      "callCostCny": 0,
+      "schedule": {
+        "zone": "Asia/Shanghai",
+        "weekdays": [1, 2, 3, 4, 5],
+        "windows": [["09:00", "12:00"], ["14:00", "18:00"]],
+        "multiplier": 2
+      }
+    }
+  },
+  "thinking": {
+    "model": "deepseek-v4-pro",
+    "protocol": "responses",
+    "pricing": {
+      "inputCnyPerMillion": 4.5,
+      "outputCnyPerMillion": 13.5,
+      "cachedInputCnyPerMillion": 0.15,
+      "callCostCny": 0,
+      "schedule": {
+        "zone": "Asia/Shanghai",
+        "weekdays": [1, 2, 3, 4, 5],
+        "windows": [["09:00", "12:00"], ["14:00", "18:00"]],
+        "multiplier": 2
+      }
+    }
+  },
+  "deepseek": {
+    "model": "deepseek-flash",
+    "protocol": "responses",
+    "pricing": {
+      "inputCnyPerMillion": 1,
+      "outputCnyPerMillion": 4,
+      "cachedInputCnyPerMillion": 0.02,
+      "callCostCny": 0,
+      "schedule": {
+        "zone": "Asia/Shanghai",
+        "weekdays": [1, 2, 3, 4, 5],
+        "windows": [["09:00", "12:00"], ["14:00", "18:00"]],
+        "multiplier": 2
+      }
+    }
+  }
+}

@@ -2,7 +2,7 @@
 
 ## 配置
 
-免费配额通过 QQ UID 跨入口共享，默认 QQ 30 Units/周、注册 90 Units/周。周一北京时间 00:00 以周账本自然切换。Paid Credits 不过期。
+免费配额通过 QQ UID 跨入口共享，默认 QQ 80 Units/周、QO 账户 120 Units/周。周一北京时间 00:00 以周账本自然切换。Paid Credits 不过期。
 
 服务端 `data/llm/providers.json` 支持顶层路由：
 
@@ -22,6 +22,10 @@
 ```
 
 以上数字只说明字段格式，不是模型报价。部署前按实际 API 供应商账单配置全部模型（含摘要模型），外币价格需先换算为人民币。`callCostCny` 用于每次调用固定成本；token 之外的搜索等费用须包含在供应商计价配置中。价格在一次请求内保持同一配置快照。缺失模型计价时阻止聊天调用，摘要则跳过。
+
+聊天返回 `pricing_unavailable` 表示所选路由的 `models.<alias>.pricing` 缺失，不是 QQ 用户未注册或每周额度不足。服务端日志会指出 provider、档位和模型；在实际部署的 providers.json 中补充供应商计价后，配置热重载即可恢复。`quota_unavailable` 则表示额度扣额失败；服务端记录失败类别与 SQL 状态/错误码，不记录令牌或请求内容。取消请求继续传播取消状态。
+
+当前 DeepSeek 配置可直接把 [带计价的 models 配置](examples/deepseek-models-priced.json) 放到 `data/llm/providers.json` 的 `providers.deepseek.models`。这是 models 片段，不是整个 providers.json；端点、tokenFile 与其他供应商配置保留。报价核对于 2026-09-13 的 [官方人民币价格表](https://api-docs.deepseek.com/zh-cn/quick_start/pricing/)：Flash 空闲缓存输入/未缓存输入/输出为 0.02/1/4 元每百万 tokens，Pro 为 0.15/4.5/13.5 元；高峰均为两倍。`pricing.schedule` 显式声明时区、ISO 星期（1=周一）及起止时间，高峰区间含起点、不含终点。每次请求在预留前固定计价，跨时段结算使用同一价格，避免重复应用倍数。不为其他供应商猜测价格；未配置计价的摘要仍跳过。
 
 Fast 默认关闭思考；Thinking 默认 medium。只有显式 high/max 参数才提升到 high，不通过关键词识别任务。QQ 入口始终关闭思考，切换档位不改变此策略。前端只显示能力档位，响应的 model 使用档位别名。
 

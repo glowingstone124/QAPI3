@@ -151,7 +151,7 @@ internal suspend fun LLMServices.postUpstream(source: String, body: String, prov
 	}
 
 internal suspend fun LLMServices.postSummaryUpstream(source: String, body: String, summary: LLMSummaryConfig): Pair<Int, String> {
-    val pricing=summary.pricing ?: return 503 to errorJson("pricing_unavailable","摘要模型未配置计价")
+    val pricing=summary.pricing?.at(java.time.Instant.now()) ?: return 503 to errorJson("pricing_unavailable","摘要模型未配置计价")
     val request=JsonParser.parseString(body).asJsonObject
     val maxOutput=request.get("max_tokens")?.asLong ?: request.get("max_output_tokens")?.asLong ?: 8192
     val estimate=pricing.cost(body.toByteArray(StandardCharsets.UTF_8).size.toLong(),maxOutput,0)

@@ -647,6 +647,7 @@ class LLMServices(
 		val currentUserText: String,
 		val enableMarkdown: Boolean,
 		val reasoningEffort: LLMReasoningEffort,
+		val pricing: LLMModelPricing? = null,
 	)
 
 	internal data class LLMRequester(
