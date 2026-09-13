@@ -56,6 +56,15 @@ MQIDAQAB
 
 data class CreditPack(val amount: Int, val credits: Int, val skuId: String, val checkoutUrl: String)
 interface AfdianOrderQuery { suspend fun query(orderNo: String): JsonObject }
+internal class AfdianOrderNotFoundException : IllegalStateException("Order not visible in the official query; retry required")
+
+internal fun queriedAfdianOrder(root: JsonObject, orderNo: String): JsonObject {
+    check(root.get("ec")?.asInt==200) { "Afdian rejected order query" }
+    val matches = root.getAsJsonObject("data").getAsJsonArray("list").map { it.asJsonObject }
+        .filter { it.get("out_trade_no")?.asString==orderNo }
+    check(matches.size <= 1) { "Afdian returned duplicate order numbers" }
+    return matches.singleOrNull() ?: throw AfdianOrderNotFoundException()
+}
 
 @Service
 class HttpAfdianOrderQuery(
@@ -78,9 +87,7 @@ class HttpAfdianOrderQuery(
         val response = client.post(url) { contentType(ContentType.Application.Json); setBody(body.toString()) }
         check(response.status.value in 200..299) { "Afdian query failed" }
         val root = JsonParser.parseString(response.bodyAsText()).asJsonObject
-        check(root.get("ec")?.asInt==200) { "Afdian rejected order query" }
-        return root.getAsJsonObject("data").getAsJsonArray("list").map { it.asJsonObject }
-            .single { it.get("out_trade_no")?.asString==orderNo }
+        return queriedAfdianOrder(root,orderNo)
     }
 }
 
@@ -118,6 +125,8 @@ class AfdianCreditsService(private val db: ReactiveDatabase, private val quota: 
         require(orderElement.isJsonObject) { "Invalid webhook order" }
         require(data.get("type")?.asString=="order")
         val order = orderElement.asJsonObject
+        // Regular sponsorships are not Credits products. Acknowledging them grants nothing.
+        if (order.get("product_type")?.takeUnless { it.isJsonNull }?.asInt == 0) return
         require(AfdianSignature.verify(order,data.get("sign")?.asString ?: "")) { "Invalid webhook signature" }
         val no = order.get("out_trade_no").asString
         require(no.matches(Regex("[A-Za-z0-9_-]{1,64}")))

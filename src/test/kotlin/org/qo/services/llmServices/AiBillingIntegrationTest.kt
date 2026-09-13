@@ -115,6 +115,21 @@ class AiBillingIntegrationTest {
         assertEquals(0, db.one("SELECT COUNT(*) AS n FROM ai_quota_account") { (it.get("n") as Number).toInt() })
     }
 
+    @Test fun `regular sponsorship test orders are acknowledged without querying or granting credits`() = runBlocking {
+        val payments = AfdianCreditsService(db, store, object : AfdianOrderQuery {
+            override suspend fun query(orderNo: String): com.google.gson.JsonObject = error("Sponsorship test must not query orders")
+        }, AfdianConfig())
+        val body = """{"ec":200,"em":"ok","data":{"type":"order","order":{
+            "out_trade_no":"202106232138371083454010626","user_id":"adf397fe8374811eaacee52540025c377",
+            "plan_id":"a45353328af911eb973052540025c377","month":1,"total_amount":"5.00","show_amount":"5.00",
+            "status":2,"remark":"","redeem_id":"","product_type":0,"discount":"0.00","sku_detail":[],
+            "address_person":"","address_phone":"","address_address":""}}}"""
+        assertEquals(200, JsonParser.parseString(AfdianWebhookController(payments).webhook(body)).asJsonObject.get("ec").asInt)
+        assertEquals(0, db.one("SELECT COUNT(*) AS n FROM ai_credit_ledger") { (it.get("n") as Number).toInt() })
+        assertEquals(0, db.one("SELECT COUNT(*) AS n FROM ai_payment_order") { (it.get("n") as Number).toInt() })
+        assertEquals(0, db.one("SELECT COUNT(*) AS n FROM ai_quota_account") { (it.get("n") as Number).toInt() })
+    }
+
     @Test fun `an order cannot masquerade as a connectivity notification to bypass verification`() = runBlocking {
         var queried = false
         val payments = AfdianCreditsService(db, store, object : AfdianOrderQuery {
@@ -125,6 +140,7 @@ class AiBillingIntegrationTest {
         }, AfdianConfig())
         val controller = AfdianWebhookController(payments)
         for (body in listOf("""{"data":{"type":"order","order":{"out_trade_no":"fake"}}}""",
+            """{"data":{"type":"order","order":{"out_trade_no":"fake","product_type":1}}}""",
             """{"data":{"type":"test","order":{}}}""", """{"data":{"order":"invalid"}}""", "[]", "null", "not-json")) {
             val error = assertFailsWith<org.springframework.web.server.ResponseStatusException> { controller.webhook(body) }
             assertEquals(400, error.statusCode.value())
