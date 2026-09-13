@@ -55,7 +55,7 @@ class QqLoginController(
 				addProperty("token", challenge.token)
 				addProperty("username", challenge.username)
 				addProperty("account_type", challenge.accountType)
-				addProperty("daily_limit", challenge.dailyLimit)
+				addProperty("weekly_limit", challenge.weeklyLimit)
 			}
 		}
 	}
@@ -83,7 +83,7 @@ class QqLoginController(
 				addProperty("result", true)
 				addProperty("message", "Kotshi 登录验证成功")
 				addProperty("account_type", result.accountType)
-				addProperty("daily_limit", result.dailyLimit)
+				addProperty("weekly_limit", result.weeklyLimit)
 			}
 			QqLoginConfirmation.NotFound -> failure(HttpStatus.NOT_FOUND, "登录代码不存在")
 			QqLoginConfirmation.QqMismatch -> failure(HttpStatus.FORBIDDEN, "该登录代码不属于你的 QQ 号")

@@ -54,9 +54,7 @@ class GetUserQuotaToolTest {
 		val resultJson = tool.execute(args, context)
 		val result = JsonParser.parseString(resultJson).asJsonObject
 
-		assertEquals(888888L, result.get("uid").asLong)
-		assertEquals(1, result.get("used").asInt)
-		assertEquals(19, result.get("remaining").asInt)
+		assertEquals("forbidden", result.get("error").asString)
 	}
 
 	@Test
@@ -75,8 +73,7 @@ class GetUserQuotaToolTest {
 		private val counts = mutableMapOf<String, Int>()
 		private val requests = mutableMapOf<String, String>()
 
-		@Synchronized
-		override fun reserve(
+				override suspend fun reserve(
 			quotaKey: String,
 			requestKey: String,
 			limit: Int,
@@ -94,10 +91,8 @@ class GetUserQuotaToolTest {
 			return LLMQuotaStoreDecision(LLMQuotaStatus.ACCEPTED, current + 1)
 		}
 
-		@Synchronized
-		override fun refund(reservation: LLMQuotaReservation): Int? = null
+				override suspend fun refund(reservation: LLMQuotaReservation): Int? = null
 
-		@Synchronized
-		override fun used(quotaKey: String): Int? = counts[quotaKey] ?: 0
+				override suspend fun used(quotaKey: String): Int? = counts[quotaKey] ?: 0
 	}
 }

@@ -52,5 +52,6 @@ http-client.private.env.json
 LLMAPITOKEN
 data/sql/info.json
 data/redis/config.json
+data/afdian.json
 
 nodes.json

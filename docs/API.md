@@ -277,20 +277,29 @@ IP 添加/删除常见返回码：`0` 成功，`1` 令牌无效，`2` 超出数�
 - 推荐 Header：`Authorization: Bearer <token>`。
 - 兼容旧 Header：`token: <token>`。
 
-### 统一每日额度
+### Weekly Limits 与 Paid Credits
 
-Web、QQ Bot 和 Minecraft 三个入口都会在各自认证成功后归一到同一个 QQ UID，并共享该账户每天的 LLM 额度：拥有 QO 账户的用户每天 50 轮；未注册 QO 账户的游客每天 20 轮（超限时会提示加入/注册 QO 账户获取更多额度）。额度按 `Asia/Shanghai` 自然日重置，不能通过更换 token、IP 或调用入口绕过。
+Web、QQ Bot 和 Minecraft 在认证后归一到同一个 QQ UID，共享 Weekly Units 与永久 Paid Credits。QQ 身份默认每周 30 Units、1 并发、3 RPM；注册账户每周 90 Units、2 并发、6 RPM。注册提升同一身份的上限，保留本周已用额度。每周一北京时间 00:00 切换周账本，无定时扫描、不累积。
 
-- 可选 Header：`X-Request-ID: <client-generated-id>`，同一 source 内重复提交相同 ID 不会重复扣除额度。
-- `GET /qo/asking/v1/quota`：使用用户登录令牌查询统一额度，返回 `limit`、`used`、`remaining` 和 Unix 秒格式的 `reset_at`。
-- `GET /qo/authorization/account/kotshi`：使用用户登录令牌查询 Kotshi 查询权限、统一额度、当日 Kotshi Web 使用汇总和最近调用记录。
-- `PATCH /qo/authorization/account/kotshi`：使用 `{"kotshi_query_enabled": false}` 关闭该账户在 Kotshi 中被按玩家名查询；QCommunity 原有公开查询接口不受此开关影响。
-- `GET /qo/kotshi/player?name=<name>`：Kotshi 使用的隐私感知玩家查询入口。查询开关关闭时返回 HTTP `403`，避免客户端或 LLM 工具绕过账户设置。
-- LLM 响应包含 `X-RateLimit-Limit`、`X-RateLimit-Remaining`、`X-RateLimit-Reset`；额度耗尽时返回 HTTP `429` 和 `Retry-After`。
-- Redis 不可用时额度受保护的 LLM 请求返回 HTTP `503`，不会 fail-open。
-- 上游在接受请求前失败会退还预留额度；上游已经接受请求或开始流式输出后，即使客户端中断也计为一轮。
+- 前端只选择 `fast / thinking`。请求 body 的 `model` 字段生效；兼容 query 参数。具体 provider、model 和计价由服务端配置。
+- `GET /qo/asking/v1/quota` 返回 `limit`、`used`、`remaining`、Unix 秒 `reset_at`、`paid_credits`、`period: weekly`。
+- `X-Request-ID` 在同一 QQ 身份的所有入口之间防重复，即使跨周也不能重用。
+- 请求按照配置的人民币计价预留；获得所有工具轮次的真实 Usage 后，按 `max(1, ceil(actualCostCny / 0.005))` 结算。优先 Weekly，不足部分使用 Paid Credits，同一请求可跨池扣费。
+- 成功响应包含 `quota`，其中 `charged_units` 表示本次实际消耗。流式结算事件在 `[DONE]` 前发送。流式响应头是预留时的快照，最终余额以结算事件或额度查询为准。
+- HTTP 429 `weekly_quota_exceeded` 表示额度或免费补贴不足；`rate_limited` 表示并发/RPM 限制。数据库不可用返回 503，阻止未记账的调用。
+- 请求失败、流提前结束、客户端取消会退款。成功后缺失真实 Usage 或结算失败，预留转为 `pending`，保留余额并等待对账。
+- `GET /qo/authorization/account/kotshi` 提供账户额度和 Web 调用记录。玩家资料的隐私开关与原接口保持兼容。
 
-额度可通过 Spring property `qapi.llm.daily-limit` 调整（默认 `50`），游客额度可通过 `qapi.llm.guest-daily-limit` 调整（默认 `20`）；时区可通过 `qapi.llm.quota-zone` 调整，默认 `Asia/Shanghai`。
+配置项为 `qapi.llm.weekly-limit`（90）、`qapi.llm.guest-weekly-limit`（30），周界限使用北京时间。数据库表自动按需创建，旧 Redis 每日计数不迁移为 Paid Credits。
+
+爱发电：
+
+- `POST /qo/asking/v1/credits/purchase`：Bearer 登录令牌，body `{"amount":5}`、`10` 或 `20`。分别获得 350、800、1800 Credits。服务端创建购买意向，返回 `purchase_intent`、`checkout_url`、`credits`。
+- `POST /hooks/afdian`：固定公开回调端点。先对 `data.sign` 做 RSA/SHA256 验签，再通过 `query-order` 查询官方订单；实际 SKU、数量、金额、成功状态、`custom_order_id` 全部以查询结果为准。
+- `POST /qo/asking/v1/credits/reconcile`：Bearer 登录令牌，重试本人的已知 Usage 待结算记录，返回 `settled` 数量。Usage 缺失和进程崩溃留下的预留需要运营核对，不自动猜测收费或退款。
+- `UNIQUE(provider,out_trade_no)` 与 `UNIQUE(intent_id)` 确保重复通知、重复订单和一个购买意向的多次支付不会重复充值。
+
+完整配置及预算说明见 [AI billing](AI_BILLING.md)。
 
 ### OpenAI Chat Completions
 
@@ -314,11 +323,10 @@ Web、QQ Bot 和 Minecraft 三个入口都会在各自认证成功后归一到�
 
 - `fast`
 - `thinking`
-- provider JSON 中配置的真实模型名
 
 `stream=false` 返回 JSON；`stream=true` 返回 SSE。每个预设通过 provider `models.<preset>.protocol` 显式选择 `responses`、`chat-completions` 或 `anthropic`。Responses 路径把 `reasoning_effort` 转为 `reasoning.effort`；Anthropic 路径按模型 `thinkingMode` 转为 thinking budget 或 `output_config.effort`，并保持对外 Chat Completion 格式。三个协议的交互请求均启用上游 Web Search；Anthropic 支持 `pause_turn` 续接、搜索与本地工具混用，并返回来源链接。上游需要支持对应搜索功能且账户已启用；Anthropic 搜索失败会返回错误，不会悄悄移除搜索继续请求。工具调用、群上下文、记忆、历史检索和 RAG 在 Responses 路径中均可用；工具轮次会完整回传上游 output item，以保留模型需要的 reasoning 上下文。
 
-`reasoning_effort` 支持 `none`、`low`、`medium`、`high`、`xhigh`、`max`；DeepSeek 映射为 `none→none`、`low→low`、`medium/high/xhigh→high`、`max→max`。QQ Bot 与 Minecraft 请求默认 `none`，Web 请求默认 `high`，Web 客户端只提供 `low/high/max`。也可传 Responses 形式的 `{"reasoning":{"effort":"high"}}`，但不可与 `reasoning_effort` 同时出现。
+`reasoning_effort` 支持 `none`、`low`、`medium`、`high`、`xhigh`、`max`，也可传 Responses 形式的 `{"reasoning":{"effort":"high"}}`，两者不可同时出现。后端按档位决定最终强度：Fast 关闭，Thinking 默认 medium，显式 high/max 提升到 high，不按请求内容分类。QQ Bot 入口始终关闭思考，管理员切换档位也不改变。
 
 流式 SSE 会先发送若干 `data:` JSON 状态帧（`object: "kotshi.status"`），例如
 `{"phase":"analyzing","label":"正在分析问题…"}`、
@@ -341,7 +349,7 @@ Web 流式请求会校验 `Origin`，允许来源由 `qapi.llm.web-allowed-origi
 - 可选 `X-QQ-Name: <name>`
 - 节点认证：`Authorization` 或 `token`
 
-Body 与 Chat Completions 相同。Bot 请求未指定推理强度时默认使用 `none`。
+Body 与 Chat Completions 相同。QQ Bot 固定使用 `none`，不能由用户请求开启思考。
 
 ### Minecraft 对话
 
@@ -354,7 +362,7 @@ Body 与 Chat Completions 相同。Bot 请求未指定推理强度时默认使�
 - `X-Minecraft-HP`
 - 节点认证：`Authorization` 或 `token`
 
-Minecraft 请求未指定推理强度时默认使用 `none`。
+Minecraft 请求遵循 Fast / Thinking 档位策略，显式 high/max 参数可提升到 high。
 
 ### 历史消息归档
 
@@ -410,7 +418,7 @@ Responses 路径的非流式与 SSE 请求均可调用：
 - `upsert_member_profile`
 - `forget_member_profile_field`
 - `get_remain_balance`：查询当前 LLM API 账户的 token 余额。
-- `get_user_quota`：查询当前用户今日剩余的 LLM 对话轮数、每日上限、重置时间及账户类型（QO 绑定用户/游客），若为游客还会附带加入 QO 获取更多额度的提示。
+- `get_user_quota`：查询当前用户的每周 Units、Paid Credits、每周上限、重置时间及账户类型（QO 绑定用户/游客），若为游客还会附带加入 QO 获取更多额度的提示。
 - `set_msg_emoji_like`：为群消息设置表情回应（贴一贴）。`emoji_id` 支持语义名或数字 ID，当前支持 `monkey_head`（128053，🐵）。需配置 `QBOT_ENDPOINT` 与 `QBOT_TOKEN` 指向 qbot。
 
 ### LLM 配置

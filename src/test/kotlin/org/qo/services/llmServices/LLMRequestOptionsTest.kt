@@ -8,10 +8,22 @@ import kotlin.test.assertFalse
 
 class LLMRequestOptionsTest {
     @Test
+    fun `QQ always disables reasoning while thinking elsewhere follows backend policy`() {
+        for (mode in listOf("fast", "thinking")) {
+            for (requested in LLMReasoningEffort.entries) {
+                assertEquals(LLMReasoningEffort.NONE, reasoningEffortForMode(LLMSource.QQ, mode, requested))
+            }
+        }
+        assertEquals(LLMReasoningEffort.NONE, reasoningEffortForMode(LLMSource.WEB, "fast", LLMReasoningEffort.MAX))
+        assertEquals(LLMReasoningEffort.MEDIUM, reasoningEffortForMode(LLMSource.WEB, "thinking", LLMReasoningEffort.NONE))
+        assertEquals(LLMReasoningEffort.HIGH, reasoningEffortForMode(LLMSource.MINECRAFT, "thinking", LLMReasoningEffort.HIGH))
+    }
+
+    @Test
     fun `reasoning defaults are source specific`() {
         assertEquals(LLMReasoningEffort.NONE, defaultReasoningEffort(LLMSource.QQ))
         assertEquals(LLMReasoningEffort.NONE, defaultReasoningEffort(LLMSource.MINECRAFT))
-        assertEquals(LLMReasoningEffort.HIGH, defaultReasoningEffort(LLMSource.WEB))
+        assertEquals(LLMReasoningEffort.MEDIUM, defaultReasoningEffort(LLMSource.WEB))
     }
 
     @Test
@@ -50,7 +62,7 @@ class LLMRequestOptionsTest {
         val medium = JsonParser.parseString("""{"reasoning_effort":"medium"}""").asJsonObject
         val xhigh = JsonParser.parseString("""{"reasoning_effort":"xhigh"}""").asJsonObject
 
-        assertEquals(LLMReasoningEffort.HIGH, extractReasoningEffort(medium, LLMReasoningEffort.NONE))
+        assertEquals(LLMReasoningEffort.MEDIUM, extractReasoningEffort(medium, LLMReasoningEffort.NONE))
         assertEquals(LLMReasoningEffort.HIGH, extractReasoningEffort(xhigh, LLMReasoningEffort.NONE))
         assertFalse(medium.has("reasoning_effort"))
         assertFalse(xhigh.has("reasoning_effort"))

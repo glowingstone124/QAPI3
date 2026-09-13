@@ -1,5 +1,6 @@
 package org.qo.services.llmServices
 
+import kotlinx.coroutines.runBlocking
 import java.time.Instant
 import java.util.concurrent.Callable
 import java.util.concurrent.Executors
@@ -10,7 +11,7 @@ import kotlin.test.assertTrue
 
 class LLMDailyQuotaServiceTest {
     @Test
-    fun `web qq and minecraft share one qq uid quota`() {
+    fun `web qq and minecraft share one qq uid quota`() = runBlocking {
         val service = LLMDailyQuotaService(InMemoryQuotaStore(), 50, "Asia/Shanghai")
         val now = Instant.parse("2026-08-31T08:00:00Z")
 
@@ -26,7 +27,7 @@ class LLMDailyQuotaServiceTest {
     }
 
     @Test
-    fun `the fifty first request is rejected atomically`() {
+    fun `the fifty first request is rejected atomically`() = runBlocking {
         val service = LLMDailyQuotaService(InMemoryQuotaStore(), 50, "Asia/Shanghai")
         val now = Instant.parse("2026-08-31T08:00:00Z")
 
@@ -34,7 +35,7 @@ class LLMDailyQuotaServiceTest {
         try {
             val decisions = pool.invokeAll(
                 (1..100).map { index ->
-                    Callable { service.reserve(principal(LLMSource.WEB), "request-$index", now) }
+                    Callable { runBlocking { service.reserve(principal(LLMSource.WEB), "request-$index", now) } }
                 },
             ).map { it.get() }
 
@@ -47,7 +48,7 @@ class LLMDailyQuotaServiceTest {
     }
 
     @Test
-    fun `same request id is idempotent within one source`() {
+    fun `same request id is idempotent within one source`() = runBlocking {
         val service = LLMDailyQuotaService(InMemoryQuotaStore(), 50, "Asia/Shanghai")
         val now = Instant.parse("2026-08-31T08:00:00Z")
 
@@ -60,10 +61,10 @@ class LLMDailyQuotaServiceTest {
     }
 
     @Test
-    fun `quota resets at Shanghai midnight`() {
+    fun `quota resets at Shanghai Monday midnight`() = runBlocking {
         val service = LLMDailyQuotaService(InMemoryQuotaStore(), 50, "Asia/Shanghai")
-        val beforeMidnight = Instant.parse("2026-08-31T15:59:59Z")
-        val afterMidnight = Instant.parse("2026-08-31T16:00:00Z")
+        val beforeMidnight = Instant.parse("2026-09-06T15:59:59Z")
+        val afterMidnight = Instant.parse("2026-09-06T16:00:00Z")
 
         val before = service.reserve(principal(LLMSource.WEB), "before", beforeMidnight)
         val after = service.reserve(principal(LLMSource.WEB), "after", afterMidnight)
@@ -75,7 +76,7 @@ class LLMDailyQuotaServiceTest {
     }
 
     @Test
-    fun `failed upstream reservation can only be refunded once`() {
+    fun `failed upstream reservation can only be refunded once`() = runBlocking {
         val service = LLMDailyQuotaService(InMemoryQuotaStore(), 50, "Asia/Shanghai")
         val now = Instant.parse("2026-08-31T08:00:00Z")
         val accepted = service.reserve(principal(LLMSource.MINECRAFT), "refund", now)
@@ -87,7 +88,7 @@ class LLMDailyQuotaServiceTest {
     }
 
     @Test
-    fun `quota fails closed when the store is unavailable`() {
+    fun `quota fails closed when the store is unavailable`() = runBlocking {
         val store = InMemoryQuotaStore().apply { available = false }
         val service = LLMDailyQuotaService(store, 50, "Asia/Shanghai")
 
@@ -101,7 +102,7 @@ class LLMDailyQuotaServiceTest {
     }
 
     @Test
-    fun `guest users have 20 rounds limit while registered users have 50 rounds limit`() {
+    fun `guest users have 20 rounds limit while registered users have 50 rounds limit`() = runBlocking {
         val service = LLMDailyQuotaService(InMemoryQuotaStore(), 50, 20, "Asia/Shanghai")
         val now = Instant.parse("2026-08-31T08:00:00Z")
         val guestPrincipal = LLMPrincipal(999999L, "guest", LLMSource.QQ, "guest", hasAccount = false)
@@ -143,13 +144,12 @@ class LLMDailyQuotaServiceTest {
         private val requests = mutableMapOf<String, String>()
         var available = true
 
-        @Synchronized
-        override fun reserve(
+                override suspend fun reserve(
             quotaKey: String,
             requestKey: String,
             limit: Int,
             expiresAtEpochSeconds: Long,
-        ): LLMQuotaStoreDecision? {
+        ): LLMQuotaStoreDecision? = synchronized(this) {
             if (!available) return null
             val current = counts[quotaKey] ?: 0
             if (requestKey in requests) {
@@ -163,8 +163,7 @@ class LLMDailyQuotaServiceTest {
             return LLMQuotaStoreDecision(LLMQuotaStatus.ACCEPTED, current + 1)
         }
 
-        @Synchronized
-        override fun refund(reservation: LLMQuotaReservation): Int? {
+                override suspend fun refund(reservation: LLMQuotaReservation): Int? = synchronized(this) {
             if (!available) return null
             val current = counts[reservation.quotaKey] ?: 0
             if (requests[reservation.requestKey] == "reserved") {
@@ -174,7 +173,6 @@ class LLMDailyQuotaServiceTest {
             return counts[reservation.quotaKey] ?: 0
         }
 
-        @Synchronized
-        override fun used(quotaKey: String): Int? = if (available) counts[quotaKey] ?: 0 else null
+                override suspend fun used(quotaKey: String): Int? = if (available) counts[quotaKey] ?: 0 else null
     }
 }

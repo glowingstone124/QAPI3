@@ -54,6 +54,22 @@ class LLMProviderProtocolTest {
         assertNull(loaded.balanceRelated.balanceUrl)
     }
 
+    @Test fun `capability routes select different providers with their own prices`() {
+        val root = configuration()
+        val google = provider(root).deepCopy()
+        google.getAsJsonObject("models").getAsJsonObject("thinking").apply {
+            addProperty("model", "smart-model")
+            add("pricing", JsonParser.parseString("""{"inputCnyPerMillion":2,"outputCnyPerMillion":6}"""))
+        }
+        root.getAsJsonObject("providers").add("google", google)
+        root.add("routes", JsonParser.parseString("""{"fast":"mixed","thinking":"google"}"""))
+        val snapshot = load(root)
+        assertEquals("mixed", snapshot.forMode("fast").name)
+        assertEquals("google", snapshot.forMode("thinking").name)
+        assertEquals("smart-model", snapshot.forMode("thinking").modelName("thinking"))
+        assertEquals(java.math.BigDecimal("6"), snapshot.forMode("thinking").modelConfig("thinking").pricing!!.outputCnyPerMillion)
+    }
+
     @Test fun `all three endpoints are required including unused endpoints`() {
         for (key in listOf("responsesUrl", "chatCompletionsUrl", "anthropicUrl")) {
             val root = configuration()

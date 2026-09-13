@@ -29,6 +29,8 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.onCompletion
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import org.qo.datas.Mapping
@@ -105,7 +107,8 @@ class LLMServices(
 		}
 	}
 
-	fun modelPresetFromRequest(value: String): String? = providers.current().resolvePreset(value)
+	fun modelPresetFromRequest(value: String): String? = value.trim().lowercase()
+		.takeIf { it in setOf("fast", "thinking") }
 
 	internal val client = HttpClient(CIO) {
 		install(HttpTimeout) {
@@ -190,7 +193,7 @@ class LLMServices(
 	}
 
 	fun buildPromptRequest(prompt: String, stream: Boolean = true, model: String): String {
-		val provider = providers.current()
+		val provider = providers.current().forMode(model)
 		return JsonObject().apply {
 			addProperty("model", provider.modelName(model) ?: throw IllegalArgumentException("请求的模型不可用"))
 			addProperty("stream", stream)
@@ -220,26 +223,26 @@ class LLMServices(
 		val principal = authenticateWeb(token) ?: return LLMNonStreamResult(401, errorJson("invalid_token", "权限验证失败"))
 		val resolvedConvId = conversationId ?: extractConversationId(body)
 		val requester = principal.toRequester(conversationId = resolvedConvId, model = model)
-		val provider = providers.current()
+		val provider = providers.current().forMode(model)
 		if (provider.apiToken.isBlank()) {
 			return LLMNonStreamResult(500, errorJson("server_error", "LLM 上游令牌未配置"))
 		}
 		val request = normalizeRequest(body, false, requester, model, provider)
-		val requestId = insertAccessRecord(principal, request.model, false, requester.groupName)
-		if (!reserveRequest(principal.qqUid)) {
-			updateAccessRecord(requestId, "rejected", errorMessage = "duplicate request")
-			return LLMNonStreamResult(429, errorJson("rate_limited", "请求过于频繁"))
-		}
-		val quota = reserveQuota(principal, clientRequestId)
+		val requestId = insertAccessRecord(principal, request.preset, false, requester.groupName)
+		val quota = reserveQuota(principal, clientRequestId, request, provider)
 		quotaFailure(quota, principal)?.let {
 			updateAccessRecord(requestId, "rejected", errorMessage = it.body.take(512))
 			return it
 		}
 		val reservation = requireNotNull(quota.reservation)
 
+		var modelSucceeded = false
 		return try {
-			val (statusCode, text) = completeWithOptionalTools(request, requester, "chat", provider)
-			val usage = parseUsage(text)
+			val (statusCode, rawText) = completeWithOptionalTools(request, requester, "chat", provider)
+			modelSucceeded = statusCode in 200..299
+			val usage = parseUsage(rawText)
+			val settled = if (modelSucceeded) settleUsage(reservation, usage, request, provider, requester.conversationId) else null
+			val text = if (settled != null) publicModel(attachQuota(rawText, settled), request.preset) else rawText
 			updateAccessRecord(
 				requestId,
 				if (statusCode in 200..299) "completed" else "failed",
@@ -251,11 +254,11 @@ class LLMServices(
 			if (statusCode in 200..299) {
 				recordConversation(requester, request.userContent, text, provider)
 			} else {
-				dailyQuotaService.refund(reservation)
+				refundUsage(reservation,usage,request,provider,requester.conversationId)
 			}
-			LLMNonStreamResult(statusCode, text, quota.view)
+			LLMNonStreamResult(statusCode, text, settled ?: quota.view)
 		} catch (e: Exception) {
-			dailyQuotaService.refund(reservation)
+			if (!modelSucceeded) kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) { dailyQuotaService.refund(reservation) }
 			updateAccessRecord(
 				requestId,
 				"failed",
@@ -286,17 +289,13 @@ class LLMServices(
 			?: return LLMStreamResult(401, flowOfText(errorJson("invalid_token", "权限验证失败")))
 		val resolvedConvId = conversationId ?: extractConversationId(body)
 		val requester = principal.toRequester(conversationId = resolvedConvId, model = model)
-		val provider = providers.current()
+		val provider = providers.current().forMode(model)
 		if (provider.apiToken.isBlank()) {
 			return LLMStreamResult(500, flowOfText(errorJson("server_error", "LLM 上游令牌未配置")))
 		}
 		val request = normalizeRequest(body, true, requester, model, provider)
-		val requestId = insertAccessRecord(principal, request.model, true, requester.groupName)
-		if (!reserveRequest(principal.qqUid)) {
-			updateAccessRecord(requestId, "rejected", errorMessage = "duplicate request")
-			return LLMStreamResult(429, flowOfText(errorJson("rate_limited", "请求过于频繁")))
-		}
-		val quota = reserveQuota(principal, clientRequestId)
+		val requestId = insertAccessRecord(principal, request.preset, true, requester.groupName)
+		val quota = reserveQuota(principal, clientRequestId, request, provider)
 		quotaStreamFailure(quota, principal)?.let {
 			updateAccessRecord(requestId, "rejected", errorMessage = quotaErrorMessage(quota.status, principal))
 			return it
@@ -310,7 +309,7 @@ class LLMServices(
 		}
 		return LLMStreamResult(
 			200,
-			chunks,
+			chunks.map { publicModel(it, request.preset) }.onCompletion { kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) { dailyQuotaService.refund(reservation) } },
 			quota.view,
 		)
 	}
@@ -348,29 +347,28 @@ class LLMServices(
 			?: qqGroupId?.let { "group:$it" }
 		val principal = LLMPrincipal(qqUid, username, LLMSource.QQ, qqUid.toString(), hasAccount = hasAccount)
 		val requester = principal.toRequester(groupId = qqGroupId, groupName = decodedGroupName, messageId = qqMessageId)
-		val provider = providers.current()
-		val model = provider.resolvePreset(model)
+		val provider = providers.current().forMode(model)
+		val model = modelPresetFromRequest(model)
 			?: return LLMNonStreamResult(400, errorJson("model_not_available", "请求的模型不可用"))
 		if (provider.apiToken.isBlank()) {
 			return LLMNonStreamResult(500, errorJson("server_error", "LLM 上游令牌未配置"))
 		}
 		val request = normalizeRequest(body, false, requester, model, provider)
-		val requestId = insertAccessRecord(principal, request.model, false, requester.groupName)
-		if (!reserveRequest(principal.qqUid)) {
-			updateAccessRecord(requestId, "rejected", errorMessage = "duplicate request")
-
-			return LLMNonStreamResult(429, errorJson("rate_limited", "请求过于频繁"))
-		}
-		val quota = reserveQuota(principal, clientRequestId)
+		val requestId = insertAccessRecord(principal, request.preset, false, requester.groupName)
+		val quota = reserveQuota(principal, clientRequestId, request, provider)
 		quotaFailure(quota, principal)?.let {
 			updateAccessRecord(requestId, "rejected", errorMessage = it.body.take(512))
 			return it
 		}
 		val reservation = requireNotNull(quota.reservation)
 
+		var modelSucceeded = false
 		return try {
-			val (statusCode, text) = completeWithOptionalTools(request, requester, "bot", provider)
-			val usage = parseUsage(text)
+			val (statusCode, rawText) = completeWithOptionalTools(request, requester, "bot", provider)
+			modelSucceeded = statusCode in 200..299
+			val usage = parseUsage(rawText)
+			val settled = if (modelSucceeded) settleUsage(reservation, usage, request, provider, requester.conversationId) else null
+			val text = if (settled != null) publicModel(attachQuota(rawText, settled), request.preset) else rawText
 			updateAccessRecord(
 				requestId,
 				if (statusCode in 200..299) "completed" else "failed",
@@ -382,11 +380,11 @@ class LLMServices(
 			if (statusCode in 200..299) {
 				recordConversation(requester, request.userContent, text, provider)
 			} else {
-				dailyQuotaService.refund(reservation)
+				refundUsage(reservation,usage,request,provider,requester.conversationId)
 			}
-			LLMNonStreamResult(statusCode, text, quota.view)
+			LLMNonStreamResult(statusCode, text, settled ?: quota.view)
 		} catch (e: Exception) {
-			dailyQuotaService.refund(reservation)
+			if (!modelSucceeded) kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) { dailyQuotaService.refund(reservation) }
 			updateAccessRecord(
 				requestId,
 				"failed",
@@ -449,26 +447,26 @@ class LLMServices(
 				minecraftHP,
 			)
 		)
-		val provider = providers.current()
+		val provider = providers.current().forMode(model)
 		if (provider.apiToken.isBlank()) {
 			return LLMNonStreamResult(500, errorJson("server_error", "LLM 上游令牌未配置"))
 		}
 		val request = normalizeRequest(body, false, requester, model, provider)
-		val requestId = insertAccessRecord(principal, request.model, false, requester.groupName)
-		if (!reserveRequest(principal.qqUid)) {
-			updateAccessRecord(requestId, "rejected", errorMessage = "duplicate request")
-			return LLMNonStreamResult(429, errorJson("rate_limited", "请求过于频繁"))
-		}
-		val quota = reserveQuota(principal, clientRequestId)
+		val requestId = insertAccessRecord(principal, request.preset, false, requester.groupName)
+		val quota = reserveQuota(principal, clientRequestId, request, provider)
 		quotaFailure(quota, principal)?.let {
 			updateAccessRecord(requestId, "rejected", errorMessage = it.body.take(512))
 			return it
 		}
 		val reservation = requireNotNull(quota.reservation)
 
+		var modelSucceeded = false
 		return try {
-			val (statusCode, text) = completeWithOptionalTools(request, requester, "minecraft", provider)
-			val usage = parseUsage(text)
+			val (statusCode, rawText) = completeWithOptionalTools(request, requester, "minecraft", provider)
+			modelSucceeded = statusCode in 200..299
+			val usage = parseUsage(rawText)
+			val settled = if (modelSucceeded) settleUsage(reservation, usage, request, provider, requester.conversationId) else null
+			val text = if (settled != null) publicModel(attachQuota(rawText, settled), request.preset) else rawText
 			updateAccessRecord(
 				requestId,
 				if (statusCode in 200..299) "completed" else "failed",
@@ -480,11 +478,11 @@ class LLMServices(
 			if (statusCode in 200..299) {
 				recordConversation(requester, request.userContent, text, provider)
 			} else {
-				dailyQuotaService.refund(reservation)
+				refundUsage(reservation,usage,request,provider,requester.conversationId)
 			}
-			LLMNonStreamResult(statusCode, text, quota.view)
+			LLMNonStreamResult(statusCode, text, settled ?: quota.view)
 		} catch (e: Exception) {
-			dailyQuotaService.refund(reservation)
+			if (!modelSucceeded) kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) { dailyQuotaService.refund(reservation) }
 			updateAccessRecord(
 				requestId,
 				"failed",
@@ -704,6 +702,9 @@ class LLMServices(
 		val totalTokens: Int? = null,
 		val cacheHitTokens: Int? = null,
 		val cacheMissTokens: Int? = null,
+		val reasoningTokens: Long? = null,
+		val apiCalls: Int = 1,
+		val complete: Boolean = true,
 	)
 }
 

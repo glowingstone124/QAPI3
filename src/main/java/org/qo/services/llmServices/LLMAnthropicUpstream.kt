@@ -27,6 +27,13 @@ internal suspend fun runAnthropicUpstream(
     onRequest: (String) -> Unit = {},
 ): Pair<Int, String> {
     val totalUsage = JsonObject()
+    fun failure(body: String): String = if (!totalUsage.has("qapi_api_calls")) body else runCatching {
+        val converted = JsonParser.parseString(LLMAnthropicAdapter.toChatCompletion(JsonObject().apply {
+            add("content", com.google.gson.JsonArray())
+            add("usage", totalUsage)
+        })).asJsonObject
+        JsonParser.parseString(body).asJsonObject.apply { add("usage", converted.get("usage")) }.toString()
+    }.getOrDefault(body)
     var toolRounds = 0
     var pauses = 0
     while (true) {
@@ -72,25 +79,29 @@ internal suspend fun runAnthropicUpstream(
                 }
             }
         }
-        errorBody?.let { return status to it }
+        errorBody?.let { return status to failure(it) }
         val result = requireNotNull(completed)
         require(result.get("type")?.asString == "message") { "Anthropic upstream returned no message" }
-        LLMAnthropicAdapter.webSearchError(result)?.let { return 502 to anthropicError("web_search_error", it) }
+        totalUsage.addProperty("qapi_api_calls",(totalUsage.get("qapi_api_calls")?.asInt ?: 0)+1)
+        val roundUsage = result.getAsJsonObject("usage")
+        totalUsage.addProperty("qapi_usage_complete", (totalUsage.get("qapi_usage_complete")?.asBoolean ?: true) &&
+            roundUsage?.get("input_tokens")?.isJsonPrimitive == true && roundUsage.get("output_tokens")?.isJsonPrimitive == true)
         result.getAsJsonObject("usage")?.let { usage ->
             listOf("input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens").forEach { key ->
                 totalUsage.addProperty(key, (totalUsage.get(key)?.asInt ?: 0) + (usage.get(key)?.asInt ?: 0))
             }
         }
+        LLMAnthropicAdapter.webSearchError(result)?.let { return 502 to failure(anthropicError("web_search_error", it)) }
         val stopReason = result.get("stop_reason")?.asString
         require(!stopReason.isNullOrBlank()) { "Anthropic upstream returned no stop reason" }
         val calls = LLMAnthropicAdapter.functionCalls(result)
         if (calls.isNotEmpty()) {
-            if (toolRounds++ >= maxToolRounds) return 502 to anthropicError("tool_round_limit", "工具调用轮数超过限制")
+            if (toolRounds++ >= maxToolRounds) return 502 to failure(anthropicError("tool_round_limit", "工具调用轮数超过限制"))
             val outputs = linkedMapOf<String, String>()
             for (call in calls) outputs[call.callId] = executeTool(call)
             LLMAnthropicAdapter.appendContinuation(request, result, outputs)
         } else if (stopReason == "pause_turn") {
-            if (++pauses > 8) return 502 to anthropicError("search_round_limit", "Anthropic 搜索续接次数超过限制")
+            if (++pauses > 8) return 502 to failure(anthropicError("search_round_limit", "Anthropic 搜索续接次数超过限制"))
             LLMAnthropicAdapter.appendContinuation(request, result, emptyMap())
             onUpdate(AnthropicStreamUpdate(phase = "web_search"))
         } else {
@@ -179,7 +190,7 @@ internal fun LLMServices.streamFromAnthropic(
             onRequest = { outgoing -> logUpstreamRequest(source, outgoing, provider, "anthropic"); debugPrompt(source, outgoing) },
         )
         if (status !in 200..299) {
-            if (!accepted) dailyQuotaService.refund(quotaReservation)
+            refundUsage(quotaReservation, parseUsage(text), request, provider, requester.conversationId)
             updateAccessRecord(requestId, "failed", errorMessage = text.take(512), groupName = requester.groupName, qqUid = requester.uid)
             emit(normalizeUpstreamError(text))
             return@flow
@@ -190,12 +201,14 @@ internal fun LLMServices.streamFromAnthropic(
             terminal.getAsJsonArray("choices")[0].asJsonObject.getAsJsonObject("delta").remove("content")
             emit(terminal.toString())
         }
+        val settled = settleUsage(quotaReservation, parseUsage(text), request, provider, requester.conversationId)
+        emit(attachQuota("{}", settled))
         updateAccessRecord(requestId, "completed", parseUsage(text), groupName = requester.groupName, qqUid = requester.uid)
         if (assistant.isNotBlank()) recordConversationAnswer(requester, request.userContent, assistant.toString(), provider)
     } catch (e: kotlinx.coroutines.CancellationException) {
         throw e
     } catch (e: Exception) {
-        if (!accepted) dailyQuotaService.refund(quotaReservation)
+        if (e !is QuotaSettlementException) dailyQuotaService.refund(quotaReservation)
         updateAccessRecord(requestId, "failed", errorMessage = e.message, groupName = requester.groupName, qqUid = requester.uid)
         emit(errorJson("upstream_error", e.message ?: "Anthropic 上游请求失败"))
     }

@@ -65,6 +65,8 @@ public class Main {
                 "X-RateLimit-Limit",
                 "X-RateLimit-Remaining",
                 "X-RateLimit-Reset",
+                "X-Quota-Period",
+                "X-Paid-Credits",
                 "Retry-After"
         ));
         config.setAllowedMethods(java.util.List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));

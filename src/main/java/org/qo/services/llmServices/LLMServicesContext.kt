@@ -63,16 +63,13 @@ internal suspend fun LLMServices.normalizeRequest(
 	obj.remove("conversationId")
 	val enableMarkdown = extractEnableMarkdownFlag(obj)
 	val requesterSource = LLMSource.entries.firstOrNull { it.value == requester?.source }
-	val reasoningDefault = defaultReasoningEffort(requesterSource)
-	val reasoningEffort = extractReasoningEffort(obj, reasoningDefault)
-	if (requester?.source == LLMSource.WEB.value && reasoningEffort == LLMReasoningEffort.NONE) {
-		throw IllegalArgumentException("Web reasoning effort must be one of low, high, max")
-	}
+	val requestedEffort = extractReasoningEffort(obj, LLMReasoningEffort.MEDIUM)
+	val reasoningEffort = reasoningEffortForMode(requesterSource, model, requestedEffort)
 	val resolvedModel = provider.modelName(model) ?: throw IllegalArgumentException("请求的模型不可用")
 	obj.addProperty("model", resolvedModel)
 	if (provider.protocol(model) == LLMProtocol.CHAT_COMPLETIONS) {
 		obj.addProperty("reasoning_effort", reasoningEffort.wireValue)
-		obj.add("thinking", JsonObject().apply {
+		if (provider.name.contains("deepseek", ignoreCase = true)) obj.add("thinking", JsonObject().apply {
 			addProperty("type", if (reasoningEffort == LLMReasoningEffort.NONE) "disabled" else "enabled")
 		})
 	}
@@ -85,6 +82,9 @@ internal suspend fun LLMServices.normalizeRequest(
 			else -> 4096
 		})
 	}
+	for (key in listOf("max_tokens", "max_completion_tokens", "max_output_tokens")) obj.remove(key)
+	obj.addProperty("max_tokens", if(model=="fast") 2048 else 4096)
+	if(stream) obj.add("stream_options",JsonObject().apply { addProperty("include_usage",true) })
 	requester?.let {
 		obj.addProperty("user_id", it.identityKey())
 	}
@@ -595,18 +595,26 @@ internal fun LLMServices.reserveRequest(qqUid: Long): Boolean {
 		.ignoreException() ?: true
 }
 
-internal fun LLMServices.reserveQuota(principal: LLMPrincipal, clientRequestId: String?): LLMQuotaDecision {
-	return if (clientRequestId.isNullOrBlank()) {
-		dailyQuotaService.reserve(principal)
-	} else {
-		dailyQuotaService.reserve(principal, clientRequestId)
-	}
+internal suspend fun LLMServices.reserveQuota(principal: LLMPrincipal, clientRequestId: String?, request: LLMServices.NormalizedRequest, provider: LLMProvider): LLMQuotaDecision {
+    val pricing = provider.modelConfig(request.preset).pricing
+        ?: return LLMQuotaDecision(LLMQuotaStatus.UNAVAILABLE, dailyQuotaService.snapshot(principal.qqUid, principal.hasAccount).view)
+    val obj = JsonParser.parseString(request.body).asJsonObject
+    val output = obj.get("max_tokens")?.asInt ?: 2048
+    val estimated = pricing.cost(request.body.toByteArray(StandardCharsets.UTF_8).size.toLong(), output.toLong(), 0)
+    return try {
+        dailyQuotaService.reserve(principal, clientRequestId?.takeIf { it.isNotBlank() } ?: java.util.UUID.randomUUID().toString(),
+            estimatedUnits = LLMDailyQuotaService.units(estimated), mode = request.preset,
+            provider = provider.name, model = request.model, estimatedCost = estimated)
+    } catch (_: Exception) {
+        LLMQuotaDecision(LLMQuotaStatus.UNAVAILABLE, dailyQuotaService.snapshot(principal.qqUid, principal.hasAccount).view)
+    }
 }
 
 internal fun LLMServices.quotaFailure(decision: LLMQuotaDecision, principal: LLMPrincipal): LLMNonStreamResult? {
 	val (status, code) = when (decision.status) {
 		LLMQuotaStatus.ACCEPTED -> return null
-		LLMQuotaStatus.EXCEEDED -> 429 to "daily_quota_exceeded"
+		LLMQuotaStatus.EXCEEDED -> 429 to "weekly_quota_exceeded"
+		LLMQuotaStatus.RATE_LIMITED -> 429 to "rate_limited"
 		LLMQuotaStatus.DUPLICATE -> 409 to "duplicate_request"
 		LLMQuotaStatus.UNAVAILABLE -> 503 to "quota_unavailable"
 	}
@@ -621,10 +629,11 @@ internal fun LLMServices.quotaStreamFailure(decision: LLMQuotaDecision, principa
 internal fun LLMServices.quotaErrorMessage(status: LLMQuotaStatus, principal: LLMPrincipal): String = when (status) {
 	LLMQuotaStatus.ACCEPTED -> ""
 	LLMQuotaStatus.EXCEEDED -> if (principal.hasAccount) {
-		"今天的对话额度已经用完"
+		"本周额度和 Paid Credits 不足，可购买 Credits 继续使用"
 	} else {
-		"今天的游客对话额度已用完（每日 20 轮）。加入或注册 QO 账户可获取更多额度（每日 50 轮）！"
+		"本周 QQ 额度为 30 Units，注册后同一身份提升至 90 Units；可购买 Credits 继续使用"
 	}
+	LLMQuotaStatus.RATE_LIMITED -> "请求过于频繁或达到并发限制，请稍后重试"
 	LLMQuotaStatus.DUPLICATE -> "该请求已经提交，请勿重复发送"
 	LLMQuotaStatus.UNAVAILABLE -> "额度服务暂时不可用，请稍后重试"
 }
@@ -634,6 +643,9 @@ internal fun LLMServices.quotaJson(view: LLMQuotaView): String = JsonObject().ap
 	addProperty("used", view.used)
 	addProperty("remaining", view.remaining)
 	addProperty("reset_at", view.resetAtEpochSeconds)
+	addProperty("paid_credits", view.paidCredits)
+	addProperty("period", "weekly")
+	view.chargedUnits?.let { addProperty("charged_units", it) }
 }.toString()
 
 internal fun LLMServices.recordConversation(

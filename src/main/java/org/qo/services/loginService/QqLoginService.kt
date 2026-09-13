@@ -20,11 +20,11 @@ data class QqLoginChallengeRecord(
 	val token: String? = null,
 	val username: String? = null,
 	val accountType: String? = null,
-	val dailyLimit: Int? = null,
+	val weeklyLimit: Int? = null,
 )
 
 sealed interface QqLoginConfirmation {
-	data class Authorized(val accountType: String, val dailyLimit: Int) : QqLoginConfirmation
+	data class Authorized(val accountType: String, val weeklyLimit: Int) : QqLoginConfirmation
 	data object NotFound : QqLoginConfirmation
 	data object QqMismatch : QqLoginConfirmation
 	data object Expired : QqLoginConfirmation
@@ -184,17 +184,17 @@ class QqLoginService(
 		val token = login.generateToken(32)
 		login.insertIntoAsync(token, account?.username ?: "$GUEST_PREFIX$qq")
 		val accountType = if (hasAccount) "qo" else "guest"
-		val dailyLimit = dailyQuotaService.effectiveLimit(hasAccount)
+		val weeklyLimit = dailyQuotaService.effectiveLimit(hasAccount)
 		store.update(
 			record.copy(
 				status = "authorized",
 				token = token,
 				username = account?.username ?: "QQ $qq",
 				accountType = accountType,
-				dailyLimit = dailyLimit,
+				weeklyLimit = weeklyLimit,
 			),
 		)
-		return QqLoginConfirmation.Authorized(accountType, dailyLimit)
+		return QqLoginConfirmation.Authorized(accountType, weeklyLimit)
 	}
 
 	companion object {

@@ -26,6 +26,7 @@ data class LLMModelConfig(
 	val model: String,
 	val protocol: LLMProtocol,
 	val thinkingMode: String = "enabled",
+	val pricing: LLMModelPricing? = null,
 )
 
 enum class BalanceStructParse(val provider: String) {
@@ -59,6 +60,7 @@ data class LLMSummaryConfig(
 	val contextWindow: Int,
 	val protocol: LLMProtocol,
 	val thinkingMode: String,
+	val pricing: LLMModelPricing? = null,
 )
 
 data class LLMCompactConfig(
@@ -82,7 +84,10 @@ data class LLMProvider(
 	val summary: LLMSummaryConfig,
 	val compact: LLMCompactConfig,
 	val balanceRelated: BalanceRelated,
+	val routes: Map<String, LLMProvider> = emptyMap(),
 ) {
+	fun forMode(mode: String): LLMProvider = routes[mode.lowercase(Locale.ROOT)] ?: this
+
 	val mainContextWindow: Int
 		get() = contextWindow
 
@@ -126,8 +131,9 @@ data class LLMProvider(
 			return fromConfig(configPath, explicitlySelected)
 		}
 
-		fun fromConfig(configPath: Path, explicitlySelected: String? = null): LLMProvider {
-			val root = readConfig(configPath)
+		fun fromConfig(configPath: Path, explicitlySelected: String? = null): LLMProvider = loadConfig(configPath, explicitlySelected, true)
+
+		private fun loadConfig(configPath: Path, explicitlySelected: String?, loadRoutes: Boolean, root: JsonObject? = readConfig(configPath)): LLMProvider {
 			val providers = root?.getAsJsonObject("providers")
 			// Validate every provider, including those that are not currently selected.
 			providers?.entrySet()?.forEach { (name, value) ->
@@ -155,6 +161,10 @@ data class LLMProvider(
 
 			return LLMProvider(
 				name = selectedName,
+				routes = if (loadRoutes) root?.getAsJsonObject("routes")?.entrySet()?.associate { (mode, provider) ->
+					require(mode in setOf("fast", "thinking")) { "Unknown capability route" }
+					mode to loadConfig(configPath, provider.asString, false, root)
+				} ?: emptyMap() else emptyMap(),
 				chatCompletionsUrl = readEndpoint(configured, selectedName, LLMProtocol.CHAT_COMPLETIONS),
 				responsesUrl = readEndpoint(configured, selectedName, LLMProtocol.RESPONSES),
 				anthropicUrl = readEndpoint(configured, selectedName, LLMProtocol.ANTHROPIC),
@@ -197,6 +207,7 @@ data class LLMProvider(
 				contextWindow = readContextWindow(summary, "contextWindow", mainContextWindow),
 				protocol = model.protocol,
 				thinkingMode = model.thinkingMode,
+				pricing = model.pricing,
 			)
 		}
 
@@ -219,7 +230,7 @@ data class LLMProvider(
 				require(thinkingMode in setOf("enabled", "adaptive", "disabled")) { "Invalid thinkingMode for '$providerName/$alias'" }
 				val normalized = alias.trim().lowercase(Locale.ROOT)
 				require(normalized.isNotBlank()) { "Empty model preset in provider '$providerName'" }
-				normalized to LLMModelConfig(model, protocol, thinkingMode)
+				normalized to LLMModelConfig(model, protocol, thinkingMode, obj.getAsJsonObject("pricing")?.let(LLMModelPricing::fromJson))
 			}.also {
 				require(it.containsKey("fast") && it.containsKey("thinking")) { "provider '$providerName' must declare fast and thinking models" }
 				require(it.size == models.size()) { "Duplicate normalized model presets in provider '$providerName'" }

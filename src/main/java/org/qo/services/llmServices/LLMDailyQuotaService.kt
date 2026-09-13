@@ -1,10 +1,7 @@
 package org.qo.services.llmServices
 
-import org.qo.redis.DatabaseType
-import org.qo.redis.Redis
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.beans.factory.annotation.Value
-import org.springframework.stereotype.Component
 import org.springframework.stereotype.Service
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
@@ -32,6 +29,7 @@ enum class LLMQuotaStatus {
     EXCEEDED,
     DUPLICATE,
     UNAVAILABLE,
+    RATE_LIMITED,
 }
 
 data class LLMQuotaView(
@@ -39,6 +37,8 @@ data class LLMQuotaView(
     val used: Int,
     val remaining: Int,
     val resetAtEpochSeconds: Long,
+    val paidCredits: Int = 0,
+    val chargedUnits: Int? = null,
 )
 
 data class LLMQuotaReservation(
@@ -46,6 +46,8 @@ data class LLMQuotaReservation(
     val requestKey: String,
     val expiresAtEpochSeconds: Long,
     val view: LLMQuotaView,
+    val qqUid: Long = 0,
+    val reservedUnits: Int = 1,
 )
 
 data class LLMQuotaDecision(
@@ -57,162 +59,92 @@ data class LLMQuotaDecision(
 data class LLMQuotaStoreDecision(
     val status: LLMQuotaStatus,
     val used: Int,
+    val paidCredits: Int = 0,
 )
 
 interface LLMQuotaStore {
-    fun reserve(
-        quotaKey: String,
-        requestKey: String,
-        limit: Int,
-        expiresAtEpochSeconds: Long,
-    ): LLMQuotaStoreDecision?
-
-    fun refund(reservation: LLMQuotaReservation): Int?
-
-    fun used(quotaKey: String): Int?
+    suspend fun reserve(quotaKey: String, requestKey: String, limit: Int, expiresAtEpochSeconds: Long): LLMQuotaStoreDecision?
+    suspend fun refund(reservation: LLMQuotaReservation): Int?
+    suspend fun refundUsage(reservation: LLMQuotaReservation, usage: AiQuotaUsage?): Int? = refund(reservation)
+    suspend fun used(quotaKey: String): Int?
+    suspend fun reserveSubsidy(source: String, summary: LLMSummaryConfig, estimate: java.math.BigDecimal): String? = null
+    suspend fun settleSubsidy(id: String, cost: java.math.BigDecimal?) {}
+    suspend fun retain(reservation: LLMQuotaReservation, usage: AiQuotaUsage?) {}
+    suspend fun balance(qqUid: Long): Int = 0
+    suspend fun reserveUnits(principal: LLMPrincipal, quotaKey: String, requestKey: String, limit: Int,
+        expiresAt: Long, units: Int, mode: String, provider: String, model: String, estimatedCost: java.math.BigDecimal): LLMQuotaStoreDecision? =
+        reserve(quotaKey, requestKey, limit, expiresAt)
+    suspend fun settle(reservation: LLMQuotaReservation, usage: AiQuotaUsage): LLMQuotaView? = null
 }
 
-@Component
-class RedisLLMQuotaStore : LLMQuotaStore {
-    private val redis = Redis()
-    private val database = DatabaseType.QO_RATE_LIMIT_DATABASE.value
-
-    override fun reserve(
-        quotaKey: String,
-        requestKey: String,
-        limit: Int,
-        expiresAtEpochSeconds: Long,
-    ): LLMQuotaStoreDecision? {
-        val result = redis.reserveDailyQuota(
-            quotaKey,
-            requestKey,
-            database,
-            limit,
-            expiresAtEpochSeconds,
-        ).onException { error ->
-            println("LLM daily quota reservation failed: ${error.message}")
-        } ?: return null
-        val status = when (result.status) {
-            1L -> LLMQuotaStatus.ACCEPTED
-            2L -> LLMQuotaStatus.DUPLICATE
-            else -> LLMQuotaStatus.EXCEEDED
-        }
-        return LLMQuotaStoreDecision(status, result.used.coerceAtMost(Int.MAX_VALUE.toLong()).toInt())
-    }
-
-    override fun refund(reservation: LLMQuotaReservation): Int? = redis.refundDailyQuota(
-        reservation.quotaKey,
-        reservation.requestKey,
-        database,
-        reservation.expiresAtEpochSeconds,
-    ).onException { error ->
-        println("LLM daily quota refund failed: ${error.message}")
-    }?.coerceAtMost(Int.MAX_VALUE.toLong())?.toInt()
-
-    override fun used(quotaKey: String): Int? = redis.readDailyQuota(quotaKey, database)
-        .onException { error -> println("LLM daily quota lookup failed: ${error.message}") }
-        ?.coerceAtMost(Int.MAX_VALUE.toLong())
-        ?.toInt()
-}
-
+/** The historical class name is retained for injection compatibility; all windows are weekly. */
 @Service
 class LLMDailyQuotaService @Autowired constructor(
     private val store: LLMQuotaStore,
-    @Value("\${qapi.llm.daily-limit:50}") configuredDailyLimit: Int,
-    @Value("\${qapi.llm.guest-daily-limit:20}") configuredGuestDailyLimit: Int = 20,
+    @Value("\${qapi.llm.weekly-limit:90}") configuredDailyLimit: Int,
+    @Value("\${qapi.llm.guest-weekly-limit:30}") configuredGuestDailyLimit: Int = 30,
     @Value("\${qapi.llm.quota-zone:Asia/Shanghai}") quotaZoneName: String = "Asia/Shanghai",
 ) {
-    val dailyLimit = configuredDailyLimit.coerceAtLeast(1)
-    val guestDailyLimit = configuredGuestDailyLimit.coerceAtLeast(1)
+    val weeklyLimit = configuredDailyLimit.coerceAtLeast(1)
+    val guestWeeklyLimit = configuredGuestDailyLimit.coerceAtLeast(1)
     private val quotaZone = ZoneId.of(quotaZoneName)
+    constructor(store: LLMQuotaStore, configuredDailyLimit: Int, quotaZoneName: String) :
+        this(store, configuredDailyLimit, 30, quotaZoneName)
+    fun effectiveLimit(hasAccount: Boolean): Int = if (hasAccount) weeklyLimit else guestWeeklyLimit
 
-    constructor(
-        store: LLMQuotaStore,
-        configuredDailyLimit: Int,
-        quotaZoneName: String,
-    ) : this(store, configuredDailyLimit, 20, quotaZoneName)
-
-    fun effectiveLimit(hasAccount: Boolean): Int =
-        if (hasAccount) dailyLimit else guestDailyLimit
-
-    fun reserve(
-        principal: LLMPrincipal,
-        requestId: String = UUID.randomUUID().toString(),
-        now: Instant = Instant.now(),
-    ): LLMQuotaDecision {
-        require(principal.qqUid > 0) { "QQ UID must be positive" }
+    suspend fun reserve(principal: LLMPrincipal, requestId: String = UUID.randomUUID().toString(),
+        now: Instant = Instant.now(), estimatedUnits: Int = 1, mode: String = "fast",
+        provider: String = "", model: String = "", estimatedCost: java.math.BigDecimal = COST_PER_UNIT): LLMQuotaDecision {
+        require(principal.qqUid > 0 && estimatedUnits > 0)
         val limit = effectiveLimit(principal.hasAccount)
-        val window = window(now)
-        val quotaKey = quotaKey(principal.qqUid, window.date)
-        val requestKey = requestKey(principal, requestId, window.date)
-        val stored = store.reserve(quotaKey, requestKey, limit, window.expiresAtEpochSeconds)
-            ?: return LLMQuotaDecision(
-                LLMQuotaStatus.UNAVAILABLE,
-                view(0, limit, window.resetAtEpochSeconds),
-            )
-        val quotaView = view(stored.used, limit, window.resetAtEpochSeconds)
-        val reservation = if (stored.status == LLMQuotaStatus.ACCEPTED) {
-            LLMQuotaReservation(quotaKey, requestKey, window.expiresAtEpochSeconds, quotaView)
-        } else {
-            null
-        }
-        return LLMQuotaDecision(stored.status, quotaView, reservation)
+        val period = period(now)
+        val reset = period.plusWeeks(1).atStartOfDay(quotaZone).toEpochSecond()
+        val key = quotaKey(principal.qqUid, period)
+        val digest = MessageDigest.getInstance("SHA-256").digest(requestId.toByteArray(StandardCharsets.UTF_8))
+            .joinToString("") { "%02x".format(it) }
+        // A QQ identity and request ID are shared across every entry point.
+        val requestKey = "llm:weekly-request:${principal.qqUid}:$digest"
+        val result = store.reserveUnits(principal, key, requestKey, limit, reset, estimatedUnits, mode, provider, model, estimatedCost)
+            ?: return LLMQuotaDecision(LLMQuotaStatus.UNAVAILABLE, view(0, limit, reset, 0))
+        val view = view(result.used, limit, reset, result.paidCredits)
+        return LLMQuotaDecision(result.status, view, if (result.status == LLMQuotaStatus.ACCEPTED)
+            LLMQuotaReservation(key, requestKey, reset, view, principal.qqUid, estimatedUnits) else null)
     }
 
-    fun snapshot(qqUid: Long, now: Instant = Instant.now()): LLMQuotaDecision =
-        snapshot(qqUid, true, now)
-
-    fun snapshot(qqUid: Long, hasAccount: Boolean, now: Instant = Instant.now()): LLMQuotaDecision {
-        require(qqUid > 0) { "QQ UID must be positive" }
+    suspend fun snapshot(qqUid: Long, now: Instant = Instant.now()): LLMQuotaDecision = snapshot(qqUid, true, now)
+    suspend fun snapshot(qqUid: Long, hasAccount: Boolean, now: Instant = Instant.now()): LLMQuotaDecision {
+        require(qqUid > 0)
         val limit = effectiveLimit(hasAccount)
-        val window = window(now)
-        val used = store.used(quotaKey(qqUid, window.date))
-            ?: return LLMQuotaDecision(
-                LLMQuotaStatus.UNAVAILABLE,
-                view(0, limit, window.resetAtEpochSeconds),
-            )
-        val status = if (used >= limit) LLMQuotaStatus.EXCEEDED else LLMQuotaStatus.ACCEPTED
-        return LLMQuotaDecision(status, view(used, limit, window.resetAtEpochSeconds))
+        val period = period(now)
+        val reset = period.plusWeeks(1).atStartOfDay(quotaZone).toEpochSecond()
+        return try {
+            val used = store.used(quotaKey(qqUid, period)) ?: return LLMQuotaDecision(LLMQuotaStatus.UNAVAILABLE, view(0, limit, reset, 0))
+            val paid = store.balance(qqUid)
+            LLMQuotaDecision(if (used >= limit && paid <= 0) LLMQuotaStatus.EXCEEDED else LLMQuotaStatus.ACCEPTED, view(used, limit, reset, paid))
+        } catch (_: Exception) { LLMQuotaDecision(LLMQuotaStatus.UNAVAILABLE, view(0, limit, reset, 0)) }
     }
-
-    fun refund(reservation: LLMQuotaReservation): Boolean = store.refund(reservation) != null
-
-    private fun view(used: Int, limit: Int, resetAtEpochSeconds: Long): LLMQuotaView {
-        val boundedUsed = used.coerceAtLeast(0)
-        return LLMQuotaView(
-            limit = limit,
-            used = boundedUsed,
-            remaining = (limit - boundedUsed).coerceAtLeast(0),
-            resetAtEpochSeconds = resetAtEpochSeconds,
-        )
-    }
-
-    private fun quotaKey(qqUid: Long, date: LocalDate): String = "llm:quota:$date:$qqUid"
-
-    private fun requestKey(principal: LLMPrincipal, requestId: String, date: LocalDate): String {
-        val digest = MessageDigest.getInstance("SHA-256")
-            .digest(requestId.toByteArray(StandardCharsets.UTF_8))
-            .joinToString("") { byte -> "%02x".format(byte) }
-        return "llm:quota-request:$date:${principal.qqUid}:${principal.source.value}:$digest"
-    }
-
-    private fun window(now: Instant): QuotaWindow {
-        val current = now.atZone(quotaZone)
-        val resetAt = current.toLocalDate().plusDays(1).atStartOfDay(quotaZone).toInstant()
-        return QuotaWindow(
-            date = current.toLocalDate(),
-            resetAtEpochSeconds = resetAt.epochSecond,
-            expiresAtEpochSeconds = resetAt.plusSeconds(EXPIRY_GRACE_SECONDS).epochSecond,
-        )
-    }
-
-    private data class QuotaWindow(
-        val date: LocalDate,
-        val resetAtEpochSeconds: Long,
-        val expiresAtEpochSeconds: Long,
-    )
-
-    private companion object {
-        const val EXPIRY_GRACE_SECONDS = 300L
+    suspend fun refundUsage(reservation: LLMQuotaReservation, usage: AiQuotaUsage?) = store.refundUsage(reservation,usage)
+    suspend fun refund(reservation: LLMQuotaReservation): Boolean = store.refund(reservation) != null
+    suspend fun reserveSubsidy(source: String, summary: LLMSummaryConfig, estimate: java.math.BigDecimal) = store.reserveSubsidy(source, summary, estimate)
+    suspend fun settleSubsidy(id: String, cost: java.math.BigDecimal?) = store.settleSubsidy(id, cost)
+    suspend fun retain(reservation: LLMQuotaReservation, usage: AiQuotaUsage?) = store.retain(reservation, usage)
+    suspend fun settle(reservation: LLMQuotaReservation, usage: AiQuotaUsage): LLMQuotaView =
+        requireNotNull(store.settle(reservation, usage)) { "Quota settlement unavailable; reservation retained for reconciliation" }
+    fun period(now: Instant): LocalDate = now.atZone(quotaZone).toLocalDate()
+        .with(java.time.temporal.TemporalAdjusters.previousOrSame(java.time.DayOfWeek.MONDAY))
+    private fun quotaKey(uid: Long, period: LocalDate) = "llm:weekly:$period:$uid"
+    private fun view(used: Int, limit: Int, reset: Long, paid: Int) = LLMQuotaView(limit, used.coerceAtLeast(0), (limit-used).coerceAtLeast(0), reset, paid)
+    companion object {
+        val COST_PER_UNIT = java.math.BigDecimal("0.005")
+        fun units(cost: java.math.BigDecimal): Int {
+            require(cost.signum() >= 0)
+            return cost.divide(COST_PER_UNIT, 0, java.math.RoundingMode.CEILING).intValueExact().coerceAtLeast(1)
+        }
     }
 }
+
+data class AiQuotaUsage(
+    val inputTokens: Long, val outputTokens: Long, val cachedTokens: Long,
+    val reasoningTokens: Long?, val actualCostCny: java.math.BigDecimal,
+    val chargedUnits: Int, val conversationId: String? = null,
+)

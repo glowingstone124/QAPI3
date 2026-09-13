@@ -43,7 +43,7 @@ class LLMControllerQuotaTest {
             .thenReturn(
                 LLMStreamResult(
                     429,
-                    flowOf("""{"error":{"code":"daily_quota_exceeded"}}"""),
+                    flowOf("""{"error":{"code":"weekly_quota_exceeded"}}"""),
                     quota,
                 ),
             )
@@ -61,7 +61,7 @@ class LLMControllerQuotaTest {
             .expectHeader().valueEquals("X-RateLimit-Reset", "1800000000")
             .expectHeader().exists("Retry-After")
             .expectBody()
-            .jsonPath("$.error.code").isEqualTo("daily_quota_exceeded")
+            .jsonPath("$.error.code").isEqualTo("weekly_quota_exceeded")
     }
 
     @Test

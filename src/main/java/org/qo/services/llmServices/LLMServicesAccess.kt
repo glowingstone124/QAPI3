@@ -159,17 +159,21 @@ internal suspend fun LLMServices.updateAccessRecord(
 internal fun LLMServices.parseUsage(body: String): LLMServices.Usage? = runCatching {
 	val obj = JsonParser.parseString(body).asJsonObject
 	val usage = obj.getAsJsonObject("usage") ?: return null
-	val promptTokens = usage.get("prompt_tokens")?.asInt ?: usage.get("input_tokens")?.asInt
-	val cachedTokens = usage.get("prompt_cache_hit_tokens")?.asInt
-		?: usage.getAsJsonObject("prompt_tokens_details")?.get("cached_tokens")?.asInt
-		?: usage.getAsJsonObject("input_tokens_details")?.get("cached_tokens")?.asInt
+	val promptTokens = usage.get("prompt_tokens")?.takeUnless { it.isJsonNull }?.asInt ?: usage.get("input_tokens")?.takeUnless { it.isJsonNull }?.asInt
+	val cachedTokens = usage.get("prompt_cache_hit_tokens")?.takeUnless { it.isJsonNull }?.asInt
+		?: usage.getAsJsonObject("prompt_tokens_details")?.get("cached_tokens")?.takeUnless { it.isJsonNull }?.asInt
+		?: usage.getAsJsonObject("input_tokens_details")?.get("cached_tokens")?.takeUnless { it.isJsonNull }?.asInt
 	LLMServices.Usage(
 		promptTokens,
-		usage.get("completion_tokens")?.asInt ?: usage.get("output_tokens")?.asInt,
-		usage.get("total_tokens")?.asInt,
+		usage.get("completion_tokens")?.takeUnless { it.isJsonNull }?.asInt ?: usage.get("output_tokens")?.takeUnless { it.isJsonNull }?.asInt,
+		usage.get("total_tokens")?.takeUnless { it.isJsonNull }?.asInt,
 		cachedTokens,
-		usage.get("prompt_cache_miss_tokens")?.asInt
+		usage.get("prompt_cache_miss_tokens")?.takeUnless { it.isJsonNull }?.asInt
 			?: promptTokens?.let { total -> cachedTokens?.let { (total - it).coerceAtLeast(0) } },
+		usage.getAsJsonObject("completion_tokens_details")?.get("reasoning_tokens")?.takeUnless { it.isJsonNull }?.asLong
+			?: usage.getAsJsonObject("output_tokens_details")?.get("reasoning_tokens")?.takeUnless { it.isJsonNull }?.asLong,
+		usage.get("qapi_api_calls")?.takeUnless { it.isJsonNull }?.asInt ?: 1,
+		usage.get("qapi_usage_complete")?.asBoolean ?: true,
 	)
 }.getOrNull()
 

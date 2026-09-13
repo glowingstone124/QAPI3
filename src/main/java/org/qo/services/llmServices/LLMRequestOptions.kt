@@ -5,13 +5,20 @@ import com.google.gson.JsonObject
 internal enum class LLMReasoningEffort(val wireValue: String) {
     NONE("none"),
     LOW("low"),
+    MEDIUM("medium"),
     HIGH("high"),
     MAX("max"),
 }
 
 internal fun defaultReasoningEffort(source: LLMSource?): LLMReasoningEffort = when (source) {
-    LLMSource.WEB -> LLMReasoningEffort.HIGH
+    LLMSource.WEB -> LLMReasoningEffort.MEDIUM
     else -> LLMReasoningEffort.NONE
+}
+
+internal fun reasoningEffortForMode(source: LLMSource?, mode: String, requested: LLMReasoningEffort): LLMReasoningEffort = when {
+    source == LLMSource.QQ || mode == "fast" -> LLMReasoningEffort.NONE
+    requested in setOf(LLMReasoningEffort.HIGH, LLMReasoningEffort.MAX) -> LLMReasoningEffort.HIGH
+    else -> LLMReasoningEffort.MEDIUM
 }
 
 internal fun extractEnableMarkdownFlag(request: JsonObject): Boolean {
@@ -47,7 +54,8 @@ internal fun extractReasoningEffort(
     return when (value.asString.lowercase()) {
         "none" -> LLMReasoningEffort.NONE
         "low" -> LLMReasoningEffort.LOW
-        "medium", "high", "xhigh" -> LLMReasoningEffort.HIGH
+        "medium" -> LLMReasoningEffort.MEDIUM
+        "high", "xhigh" -> LLMReasoningEffort.HIGH
         "max" -> LLMReasoningEffort.MAX
         else -> throw IllegalArgumentException("reasoning effort must be one of none, low, medium, high, xhigh, max")
     }

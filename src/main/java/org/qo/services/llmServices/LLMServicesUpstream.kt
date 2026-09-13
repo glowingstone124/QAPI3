@@ -68,20 +68,22 @@ internal suspend fun LLMServices.completeWithOptionalTools(
 
 	var latestStatus = 502
 	var latestBody = ""
+	var totalUsage: LLMServices.Usage? = null
 	repeat(maxToolRounds) { round ->
 		val body = obj.toString()
 		val response = postUpstream("$source/tool-round-${round + 1}", body, provider)
 		latestStatus = response.status.value
 		latestBody = response.bodyAsText()
 		if (!response.status.isSuccess()) {
-			return latestStatus to latestBody
+			return latestStatus to withUsage(latestBody,totalUsage)
 		}
+		totalUsage = accumulateUsage(totalUsage, parseUsage(latestBody))
 		val toolCalls = extractToolCalls(latestBody)
 		if (toolCalls.isEmpty()) {
 			if (containsToolMarkup(latestBody)) {
-				return 502 to errorJson("invalid_tool_call", "LLM 输出了无法解析的工具调用")
+				return 502 to withUsage(errorJson("invalid_tool_call", "LLM 输出了无法解析的工具调用"), totalUsage)
 			}
-			return latestStatus to sanitizeResponseBody(latestBody, request.enableMarkdown)
+			return latestStatus to sanitizeResponseBody(withUsage(latestBody, totalUsage), request.enableMarkdown)
 		}
 		appendAssistantToolCallMessage(obj.getAsJsonArray("messages"), latestBody, toolCalls)
 		for (call in toolCalls) {
@@ -93,7 +95,7 @@ internal suspend fun LLMServices.completeWithOptionalTools(
 			})
 		}
 	}
-	return 502 to errorJson("tool_round_limit", "工具调用轮数超过限制，请调高 LLM_TOOL_MAX_ROUNDS")
+	return 502 to withUsage(errorJson("tool_round_limit", "工具调用轮数超过限制，请调高 LLM_TOOL_MAX_ROUNDS"), totalUsage)
 }
 
 internal suspend fun LLMServices.completeWithResponsesApi(
@@ -108,6 +110,7 @@ internal suspend fun LLMServices.completeWithResponsesApi(
 		functionTools,
 		reasoningEffort = request.reasoningEffort,
 	)
+	var totalUsage: LLMServices.Usage? = null
 	repeat(maxToolRounds) { round ->
 		val response = postUpstream("$source/responses-round-${round + 1}", body.toString(), provider, provider.responsesUrl)
 		val responseText = response.bodyAsText()
@@ -115,12 +118,17 @@ internal suspend fun LLMServices.completeWithResponsesApi(
 			println("[LLM] responses result source=$source round=${round + 1} ${LLMResponsesAdapter.outputSummary(responseText)}")
 		}
 		if (!response.status.isSuccess()) {
-			return response.status.value to responseText
+			return response.status.value to withUsage(responseText,totalUsage)
+		}
+		totalUsage = accumulateUsage(totalUsage, parseUsage(responseText))
+		val responseRoot = JsonParser.parseString(responseText).asJsonObject
+		if (responseRoot.has("error") || responseRoot.get("status")?.asString in setOf("failed", "incomplete")) {
+			return 502 to withUsage(errorJson("upstream_error", "Responses API 未成功完成请求"), totalUsage)
 		}
 		val functionCalls = LLMResponsesAdapter.functionCalls(responseText)
 		if (functionCalls.isEmpty()) {
 			return response.status.value to sanitizeResponseBody(
-				LLMResponsesAdapter.toChatCompletion(responseText),
+				withUsage(LLMResponsesAdapter.toChatCompletion(responseText),totalUsage),
 				request.enableMarkdown,
 			)
 		}
@@ -130,7 +138,7 @@ internal suspend fun LLMServices.completeWithResponsesApi(
 		}
 		LLMResponsesAdapter.appendToolOutputs(body, responseText, outputs)
 	}
-	return 502 to errorJson("tool_round_limit", "工具调用轮数超过限制，请调高 LLM_TOOL_MAX_ROUNDS")
+	return 502 to withUsage(errorJson("tool_round_limit", "工具调用轮数超过限制，请调高 LLM_TOOL_MAX_ROUNDS"), totalUsage)
 }
 
 internal suspend fun LLMServices.postUpstream(source: String, body: String, provider: LLMProvider, url: String = provider.chatCompletionsUrl) =
@@ -142,11 +150,29 @@ internal suspend fun LLMServices.postUpstream(source: String, body: String, prov
 		setBody(body)
 	}
 
-internal suspend fun LLMServices.postSummaryUpstream(source: String, body: String, summary: LLMSummaryConfig): Pair<Int, String> =
-	runSummaryUpstream(client, body, summary) { outgoing ->
-		println("[LLM] upstream request source=$source provider=${summary.providerName} model=${summary.model} api=${summary.protocol.wireValue}")
-		debugPrompt(source, outgoing)
-	}
+internal suspend fun LLMServices.postSummaryUpstream(source: String, body: String, summary: LLMSummaryConfig): Pair<Int, String> {
+    val pricing=summary.pricing ?: return 503 to errorJson("pricing_unavailable","摘要模型未配置计价")
+    val request=JsonParser.parseString(body).asJsonObject
+    val maxOutput=request.get("max_tokens")?.asLong ?: request.get("max_output_tokens")?.asLong ?: 8192
+    val estimate=pricing.cost(body.toByteArray(StandardCharsets.UTF_8).size.toLong(),maxOutput,0)
+    val reserved=dailyQuotaService.reserveSubsidy(source,summary,estimate)
+        ?: return 503 to errorJson("free_budget_exceeded","免费摘要预算不足")
+    try {
+        val result=runSummaryUpstream(client,body,summary) { outgoing ->
+            println("[LLM] upstream request source=$source provider=${summary.providerName} model=${summary.model} api=${summary.protocol.wireValue}")
+            debugPrompt(source,outgoing)
+        }
+        val usage=parseUsage(result.second)
+        val cost=if(usage?.promptTokens!=null && usage.completionTokens!=null)
+            pricing.cost(usage.promptTokens.toLong(),usage.completionTokens.toLong(),(usage.cacheHitTokens ?: 0).toLong())
+            else if(result.first !in 200..299) java.math.BigDecimal.ZERO else null
+        dailyQuotaService.settleSubsidy(reserved,cost)
+        return result
+    } catch(error: Exception) {
+        kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) { dailyQuotaService.settleSubsidy(reserved,null) }
+        throw error
+    }
+}
 
 internal suspend fun runSummaryUpstream(
 	client: HttpClient,
@@ -194,6 +220,7 @@ internal fun LLMServices.streamFromUpstream(
 	val functionTools = if (toolService.enabled()) toolService.definitions() else JsonArray()
 	val upstreamBody = LLMWebSearchAdapter.enableChatCompletions(request.body, functionTools).toString()
 	var upstreamAccepted = false
+	var latestUsage: LLMServices.Usage? = null
 	var lastProgressKey: String? = null
 	suspend fun emitProgress(phase: String, label: String) {
 		val key = "$phase:$label"
@@ -214,20 +241,19 @@ internal fun LLMServices.streamFromUpstream(
 		}.execute { response ->
 			if (!response.status.isSuccess()) {
 				val errorBody = response.bodyAsText()
-				dailyQuotaService.refund(quotaReservation)
+				refundUsage(quotaReservation, latestUsage, request, provider, requester.conversationId)
 				updateAccessRecord(requestId, "failed", errorMessage = errorBody.take(512), groupName = requester.groupName ?: requester.groupId?.let { "group:$it" }, qqUid = requester.uid)
 				emit(errorJson("upstream_error", errorBody.take(256)))
 				return@execute
 			}
 			upstreamAccepted = true
 
-			var latestUsage: LLMServices.Usage? = null
 			val assistantContent = StringBuilder()
 			if (response.contentType()?.match(ContentType.Text.EventStream) != true) {
 				val body = response.bodyAsText()
 				val converted = nonStreamCompletionToStreamChunk(body)
 				if (converted == null) {
-					dailyQuotaService.refund(quotaReservation)
+					refundUsage(quotaReservation, latestUsage, request, provider, requester.conversationId)
 					updateAccessRecord(requestId, "failed", errorMessage = body.take(512), groupName = requester.groupName ?: requester.groupId?.let { "group:$it" }, qqUid = requester.uid)
 					emit(normalizeUpstreamError(body))
 					return@execute
@@ -236,18 +262,29 @@ internal fun LLMServices.streamFromUpstream(
 				assistantContent.append(converted.second)
 				emitProgress("generating", "正在生成回复…")
 				emit(converted.first)
+				val settled = settleUsage(quotaReservation, latestUsage, request, provider, requester.conversationId)
+				emit(attachQuota("{}", settled))
 				updateAccessRecord(requestId, "completed", latestUsage, groupName = requester.groupName ?: requester.groupId?.let { "group:$it" }, qqUid = requester.uid)
 				recordConversationAnswer(requester, request.userContent, assistantContent.toString(), provider)
 				return@execute
 			}
+			var completed = false
 			val channel = response.bodyAsChannel()
 			while (!channel.isClosedForRead) {
 				val line = channel.readUTF8Line() ?: break
 				if (!line.startsWith("data:")) continue
 				val data = line.removePrefix("data:").trim()
 				if (data.isBlank()) continue
+				if (data == "[DONE]") completed = true
 				if (data != "[DONE]") {
 					parseUsage(data)?.let { latestUsage = it }
+					val upstreamEvent = runCatching { JsonParser.parseString(data).asJsonObject }.getOrNull()
+					if (upstreamEvent?.has("error") == true) {
+						refundUsage(quotaReservation, latestUsage, request, provider, requester.conversationId)
+						updateAccessRecord(requestId, "failed", errorMessage = data.take(512), groupName = requester.groupName, qqUid = requester.uid)
+						emit(normalizeUpstreamError(data))
+						return@execute
+					}
 					streamProgress(data)?.let { (phase, label) -> emitProgress(phase, label) }
 					val assistantDelta = parseStreamAssistantContent(data)
 					if (!assistantDelta.isNullOrBlank()) {
@@ -257,15 +294,17 @@ internal fun LLMServices.streamFromUpstream(
 				}
 				if (data != "[DONE]") emit(data)
 			}
+			require(completed) { "Stream ended before DONE" }
+			val settled = settleUsage(quotaReservation, latestUsage, request, provider, requester.conversationId)
+			emit(attachQuota("{}", settled))
 			updateAccessRecord(requestId, "completed", latestUsage, groupName = requester.groupName ?: requester.groupId?.let { "group:$it" }, qqUid = requester.uid)
 			if (assistantContent.isNotBlank()) {
 				recordConversationAnswer(requester, request.userContent, assistantContent.toString(), provider)
 			}
 		}
 	} catch (e: Exception) {
-		if (!upstreamAccepted) {
-			dailyQuotaService.refund(quotaReservation)
-		}
+		if (e is kotlinx.coroutines.CancellationException) throw e
+		if (e !is QuotaSettlementException) refundUsage(quotaReservation, latestUsage, request, provider, requester.conversationId)
 		updateAccessRecord(requestId, "failed", errorMessage = e.message, groupName = requester.groupName ?: requester.groupId?.let { "group:$it" }, qqUid = requester.uid)
 		emit(errorJson("upstream_error", e.message ?: "LLM 上游请求失败"))
 	}
@@ -287,6 +326,7 @@ internal fun LLMServices.streamFromResponses(
 		stream = true,
 	)
 	val assistantContent = StringBuilder()
+	var totalUsage: LLMServices.Usage? = null
 	var upstreamAccepted = false
 	var lastProgressKey: String? = null
 	suspend fun emitProgress(phase: String, label: String) {
@@ -324,6 +364,10 @@ internal fun LLMServices.streamFromResponses(
 					if (data.isBlank()) continue
 					val event = runCatching { JsonParser.parseString(data).asJsonObject }.getOrNull() ?: continue
 					when (event.get("type")?.asString) {
+						"error" -> {
+							upstreamError = errorJson("upstream_error", event.get("message")?.asString ?: "Responses API 请求失败")
+							break
+						}
 						"response.reasoning_text.delta" -> {
 							if (!event.get("delta")?.asString.isNullOrBlank()) {
 								emitProgress("thinking", "正在整理思路…")
@@ -352,7 +396,7 @@ internal fun LLMServices.streamFromResponses(
 			}
 
 			if (upstreamError != null) {
-				if (!upstreamAccepted) dailyQuotaService.refund(quotaReservation)
+				refundUsage(quotaReservation, totalUsage, request, provider, requester.conversationId)
 				updateAccessRecord(requestId, "failed", errorMessage = upstreamError!!.take(512), groupName = requester.groupName ?: requester.groupId?.let { "group:$it" }, qqUid = requester.uid)
 				emit(normalizeUpstreamError(upstreamError!!))
 				return@flow
@@ -360,11 +404,13 @@ internal fun LLMServices.streamFromResponses(
 
 			val completed = terminalResponse
 			if (completed == null) {
+				refundUsage(quotaReservation, totalUsage, request, provider, requester.conversationId)
 				updateAccessRecord(requestId, "failed", errorMessage = "Responses stream ended without a terminal event", groupName = requester.groupName ?: requester.groupId?.let { "group:$it" }, qqUid = requester.uid)
 				emit(errorJson("upstream_error", "Responses API 流提前结束"))
 				return@flow
 			}
-			if (completed.get("status")?.asString == "failed") {
+			if (completed.get("status")?.asString in setOf("failed", "incomplete")) {
+				refundUsage(quotaReservation, accumulateUsage(totalUsage, parseUsage(completed.toString())), request, provider, requester.conversationId)
 				val message = completed.getAsJsonObject("error")?.get("message")?.asString
 					?: "Responses API 请求失败"
 				updateAccessRecord(requestId, "failed", errorMessage = message.take(512), groupName = requester.groupName ?: requester.groupId?.let { "group:$it" }, qqUid = requester.uid)
@@ -373,9 +419,10 @@ internal fun LLMServices.streamFromResponses(
 			}
 
 			val completedBody = completed.toString()
+			totalUsage = accumulateUsage(totalUsage, parseUsage(completedBody))
 			val functionCalls = LLMResponsesAdapter.functionCalls(completedBody)
 			if (functionCalls.isEmpty()) {
-				val usage = parseUsage(completedBody)
+				val usage = totalUsage
 				if (assistantContent.isBlank()) {
 					val converted = nonStreamCompletionToStreamChunk(
 						LLMResponsesAdapter.toChatCompletion(completedBody)
@@ -386,6 +433,8 @@ internal fun LLMServices.streamFromResponses(
 						emit(converted.first)
 					}
 				}
+				val settled = settleUsage(quotaReservation, usage, request, provider, requester.conversationId)
+				emit(attachQuota("{}", settled))
 				updateAccessRecord(requestId, "completed", usage, groupName = requester.groupName ?: requester.groupId?.let { "group:$it" }, qqUid = requester.uid)
 				if (assistantContent.isNotBlank()) {
 					recordConversationAnswer(requester, request.userContent, assistantContent.toString(), provider)
@@ -406,10 +455,12 @@ internal fun LLMServices.streamFromResponses(
 			LLMResponsesAdapter.appendToolOutputs(upstreamBody, completedBody, outputs)
 		}
 
+		refundUsage(quotaReservation, totalUsage, request, provider, requester.conversationId)
 		updateAccessRecord(requestId, "failed", errorMessage = "Responses tool round limit exceeded", groupName = requester.groupName ?: requester.groupId?.let { "group:$it" }, qqUid = requester.uid)
 		emit(errorJson("tool_round_limit", "工具调用轮数超过限制，请调高 LLM_TOOL_MAX_ROUNDS"))
 	} catch (e: Exception) {
-		if (!upstreamAccepted) dailyQuotaService.refund(quotaReservation)
+		if (e is kotlinx.coroutines.CancellationException) throw e
+		if (e !is QuotaSettlementException) refundUsage(quotaReservation, totalUsage, request, provider, requester.conversationId)
 		updateAccessRecord(requestId, "failed", errorMessage = e.message, groupName = requester.groupName ?: requester.groupId?.let { "group:$it" }, qqUid = requester.uid)
 		emit(errorJson("upstream_error", e.message ?: "LLM 上游请求失败"))
 	}

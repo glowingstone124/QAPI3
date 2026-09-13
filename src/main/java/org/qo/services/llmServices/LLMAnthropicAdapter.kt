@@ -21,6 +21,7 @@ internal object LLMAnthropicAdapter {
         val budget = when (reasoningEffort) {
             LLMReasoningEffort.NONE -> 0
             LLMReasoningEffort.LOW -> 1024
+            LLMReasoningEffort.MEDIUM -> 2048
             LLMReasoningEffort.HIGH -> 4096
             LLMReasoningEffort.MAX -> 8192
         }
@@ -234,6 +235,9 @@ internal object LLMAnthropicAdapter {
                 addProperty("prompt_cache_hit_tokens", read)
                 addProperty("prompt_cache_miss_tokens", input - read)
                 addProperty("cache_creation_input_tokens", write)
+                addProperty("qapi_api_calls",usage.get("qapi_api_calls")?.asInt ?: 1)
+                addProperty("qapi_usage_complete", (usage.get("qapi_usage_complete")?.asBoolean ?: true) &&
+                    usage.get("input_tokens")?.isJsonPrimitive == true && usage.get("output_tokens")?.isJsonPrimitive == true)
             })
         }
     }.toString()

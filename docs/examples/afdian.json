@@ -1,0 +1,19 @@
+{
+  "userId": "",
+  "apiToken": "",
+  "queryUrl": "https://ifdian.net/api/open/query-order",
+  "packs": {
+    "5": {
+      "skuId": "",
+      "checkoutUrl": ""
+    },
+    "10": {
+      "skuId": "",
+      "checkoutUrl": ""
+    },
+    "20": {
+      "skuId": "",
+      "checkoutUrl": ""
+    }
+  }
+}

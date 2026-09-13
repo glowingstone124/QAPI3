@@ -42,6 +42,39 @@ class LLMAnthropicUpstreamTest {
         runSearchAndToolRounds(stream = false)
     }
 
+    @Test fun `a failed later tool round preserves the cost of earlier calls`() = runBlocking {
+        var calls = 0
+        val engine = MockEngine {
+            if (++calls == 1) respond(toolMessage, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
+            else respond("""{"error":{"message":"unavailable"}}""", HttpStatusCode.ServiceUnavailable,
+                headersOf(HttpHeaders.ContentType, "application/json"))
+        }
+        HttpClient(engine).use { client ->
+            val result = runAnthropicUpstream(client, "https://gateway.example/messages", "test", request(), 1,
+                executeTool = { "result" })
+            assertEquals(503, result.first)
+            val usage = obj(result.second).getAsJsonObject("usage")
+            assertEquals(5, usage.get("prompt_tokens").asInt)
+            assertEquals(7, usage.get("completion_tokens").asInt)
+            assertEquals(1, usage.get("qapi_api_calls").asInt)
+        }
+    }
+
+    @Test fun `an omitted tool round usage is marked incomplete`() = runBlocking {
+        var calls = 0
+        val first = obj(toolMessage).apply { remove("usage") }.toString()
+        val engine = MockEngine {
+            respond(if (++calls == 1) first else finalMessage, HttpStatusCode.OK,
+                headersOf(HttpHeaders.ContentType, "application/json"))
+        }
+        HttpClient(engine).use { client ->
+            val result = runAnthropicUpstream(client, "https://gateway.example/messages", "test", request(), 1,
+                executeTool = { "result" })
+            assertEquals(200, result.first)
+            assertFalse(obj(result.second).getAsJsonObject("usage").get("qapi_usage_complete").asBoolean)
+        }
+    }
+
     @Test fun `stream search pause and local tool rounds emit citations and aggregate usage`() = runBlocking {
         runSearchAndToolRounds(stream = true)
     }

@@ -49,7 +49,7 @@ class LLMController(
 		@RequestHeader(HttpHeaders.ORIGIN, required = false) origin: String?,
 		@RequestHeader("X-Request-ID", required = false) requestId: String?,
 		@RequestHeader("X-Conversation-ID", required = false) conversationIdHeader: String?,
-		@RequestParam(name = "model", required = false, defaultValue = "fast") model: String = "fast",
+		@RequestParam(name = "model", required = false) model: String? = null,
 		@RequestParam(name = "conversation_id", required = false) conversationIdParam: String?,
 		@RequestBody body: String,
 	): ResponseEntity<*> {
@@ -72,7 +72,9 @@ class LLMController(
 				HttpStatus.FORBIDDEN,
 			)
 		}
-		val useModel = llmServices.modelPresetFromRequest(model)
+		val requestedMode = model ?: runCatching { com.google.gson.JsonParser.parseString(body).asJsonObject.get("model")?.asString }.getOrNull() ?: "fast"
+        if (requestedMode !in setOf("fast", "thinking")) return jsonResponse("""{"error":{"code":"invalid_model","message":"请选择 Fast 或 Thinking"}}""",HttpStatus.BAD_REQUEST)
+        val useModel = llmServices.modelPresetFromRequest(requestedMode)
 			?: return jsonResponse("""{"error":{"message":"请求的模型不存在","type":"invalid_model","code":"invalid_model"}}""", HttpStatus.BAD_REQUEST)
 		return if (stream) {
 			val result = runCatching { llmServices.streamChat(body, requestToken, useModel, requestId, conversationId) }.getOrElse {
@@ -379,6 +381,7 @@ class LLMController(
 			}
 			emit(sse("[DONE]"))
 		} catch (e: Exception) {
+			if (e is kotlinx.coroutines.CancellationException) throw e
 			emit(sse(e.message ?: "LLM stream failed", "error"))
 		}
 	}
@@ -391,12 +394,14 @@ class LLMController(
 
 	private fun jsonResponse(body: String, status: HttpStatus, quota: LLMQuotaView? = null): ResponseEntity<String> {
 		val builder = ResponseEntity.status(status).contentType(MediaType.APPLICATION_JSON)
-		applyQuotaHeaders(builder, quota, status.value())
+		applyQuotaHeaders(builder, quota, if(body.contains("weekly_quota_exceeded")) status.value() else 200)
 		return builder.body(body)
 	}
 
 	private fun applyQuotaHeaders(builder: ResponseEntity.BodyBuilder, quota: LLMQuotaView?, status: Int) {
 		if (quota == null) return
+		builder.header("X-Quota-Period", "weekly")
+		builder.header("X-Paid-Credits", quota.paidCredits.toString())
 		builder.header("X-RateLimit-Limit", quota.limit.toString())
 		builder.header("X-RateLimit-Remaining", quota.remaining.toString())
 		builder.header("X-RateLimit-Reset", quota.resetAtEpochSeconds.toString())

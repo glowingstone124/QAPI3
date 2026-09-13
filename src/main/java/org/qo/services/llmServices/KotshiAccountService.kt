@@ -42,6 +42,8 @@ data class KotshiAccountSnapshot(
 			addProperty("used", quota.used)
 			addProperty("remaining", quota.remaining)
 			addProperty("reset_at", quota.resetAtEpochSeconds)
+			addProperty("paid_credits", quota.paidCredits)
+			addProperty("period", "weekly")
 		})
 		add("usage", JsonObject().apply {
 			addProperty("requests", usage.requests)
@@ -55,6 +57,7 @@ data class KotshiAccountSnapshot(
 			recentUsage.forEach { record ->
 				add(JsonObject().apply {
 					addProperty("model", record.model)
+					addProperty("mode", record.model.takeIf { it in setOf("fast", "thinking") })
 					addProperty("status", record.status)
 					addProperty("total_tokens", record.totalTokens)
 					addProperty("created_at", record.createdAt)
