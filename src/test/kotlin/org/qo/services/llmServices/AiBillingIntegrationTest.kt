@@ -1,11 +1,13 @@
 package org.qo.services.llmServices
 
 import com.google.gson.JsonParser
+import com.google.gson.JsonObject
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import org.mockito.Mockito
 import org.qo.TestApiApplication
 import org.qo.datas.ReactiveDatabase
 import org.qo.datas.R2dbcDatabaseConfiguration
@@ -81,13 +83,70 @@ class AiBillingIntegrationTest {
             result.reservation?.let { service.refund(it) }
         }
     }
-    @Test fun `paid calls remain available when free thinking subsidy is gated`() = runBlocking {
+    @Test fun `monthly costs do not force thinking calls into paid credits`() = runBlocking {
         val month=now.atZone(java.time.ZoneId.of("Asia/Shanghai")).toLocalDate().withDayOfMonth(1).toString()
         db.execute("INSERT INTO ai_free_budget VALUES (?,90,0)",listOf(month))
         db.execute("INSERT INTO ai_quota_account VALUES (?,800)",listOf(principal.qqUid))
         val r=service.reserve(principal,"paid",mode="thinking",estimatedCost=BigDecimal("0.005")).reservation!!
-        val view=service.settle(r,usage(1)); assertEquals(0,view.used); assertEquals(799,view.paidCredits)
-        assertEquals(0,db.one("SELECT actual_cost FROM ai_free_budget") { it.get("actual_cost") as BigDecimal }!!.compareTo(BigDecimal("90")))
+        val view=service.settle(r,usage(1)); assertEquals(1,view.used); assertEquals(800,view.paidCredits)
+        assertEquals(0,db.one("SELECT actual_cost FROM ai_free_budget") { it.get("actual_cost") as BigDecimal }!!.compareTo(BigDecimal("90.005")))
+    }
+
+    @Test fun `monthly costs above the former cap do not reject QQ calls or their settlement`() = runBlocking {
+        val qq = principal.copy(source=LLMSource.QQ)
+        val month = now.atZone(java.time.ZoneId.of("Asia/Shanghai")).toLocalDate().withDayOfMonth(1).toString()
+        db.execute("INSERT INTO ai_free_budget VALUES (?,100,0)", listOf(month))
+
+        val thinking = service.reserve(qq, "qq:200:1", now, mode="thinking")
+        assertEquals(LLMQuotaStatus.ACCEPTED, thinking.status)
+        assertEquals(89, thinking.view.remaining)
+        assertEquals(0, thinking.view.paidCredits)
+        val settled = service.settle(assertNotNull(thinking.reservation), usage(1))
+        assertEquals(89, settled.remaining)
+
+        val fast = service.reserve(qq, "qq:100:1", now, mode="fast")
+        assertEquals(LLMQuotaStatus.ACCEPTED, fast.status)
+        assertEquals(88, fast.view.remaining)
+        service.refund(assertNotNull(fast.reservation))
+    }
+
+    @Test fun `QQ requests from different groups share admission despite different context sizes`() = runBlocking {
+        val qq = principal.copy(source=LLMSource.QQ)
+        db.execute("INSERT INTO ai_weekly_usage VALUES (?,?,89)", listOf(qq.qqUid, service.period(now).toString()))
+        val services = Mockito.mock(LLMServices::class.java)
+        Mockito.`when`(services.dailyQuotaService).thenReturn(service)
+        val provider = Mockito.mock(LLMProvider::class.java)
+        Mockito.`when`(provider.name).thenReturn("test")
+        val pricing = LLMModelPricing(BigDecimal.ONE, BigDecimal("4"), BigDecimal.ZERO)
+        for ((group, content) in listOf(100 to "hello", 200 to "群历史".repeat(10000))) {
+            val body = JsonObject().apply {
+                addProperty("max_tokens", 2048)
+                add("messages", JsonParser.parseString("[]"))
+                addProperty("context", content)
+            }.toString()
+            val request = LLMServices.NormalizedRequest("fast", "chat-model", body,
+                JsonObject(), "hello", false, LLMReasoningEffort.NONE, pricing=pricing)
+            val decision = services.reserveQuota(qq, "qq:$group:2", request, provider)
+            assertEquals(LLMQuotaStatus.ACCEPTED, decision.status)
+            val reservation = assertNotNull(decision.reservation)
+            assertEquals(1, reservation.reservedUnits)
+            service.refund(reservation)
+        }
+        val finalUnit = assertNotNull(service.reserve(qq, "consume-last-unit").reservation)
+        service.settle(finalUnit, usage(1))
+        assertEquals(LLMQuotaStatus.EXCEEDED, service.reserve(qq, "qq:100:3").status)
+        assertEquals(LLMQuotaStatus.EXCEEDED, service.reserve(qq, "qq:200:3").status)
+    }
+
+    @Test fun `summary cost reservations continue beyond the former monthly cap`() = runBlocking {
+        val month = now.atZone(java.time.ZoneId.of("Asia/Shanghai")).toLocalDate().withDayOfMonth(1).toString()
+        db.execute("INSERT INTO ai_free_budget VALUES (?,100,0)", listOf(month))
+        val summary = LLMSummaryConfig("test", "https://example.com/chat", "test", "summary", 4096,
+            LLMProtocol.CHAT_COMPLETIONS, "disabled")
+        val id = assertNotNull(service.reserveSubsidy("group-summary", summary, BigDecimal("0.01")))
+        service.settleSubsidy(id, BigDecimal("0.02"))
+        val cost = db.one("SELECT actual_cost FROM ai_free_budget WHERE period=?", listOf(month)) { it.get("actual_cost") as BigDecimal }!!
+        assertEquals(0, cost.compareTo(BigDecimal("100.02")))
     }
     @Test fun `verified payment is atomic and replay cannot grant credits twice`() = runBlocking {
         val config = AfdianConfig(packs = listOf(
@@ -249,17 +308,35 @@ class AiBillingIntegrationTest {
         assertEquals(0, db.one("SELECT charged_units FROM ai_usage") { (it.get("charged_units") as Number).toInt() })
     }
 
-    @Test fun `known pending usage settles after credits arrive and cannot charge twice`() = runBlocking {
+    @Test fun `known pending usage reconciles into negative weekly quota without credits and cannot charge twice`() = runBlocking {
         val r = service.reserve(principal, "pending", now, 5, estimatedCost=BigDecimal("0.025")).reservation!!
-        assertFailsWith<IllegalArgumentException> { service.settle(r, usage(100)) }
         service.retain(r, usage(100))
         service.refund(r)
         assertEquals(5, service.snapshot(principal.qqUid).view.used)
-        db.execute("UPDATE ai_quota_account SET paid_credits=10 WHERE user_id=?", listOf(principal.qqUid))
         assertEquals(1, store.reconcileKnownUsage(principal.qqUid))
         assertEquals(0, store.reconcileKnownUsage(principal.qqUid))
-        assertEquals(90, service.snapshot(principal.qqUid).view.used)
+        assertEquals(100, service.snapshot(principal.qqUid).view.used)
+        assertEquals(-10, service.snapshot(principal.qqUid).view.remaining)
         assertEquals(0, store.balance(principal.qqUid))
+    }
+
+    @Test fun `an admitted QQ turn overdraws weekly quota once and blocks both groups until reset`() = runBlocking {
+        val qq = principal.copy(source=LLMSource.QQ)
+        db.execute("INSERT INTO ai_weekly_usage VALUES (?,?,89)", listOf(qq.qqUid, service.period(now).toString()))
+        db.execute("INSERT INTO ai_quota_account VALUES (?,2)", listOf(qq.qqUid))
+        val reservation = assertNotNull(service.reserve(qq, "qq:100:overdraw", now).reservation)
+        val settled = service.settle(reservation, usage(5))
+        assertEquals(92, settled.used)
+        assertEquals(-2, settled.remaining)
+        assertEquals(0, settled.paidCredits)
+        assertEquals(5, settled.chargedUnits)
+        assertEquals(settled, service.settle(reservation, usage(5)))
+        service.refund(reservation)
+        assertEquals(-2, service.snapshot(qq.qqUid, now).view.remaining)
+        assertEquals(LLMQuotaStatus.EXCEEDED, service.reserve(qq, "qq:100:next", now).status)
+        assertEquals(LLMQuotaStatus.EXCEEDED, service.reserve(qq, "qq:200:next", now).status)
+        assertEquals(90, service.snapshot(qq.qqUid, java.time.Instant.ofEpochSecond(settled.resetAtEpochSeconds)).view.remaining)
+        assertEquals(1, db.one("SELECT COUNT(*) AS n FROM ai_usage") { (it.get("n") as Number).toInt() })
     }
     @Test fun `api signing matches official example and webhook RSA rejects tampering`() {
         assertEquals("a4acc28b81598b7e5d84ebdc3e91710c",AfdianSignature.api("123","{\"a\":333}",1624339905,"abc"))

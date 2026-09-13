@@ -605,9 +605,13 @@ internal suspend fun LLMServices.reserveQuota(principal: LLMPrincipal, clientReq
                 provider.name,request.preset,request.model,request.preset)
             return LLMQuotaDecision(LLMQuotaStatus.PRICING_UNAVAILABLE, dailyQuotaService.snapshot(principal.qqUid, principal.hasAccount).view)
         }
-        val obj = JsonParser.parseString(request.body).asJsonObject
-        val output = obj.get("max_tokens")?.asInt ?: 2048
-        val estimated = pricing.cost(request.body.toByteArray(StandardCharsets.UTF_8).size.toLong(), output.toLong(), 0)
+        // QQ admission depends on the shared user's balance, not group history size.
+        // Reserve one unit atomically; settlement still charges real upstream usage.
+        val estimated = if (principal.source == LLMSource.QQ) LLMDailyQuotaService.COST_PER_UNIT else {
+            val obj = JsonParser.parseString(request.body).asJsonObject
+            val output = obj.get("max_tokens")?.asInt ?: 2048
+            pricing.cost(request.body.toByteArray(StandardCharsets.UTF_8).size.toLong(), output.toLong(), 0)
+        }
         dailyQuotaService.reserve(principal, clientRequestId?.takeIf { it.isNotBlank() } ?: java.util.UUID.randomUUID().toString(),
             estimatedUnits = LLMDailyQuotaService.units(estimated), mode = request.preset,
             provider = provider.name, model = request.model, estimatedCost = estimated)

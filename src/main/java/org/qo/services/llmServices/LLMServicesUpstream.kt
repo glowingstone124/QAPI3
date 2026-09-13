@@ -156,7 +156,7 @@ internal suspend fun LLMServices.postSummaryUpstream(source: String, body: Strin
     val maxOutput=request.get("max_tokens")?.asLong ?: request.get("max_output_tokens")?.asLong ?: 8192
     val estimate=pricing.cost(body.toByteArray(StandardCharsets.UTF_8).size.toLong(),maxOutput,0)
     val reserved=dailyQuotaService.reserveSubsidy(source,summary,estimate)
-        ?: return 503 to errorJson("free_budget_exceeded","免费摘要预算不足")
+        ?: return 503 to errorJson("quota_unavailable","摘要成本记录服务暂时不可用")
     try {
         val result=runSummaryUpstream(client,body,summary) { outgoing ->
             println("[LLM] upstream request source=$source provider=${summary.providerName} model=${summary.model} api=${summary.protocol.wireValue}")

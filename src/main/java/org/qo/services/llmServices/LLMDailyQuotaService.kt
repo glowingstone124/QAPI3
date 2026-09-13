@@ -134,7 +134,7 @@ class LLMDailyQuotaService @Autowired constructor(
     fun period(now: Instant): LocalDate = now.atZone(quotaZone).toLocalDate()
         .with(java.time.temporal.TemporalAdjusters.previousOrSame(java.time.DayOfWeek.MONDAY))
     private fun quotaKey(uid: Long, period: LocalDate) = "llm:weekly:$period:$uid"
-    private fun view(used: Int, limit: Int, reset: Long, paid: Int) = LLMQuotaView(limit, used.coerceAtLeast(0), (limit-used).coerceAtLeast(0), reset, paid)
+    private fun view(used: Int, limit: Int, reset: Long, paid: Int) = LLMQuotaView(limit, used.coerceAtLeast(0), limit-used.coerceAtLeast(0), reset, paid)
     companion object {
         val COST_PER_UNIT = java.math.BigDecimal("0.005")
         fun units(cost: java.math.BigDecimal): Int {

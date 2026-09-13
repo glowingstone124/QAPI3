@@ -60,18 +60,10 @@ class SqlLLMQuotaStore(private val db: ReactiveDatabase) : LLMQuotaStore {
                 return@inTransaction LLMQuotaStoreDecision(LLMQuotaStatus.RATE_LIMITED, used, paid)
             val month = Instant.now().atZone(ZoneId.of("Asia/Shanghai")).toLocalDate().withDayOfMonth(1).toString()
             db.execute("INSERT INTO ai_free_budget (period, actual_cost, reserved_cost) VALUES (?, 0, 0) ON DUPLICATE KEY UPDATE period=period", listOf(month))
-            val budget = db.one("SELECT actual_cost, reserved_cost FROM ai_free_budget WHERE period=? FOR UPDATE", listOf(month)) { (it.get("actual_cost") as BigDecimal) + (it.get("reserved_cost") as BigDecimal) }!!
-            val normalWeekly = minOf(units, (limit-used).coerceAtLeast(0))
-            val gated = budget >= BigDecimal("95") || (mode == "thinking" && budget >= BigDecimal("90")) ||
-                (mode == "thinking" && budget >= BigDecimal("80") && units>30)
-            val affordableWeekly = if (estimatedCost.signum()==0) normalWeekly else
-                ((BigDecimal("95")-budget).coerceAtLeast(BigDecimal.ZERO)*BigDecimal(units))
-                    .divide(estimatedCost,0,java.math.RoundingMode.DOWN).min(BigDecimal(normalWeekly)).toInt()
-            val weekly = if (gated) 0 else minOf(normalWeekly,affordableWeekly)
+            val weekly = minOf(units, (limit-used).coerceAtLeast(0))
             val paidUnits = units-weekly
             val freeReserve = if (weekly == 0) BigDecimal.ZERO else estimatedCost.multiply(BigDecimal(weekly)).divide(BigDecimal(units),12,java.math.RoundingMode.DOWN)
             if (paid < paidUnits) return@inTransaction LLMQuotaStoreDecision(LLMQuotaStatus.EXCEEDED,used,paid)
-            if (budget >= BigDecimal("80")) org.slf4j.LoggerFactory.getLogger(javaClass).warn("AI free monthly budget warning: {} CNY", budget)
             db.execute("UPDATE ai_weekly_usage SET used=used+? WHERE user_id=? AND period=?", listOf(weekly, uid, period(quotaKey)))
             db.execute("UPDATE ai_quota_account SET paid_credits=paid_credits-? WHERE user_id=?", listOf(paidUnits, uid))
             db.execute("UPDATE ai_free_budget SET reserved_cost=reserved_cost+? WHERE period=?", listOf(freeReserve, month))
@@ -117,14 +109,11 @@ class SqlLLMQuotaStore(private val db: ReactiveDatabase) : LLMQuotaStore {
                 val used = used(reservation.quotaKey)!!
                 val paid = balance(r.uid)
                 val availableWeekly = (r.limit-used+r.weekly).coerceAtLeast(0)
-                require(usage.chargedUnits <= availableWeekly+paid+r.paid) { "Actual usage exceeds available balance; reconciliation required" }
-                val freeBudget = db.one("SELECT actual_cost,reserved_cost FROM ai_free_budget WHERE period=? FOR UPDATE",listOf(r.month)) { (it.get("actual_cost") as BigDecimal)+(it.get("reserved_cost") as BigDecimal) }!!
-                val room = (BigDecimal("95")-freeBudget+r.freeReserved).coerceAtLeast(BigDecimal.ZERO)
-                val affordable = if(usage.actualCostCny.signum()==0) usage.chargedUnits else
-                    (room*BigDecimal(usage.chargedUnits)).divide(usage.actualCostCny,0,java.math.RoundingMode.DOWN).min(BigDecimal(usage.chargedUnits)).toInt()
-                val weekly = minOf(usage.chargedUnits, if(r.weekly==0) 0 else availableWeekly,affordable)
-                val paidUnits = usage.chargedUnits-weekly
-                require(paid+r.paid >= paidUnits) { "Actual usage exceeds available balance; reconciliation required" }
+                // An admitted turn completes even when its real cost exceeds the balance.
+                // Use available weekly units and Credits first, then overdraw weekly units.
+                val normalWeekly = minOf(usage.chargedUnits, availableWeekly)
+                val paidUnits = minOf(usage.chargedUnits-normalWeekly, paid+r.paid)
+                val weekly = usage.chargedUnits-paidUnits
                 val freeActual = if(weekly==0) BigDecimal.ZERO else usage.actualCostCny.multiply(BigDecimal(weekly)).divide(BigDecimal(usage.chargedUnits),12,java.math.RoundingMode.DOWN)
                 db.execute("UPDATE ai_weekly_usage SET used=used+? WHERE user_id=? AND period=?",listOf(weekly-r.weekly,r.uid,r.period))
                 db.execute("UPDATE ai_quota_account SET paid_credits=paid_credits+? WHERE user_id=?",listOf(r.paid-paidUnits,r.uid))
@@ -135,7 +124,7 @@ class SqlLLMQuotaStore(private val db: ReactiveDatabase) : LLMQuotaStore {
                 db.execute("INSERT INTO ai_credit_ledger (user_id,reference_id,delta,kind,created_at) VALUES (?,?,?,'usage',?)",listOf(r.uid,reservation.requestKey,-paidUnits,Instant.now().epochSecond))
             }
             val used = used(reservation.quotaKey)!!
-            LLMQuotaView(r.limit,used,(r.limit-used).coerceAtLeast(0),r.reset,balance(r.uid),
+            LLMQuotaView(r.limit,used,r.limit-used,r.reset,balance(r.uid),
                 db.one("SELECT charged_units FROM ai_usage WHERE request_key=?",listOf(reservation.requestKey)) { number(it,"charged_units").toInt() })
         }
     }
@@ -154,8 +143,6 @@ class SqlLLMQuotaStore(private val db: ReactiveDatabase) : LLMQuotaStore {
         return db.inTransaction {
             val month=Instant.now().atZone(ZoneId.of("Asia/Shanghai")).toLocalDate().withDayOfMonth(1).toString()
             db.execute("INSERT INTO ai_free_budget (period,actual_cost,reserved_cost) VALUES (?,0,0) ON DUPLICATE KEY UPDATE period=period",listOf(month))
-            val spent=db.one("SELECT actual_cost,reserved_cost FROM ai_free_budget WHERE period=? FOR UPDATE",listOf(month)) { (it.get("actual_cost") as BigDecimal)+(it.get("reserved_cost") as BigDecimal) }!!
-            if(spent+estimate>BigDecimal("95")) return@inTransaction null
             val id=java.util.UUID.randomUUID().toString()
             db.execute("UPDATE ai_free_budget SET reserved_cost=reserved_cost+? WHERE period=?",listOf(estimate,month))
             db.execute("INSERT INTO ai_system_usage (id,source,provider,model,budget_period,estimated_cost,status,created_at) VALUES (?,?,?,?,?,?,'reserved',?)",listOf(id,source,summary.providerName,summary.model,month,estimate,Instant.now().epochSecond))

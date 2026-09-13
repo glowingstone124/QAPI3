@@ -73,19 +73,18 @@ Checkout URL 是每档商品的 HTTPS 购买链接，必须指向 ifdian.net、a
 
 三档充值为 ¥5/350、¥10/800、¥20/1800，没有 ¥50 档。
 
-## 结算和预算
+## 准入、结算和成本统计
 
 使用 `BigDecimal` 计算成本，Units 向上取整且至少 1。缓存命中 token 单独计价；输出 token 已包含 reasoning，不再次相加。Chat Completions、Responses、Anthropic 多轮工具调用累计 Usage。
 
-`ai_quota_account` 保存 Paid Credits；`ai_weekly_usage` 按用户/周保存已用及预留 Units；`ai_quota_reservation` 保存预留池拆分及真实 provider/model。`ai_usage` 保存真实 token、成本与最终扣费；`ai_credit_ledger` 保存充值、消费、退款。所有用户扣费操作先锁用户账户，再锁周账本与月预算。
+`ai_quota_account` 保存 Paid Credits；`ai_weekly_usage` 按用户/周保存已用及预留 Units；`ai_quota_reservation` 保存预留池拆分及真实 provider/model。`ai_usage` 保存真实 token、成本与最终扣费；`ai_credit_ledger` 保存充值、消费、退款。所有用户扣费操作先锁用户账户，再更新周账本与成本统计。
 
-`ai_free_budget.actual_cost` 是免费补贴真实成本，`reserved_cost` 防止并行请求超售预算。跨池请求按免费 Units 占全部 Units 的比例拆分真实成本，Paid 部分不计入免费补贴。摘要等后台模型请求也通过 `ai_system_usage` 计入月预算。
+QQ 请求统一原子预留 1 Unit，准入只取决于该 QQ UID 的共享周额度、Paid Credits 和并发状态，不根据群历史长度预占最大输出费用。每轮完成后按完整上游 Usage 结算，1 Unit 预留不代表每轮固定收费 1 Unit。
 
-- 80 元：日志预警，大于 30 Units 的免费 Thinking 请求转用 Paid Credits。
-- 90 元：Thinking 预留全部使用 Paid Credits。
-- 95 元：所有预留使用 Paid Credits。
-- 接近上限时允许预留跨免费预算和 Paid 池，避免已有 Paid Credits 的用户被免费预算阻断。
+已通过准入的单轮对话允许透支：先使用可用周额度，再使用可用 Paid Credits，差额计入本周已用 Units，`remaining` 可以为负。本轮正常返回，不因真实成本超过余额转为 pending；后续请求仍检查共享余额。负周额度随下周账本重置，Paid Credits 不扣为负数。并发已准入请求也各自完整结算。
 
-预估不能保证和供应商实际计费完全一致（尤其图片、工具新增上下文、搜索费用和缺失 Usage）。正常低估在余额与预算允许时补扣；无法覆盖或缺失 Usage 则保留预留为 pending，并记录已知成本。已知 Usage 可在充值后通过 reconcile 接口重试。进程崩溃、Usage 缺失及未知供应商费用需运营对账；不要直接删除预留或自动按估值收费。免费硬限制是调用准入预算，不能撤销供应商已经发生的成本。
+已取消全站月预算限额。`ai_free_budget.actual_cost` 和 `reserved_cost` 仅统计真实及预留免费成本，不限制 Fast、Thinking、结算或后台摘要。跨池请求按免费 Units 占全部 Units 的比例拆分真实成本，Paid 部分不计入免费成本；摘要等后台调用通过 `ai_system_usage` 记录。
+
+预估不能保证和供应商实际计费完全一致（尤其图片、工具新增上下文、搜索费用和缺失 Usage）。缺失 Usage 或数据库结算失败仍保留预留为 pending；已知 Usage 可通过 reconcile 接口重试，无需先充值。进程崩溃、Usage 缺失及未知供应商费用需运营对账；不要直接删除预留或自动按估值收费。
 
 失败退款与结算幂等，退款始终操作请求原所属周及原月预留，不影响新周。当前未提供历史付费余额迁移，因为原系统没有付费账本。
