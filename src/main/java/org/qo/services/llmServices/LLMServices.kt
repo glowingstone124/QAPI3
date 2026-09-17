@@ -613,7 +613,9 @@ class LLMServices(
 
 	internal fun logUpstreamRequest(source: String, body: String, provider: LLMProvider, api: String) {
 		val model = runCatching {
-			JsonParser.parseString(body).asJsonObject.get("model")?.asString
+			JsonParser.parseString(body).asJsonObject.let { request ->
+				request.get("model")?.asString ?: request.getAsJsonObject("params")?.get("model")?.asString
+			}
 		}.getOrNull() ?: "unknown"
 		println("[LLM] upstream request source=$source provider=${provider.name} model=$model api=$api")
 	}
