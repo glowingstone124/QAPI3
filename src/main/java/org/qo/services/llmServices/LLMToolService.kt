@@ -50,11 +50,16 @@ class LLMToolService(
 
 	fun enabled(): Boolean = readBoolean("LLM_TOOLS_ENABLED", true)
 
-	fun definitions(): JsonArray = JsonArray().apply {
-		tools.forEach { add(it.definition.deepCopy()) }
+	fun definitions(excludedIds: Set<String> = emptySet()): JsonArray = JsonArray().apply {
+		tools.filterNot { it.id in excludedIds }.forEach { add(it.definition.deepCopy()) }
 	}
 
-	suspend fun execute(name: String, rawArguments: String?, context: LLMToolContext): String {
+	suspend fun execute(name: String, rawArguments: String?, context: LLMToolContext, excludedIds: Set<String> = emptySet()): String {
+		if (name in excludedIds) {
+			val result = errorResult("tool_unavailable", "该工具在当前模型渠道不可用")
+			logFailure(name, rawArguments, context, result)
+			return result
+		}
 		val isMinecraftRequest = context.source == LLMSource.MINECRAFT.value
 		if (name in qoScopedToolIds && !isMinecraftRequest && (qoGroupId == null || context.groupId != qoGroupId)) {
 			val result = errorResult("qo_group_required", "该工具只能在 QO 官方群中使用")

@@ -29,7 +29,8 @@ class LLMBalanceService(
 	}
 
 	suspend fun getBalance(): Pair<Boolean, Double> {
-		val provider = providers.current()
+		val snapshot = providers.current()
+		val provider = snapshot.fallback ?: snapshot
 		val balance = provider.balanceRelated
 		if (balance.balanceStruct == BalanceStructParse.NONE || balance.balanceUrl == null) {
 			return false to -1.0

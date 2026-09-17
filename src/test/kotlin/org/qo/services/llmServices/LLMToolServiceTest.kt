@@ -51,6 +51,19 @@ class LLMToolServiceTest {
 		assertEquals("qo_group_required", JsonParser.parseString(result).asJsonObject.get("error").asString)
 	}
 
+	@Test
+	fun `commandcode excludes balance tool from definitions and execution`() = runBlocking {
+		val excluded = setOf("get_remain_balance")
+		val names = service.definitions(excluded).map { it.asJsonObject.getAsJsonObject("function").get("name").asString }
+		assertEquals(false, "get_remain_balance" in names)
+		assertEquals(true, "get_user_quota" in names)
+		val result = service.execute(
+			"get_remain_balance", "{}",
+			LLMToolContext(groupId = null, uid = "10001", name = "user", source = "web"), excluded,
+		)
+		assertEquals("tool_unavailable", JsonParser.parseString(result).asJsonObject.get("error").asString)
+	}
+
 	private class StubTool(
 		override val id: String,
 	) : Tools {

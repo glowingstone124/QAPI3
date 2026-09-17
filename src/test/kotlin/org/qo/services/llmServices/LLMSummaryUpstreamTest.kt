@@ -51,6 +51,15 @@ class LLMSummaryUpstreamTest {
                             "content":[{"type":"text","text":"summary"}],"usage":{"input_tokens":3,"output_tokens":2}}""",
                             HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
                     }
+                    LLMProtocol.COMMANDCODE -> {
+                        assertTrue(body.has("params"))
+                        assertEquals("summary-test", body.getAsJsonObject("params").get("model").asString)
+                        assertEquals("Bearer summary-token", httpRequest.headers[HttpHeaders.Authorization])
+                        assertEquals("cli", httpRequest.headers[HttpHeaders.UserAgent])
+                        respond("""{"type":"text-delta","text":"summary"}
+{"type":"finish","finishReason":"stop","totalUsage":{"inputTokens":3,"outputTokens":2}}
+""", HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/x-ndjson"))
+                    }
                 }
             }
             HttpClient(engine).use { client ->

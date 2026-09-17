@@ -53,5 +53,7 @@ LLMAPITOKEN
 data/sql/info.json
 data/redis/config.json
 data/afdian.json
+data/llm/providers.json
+data/llm/*.token
 
 nodes.json

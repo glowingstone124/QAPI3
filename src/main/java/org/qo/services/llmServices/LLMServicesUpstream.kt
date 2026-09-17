@@ -57,6 +57,10 @@ internal suspend fun LLMServices.completeWithOptionalTools(
 	source: String,
 	provider: LLMProvider,
 ): Pair<Int, String> {
+	if (provider.protocol(request.preset) == LLMProtocol.COMMANDCODE) {
+		val attempt = completeWithCommandCodeApi(request, requester, source, provider)
+		return attempt.status to attempt.body
+	}
 	if (provider.protocol(request.preset) == LLMProtocol.ANTHROPIC) {
 		return completeWithAnthropicApi(request, requester, source, provider)
 	}
@@ -180,6 +184,13 @@ internal suspend fun runSummaryUpstream(
 	summary: LLMSummaryConfig,
 	onRequest: (String) -> Unit = {},
 ): Pair<Int, String> {
+	if (summary.protocol == LLMProtocol.COMMANDCODE) {
+		return runCommandCodeUpstream(
+			client, summary.endpointUrl, summary.apiToken,
+			LLMCommandCodeAdapter.fromChatRequest(JsonParser.parseString(body).asJsonObject, JsonArray(), LLMReasoningEffort.NONE),
+			onRequest = onRequest,
+		)
+	}
 	if (summary.protocol == LLMProtocol.ANTHROPIC) {
 		return runAnthropicUpstream(
 			client, summary.endpointUrl, summary.apiToken,

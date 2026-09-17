@@ -206,6 +206,8 @@ QQ group messages are archived in the `llm_chat_history` table through `POST /qo
 - `LLM_TOOL_MAX_ROUNDS`: maximum tool-call loops per request, default `3`.
 - `LLM_TOOL_METRO_MAX_RESULTS`: maximum metro search results returned to the model, default `12`.
 
+Set `enableCommandCode: true` to try the endpoint-free `providers.commandcode` block before `defaultProvider`, with a fallback when the Command Code connection fails. See [Command Code provider setup](docs/LLM_COMMANDCODE.md), including pricing, image input, and fallback behavior.
+
 Provider configuration example (`data/llm/providers.json`; replace example URLs and model IDs with those supported by your upstream):
 
 ```json

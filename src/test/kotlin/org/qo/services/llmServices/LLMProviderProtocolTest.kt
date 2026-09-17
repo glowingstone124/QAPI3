@@ -78,6 +78,45 @@ class LLMProviderProtocolTest {
         }
     }
 
+    @Test fun `commandcode endpoint is optional until a model selects it`() {
+        val root = configuration()
+        assertEquals("unavailable", load(root).commandCodeUrl)
+        provider(root).getAsJsonObject("models").getAsJsonObject("fast").addProperty("protocol", "commandcode")
+        assertFailsWith<IllegalArgumentException> { load(root) }
+        provider(root).addProperty("commandCodeUrl", "https://api.commandcode.ai/alpha/generate")
+        val loaded = load(root)
+        assertEquals(LLMProtocol.COMMANDCODE, loaded.protocol("fast"))
+        assertEquals("https://api.commandcode.ai/alpha/generate", loaded.endpoint(LLMProtocol.COMMANDCODE))
+    }
+
+    @Test fun `root commandcode switch uses endpoint-free priced provider with default fallback`() {
+        val root = configuration()
+        val keyFile = tempDir.resolve("commandcode.token")
+        Files.writeString(keyFile, "cc-test-key")
+        val command = JsonParser.parseString("""{
+            "tokenFile":"${keyFile.toString().replace("\\", "\\\\")}",
+            "contextWindow":1000000,
+            "models":{
+                "fast":{"model":"moonshotai/Kimi-K3","pricing":{"inputCnyPerMillion":0.8,"outputCnyPerMillion":2,"cachedInputCnyPerMillion":0.04}},
+                "thinking":{"model":"moonshotai/Kimi-K3","pricing":{"inputCnyPerMillion":4,"outputCnyPerMillion":18,"cachedInputCnyPerMillion":0.3}}
+            }
+        }""").asJsonObject
+        root.getAsJsonObject("providers").add("commandcode", command)
+        assertEquals("mixed", load(root).name)
+        root.addProperty("enableCommandCode", true)
+        val selected = load(root)
+        assertEquals("commandcode", selected.name)
+        assertEquals("cc-test-key", selected.apiToken)
+        assertEquals(1000000, selected.contextWindow)
+        assertEquals("https://api.commandcode.ai/alpha/generate", selected.endpoint(LLMProtocol.COMMANDCODE))
+        assertEquals(LLMProtocol.COMMANDCODE, selected.protocol("fast"))
+        assertEquals("mixed", selected.fallback?.name)
+        assertEquals(LLMProtocol.ANTHROPIC, selected.forMode("claude").protocol("claude"))
+        assertEquals(java.math.BigDecimal("0.8"), selected.modelConfig("fast").pricing?.inputCnyPerMillion)
+        Files.delete(keyFile)
+        assertEquals("mixed", load(root).name)
+    }
+
     @Test fun `unused endpoints accept unavaliable but selected endpoints fail configuration`() {
         val root = configuration()
         val obj = provider(root)

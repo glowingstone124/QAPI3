@@ -238,10 +238,10 @@ class LLMServices(
 
 		var modelSucceeded = false
 		return try {
-			val (statusCode, rawText) = completeWithOptionalTools(request, requester, "chat", provider)
+			val (statusCode, rawText, actualRequest, actualProvider) = completeWithFallback(request, requester, "chat", provider)
 			modelSucceeded = statusCode in 200..299
 			val usage = parseUsage(rawText)
-			val settled = if (modelSucceeded) settleUsage(reservation, usage, request, provider, requester.conversationId) else null
+			val settled = if (modelSucceeded) settleUsage(reservation, usage, actualRequest, actualProvider, requester.conversationId) else null
 			val text = if (settled != null) publicModel(attachQuota(rawText, settled), request.preset) else rawText
 			updateAccessRecord(
 				requestId,
@@ -252,9 +252,9 @@ class LLMServices(
 				qqUid = requester.uid,
 			)
 			if (statusCode in 200..299) {
-				recordConversation(requester, request.userContent, text, provider)
+				recordConversation(requester, request.userContent, text, actualProvider)
 			} else {
-				refundUsage(reservation,usage,request,provider,requester.conversationId)
+				refundUsage(reservation,usage,actualRequest,actualProvider,requester.conversationId)
 			}
 			LLMNonStreamResult(statusCode, text, settled ?: quota.view)
 		} catch (e: Exception) {
@@ -306,6 +306,7 @@ class LLMServices(
 			LLMProtocol.RESPONSES -> streamFromResponses(request, requester, requestId, "stream", provider, reservation)
 			LLMProtocol.ANTHROPIC -> streamFromAnthropic(request, requester, requestId, "stream", provider, reservation)
 			LLMProtocol.CHAT_COMPLETIONS -> streamFromUpstream(request, requester, requestId, "stream", provider, reservation)
+			LLMProtocol.COMMANDCODE -> streamFromCommandCode(request, requester, requestId, "stream", provider, reservation)
 		}
 		return LLMStreamResult(
 			200,
@@ -364,10 +365,10 @@ class LLMServices(
 
 		var modelSucceeded = false
 		return try {
-			val (statusCode, rawText) = completeWithOptionalTools(request, requester, "bot", provider)
+			val (statusCode, rawText, actualRequest, actualProvider) = completeWithFallback(request, requester, "bot", provider)
 			modelSucceeded = statusCode in 200..299
 			val usage = parseUsage(rawText)
-			val settled = if (modelSucceeded) settleUsage(reservation, usage, request, provider, requester.conversationId) else null
+			val settled = if (modelSucceeded) settleUsage(reservation, usage, actualRequest, actualProvider, requester.conversationId) else null
 			val text = if (settled != null) publicModel(attachQuota(rawText, settled), request.preset) else rawText
 			updateAccessRecord(
 				requestId,
@@ -378,9 +379,9 @@ class LLMServices(
 				qqUid = requester.uid,
 			)
 			if (statusCode in 200..299) {
-				recordConversation(requester, request.userContent, text, provider)
+				recordConversation(requester, request.userContent, text, actualProvider)
 			} else {
-				refundUsage(reservation,usage,request,provider,requester.conversationId)
+				refundUsage(reservation,usage,actualRequest,actualProvider,requester.conversationId)
 			}
 			LLMNonStreamResult(statusCode, text, settled ?: quota.view)
 		} catch (e: Exception) {
@@ -462,10 +463,10 @@ class LLMServices(
 
 		var modelSucceeded = false
 		return try {
-			val (statusCode, rawText) = completeWithOptionalTools(request, requester, "minecraft", provider)
+			val (statusCode, rawText, actualRequest, actualProvider) = completeWithFallback(request, requester, "minecraft", provider)
 			modelSucceeded = statusCode in 200..299
 			val usage = parseUsage(rawText)
-			val settled = if (modelSucceeded) settleUsage(reservation, usage, request, provider, requester.conversationId) else null
+			val settled = if (modelSucceeded) settleUsage(reservation, usage, actualRequest, actualProvider, requester.conversationId) else null
 			val text = if (settled != null) publicModel(attachQuota(rawText, settled), request.preset) else rawText
 			updateAccessRecord(
 				requestId,
@@ -476,9 +477,9 @@ class LLMServices(
 				qqUid = requester.uid,
 			)
 			if (statusCode in 200..299) {
-				recordConversation(requester, request.userContent, text, provider)
+				recordConversation(requester, request.userContent, text, actualProvider)
 			} else {
-				refundUsage(reservation,usage,request,provider,requester.conversationId)
+				refundUsage(reservation,usage,actualRequest,actualProvider,requester.conversationId)
 			}
 			LLMNonStreamResult(statusCode, text, settled ?: quota.view)
 		} catch (e: Exception) {
