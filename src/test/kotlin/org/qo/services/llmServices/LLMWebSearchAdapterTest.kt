@@ -37,4 +37,18 @@ class LLMWebSearchAdapterTest {
 		assertEquals(false, request.has("tools"))
 		assertEquals(false, request.has("tool_choice"))
 	}
+
+	@Test
+	fun `uses local search without provider hosted search options`() {
+		val request = LLMWebSearchAdapter.enableChatCompletions(
+			"""{"model":"provider-model","messages":[{"role":"user","content":"news"}]}""",
+			JsonArray().apply { add(JsonObject().apply {
+				addProperty("type", "function")
+				add("function", JsonObject().apply { addProperty("name", "web_search") })
+			}) },
+			hostedSearch = false,
+		)
+		assertEquals(false, request.has("web_search_options"))
+		assertEquals("web_search", request.getAsJsonArray("tools")[0].asJsonObject.getAsJsonObject("function").get("name").asString)
+	}
 }

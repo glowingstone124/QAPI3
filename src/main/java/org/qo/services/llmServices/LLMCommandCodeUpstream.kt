@@ -213,7 +213,7 @@ internal suspend fun LLMServices.completeWithCommandCodeApi(
     provider: LLMProvider,
 ): CommandCodeAttempt {
     val chat = JsonParser.parseString(request.body).asJsonObject
-    val tools = if (toolService.enabled()) toolService.definitions(COMMANDCODE_EXCLUDED_TOOLS) else JsonArray()
+    val tools = toolService.definitions(COMMANDCODE_EXCLUDED_TOOLS)
     var usage: LLMServices.Usage? = null
     repeat(maxToolRounds) { round ->
         val body = LLMCommandCodeAdapter.fromChatRequest(chat, tools, request.reasoningEffort)
@@ -255,7 +255,7 @@ internal fun LLMServices.streamFromCommandCode(
     quotaReservation: LLMQuotaReservation,
 ): Flow<String> = flow {
     val chat = JsonParser.parseString(request.body).asJsonObject
-    val tools = if (toolService.enabled()) toolService.definitions(COMMANDCODE_EXCLUDED_TOOLS) else JsonArray()
+    val tools = toolService.definitions(COMMANDCODE_EXCLUDED_TOOLS)
     var usage: LLMServices.Usage? = null
     val assistantText = StringBuilder()
     var phase: String? = null

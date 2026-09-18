@@ -128,8 +128,9 @@ internal suspend fun LLMServices.completeWithAnthropicApi(
 ): Pair<Int, String> {
     val body = LLMAnthropicAdapter.fromChatRequest(
         request.body,
-        if (toolService.enabled()) toolService.definitions() else com.google.gson.JsonArray(),
+        toolService.definitions(),
         request.reasoningEffort,
+        webSearch = !toolService.usesSearXNG(),
         thinkingMode = provider.modelConfig(request.preset).thinkingMode,
     )
     val (status, text) = runAnthropicUpstream(
@@ -173,9 +174,10 @@ internal fun LLMServices.streamFromAnthropic(
     try {
         val body = LLMAnthropicAdapter.fromChatRequest(
             request.body,
-            if (toolService.enabled()) toolService.definitions() else com.google.gson.JsonArray(),
+            toolService.definitions(),
             request.reasoningEffort,
             stream = true,
+            webSearch = !toolService.usesSearXNG(),
             thinkingMode = provider.modelConfig(request.preset).thinkingMode,
         )
         val (status, text) = runAnthropicUpstream(

@@ -6,6 +6,8 @@ import com.google.gson.JsonArray
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import org.qo.services.llmServices.tools.Tools
+import org.qo.services.llmServices.tools.SearXNGWebSearchTool
+import org.qo.services.llmServices.tools.RemoteWebFetchTool
 import org.springframework.stereotype.Service
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
@@ -15,6 +17,8 @@ import java.nio.file.StandardOpenOption
 @Service
 class LLMToolService(
 	private val registeredTools: List<Tools>,
+	private val searxng: SearXNGWebSearchTool,
+	private val webFetch: RemoteWebFetchTool,
 ) {
 	private val qoGroupId = System.getenv("LLM_QO_GROUP_ID")?.trim()?.toLongOrNull()
 	private val failureLogPath: Path = Path.of("data/llm/toolcall-failure.log")
@@ -49,15 +53,28 @@ class LLMToolService(
 	}
 
 	fun enabled(): Boolean = readBoolean("LLM_TOOLS_ENABLED", true)
+	fun usesSearXNG(): Boolean = searxng.configured
 
 	fun definitions(excludedIds: Set<String> = emptySet()): JsonArray = JsonArray().apply {
-		tools.filterNot { it.id in excludedIds }.forEach { add(it.definition.deepCopy()) }
+		if (enabled()) tools.filterNot { it.id in excludedIds }.forEach { add(it.definition.deepCopy()) }
+		if (searxng.configured && searxng.id !in excludedIds) add(searxng.definition.deepCopy())
+		if (webFetch.id !in excludedIds) add(webFetch.definition.deepCopy())
 	}
 
 	suspend fun execute(name: String, rawArguments: String?, context: LLMToolContext, excludedIds: Set<String> = emptySet()): String {
 		if (name in excludedIds) {
 			val result = errorResult("tool_unavailable", "该工具在当前模型渠道不可用")
 			logFailure(name, rawArguments, context, result)
+			return result
+		}
+		if (name == searxng.id) {
+			val result = searxng.execute(parseArguments(rawArguments), context)
+			if (isFailure(result)) logFailure(name, rawArguments, context, result)
+			return result
+		}
+		if (name == webFetch.id) {
+			val result = webFetch.execute(parseArguments(rawArguments), context)
+			if (isFailure(result)) logFailure(name, rawArguments, context, result)
 			return result
 		}
 		val isMinecraftRequest = context.source == LLMSource.MINECRAFT.value
@@ -131,4 +148,5 @@ data class LLMToolContext(
 	val currentMessage: String? = null,
 	val currentMessageId: Long? = null,
 	val source: String? = null,
+	val conversationKey: String? = null,
 )

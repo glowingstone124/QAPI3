@@ -166,7 +166,7 @@ internal suspend fun LLMServices.enrichMessages(
 		stableContextParts.add(LLMToolInstructions.systemRules)
 	}
 	if (requester != null) {
-		stableContextParts.add(webSearchRules())
+		stableContextParts.add(webSearchRules(includeLinks = isWeb))
 	}
 	stableContextParts.add(LLMServices.hardOutputRules(enableMarkdown, isWeb))
 	val groupConversation = groupContext != null || requester?.groupId != null

@@ -6,9 +6,10 @@ import com.google.gson.JsonParser
 
 /** Enables provider-hosted search using the OpenAI Chat Completions wire format. */
 internal object LLMWebSearchAdapter {
-	fun enableChatCompletions(chatBody: String, functionTools: JsonArray): JsonObject {
+	fun enableChatCompletions(chatBody: String, functionTools: JsonArray, hostedSearch: Boolean = true): JsonObject {
 		val request = JsonParser.parseString(chatBody).asJsonObject
-		request.add("web_search_options", JsonObject())
+		if (hostedSearch) request.add("web_search_options", JsonObject())
+		else request.remove("web_search_options")
 		if (functionTools.size() > 0) {
 			request.add("tools", JsonArray().apply {
 				functionTools.forEach { add(it.deepCopy()) }

@@ -67,8 +67,8 @@ internal suspend fun LLMServices.completeWithOptionalTools(
 	if (provider.supportsResponses(request.preset)) {
 		return completeWithResponsesApi(request, requester, source, provider)
 	}
-	val functionTools = if (toolService.enabled()) toolService.definitions() else JsonArray()
-	val obj = LLMWebSearchAdapter.enableChatCompletions(request.body, functionTools)
+	val functionTools = toolService.definitions()
+	val obj = LLMWebSearchAdapter.enableChatCompletions(request.body, functionTools, !toolService.usesSearXNG())
 
 	var latestStatus = 502
 	var latestBody = ""
@@ -108,11 +108,12 @@ internal suspend fun LLMServices.completeWithResponsesApi(
 	source: String,
 	provider: LLMProvider,
 ): Pair<Int, String> {
-	val functionTools = if (toolService.enabled()) toolService.definitions() else JsonArray()
+	val functionTools = toolService.definitions()
 	val body = LLMResponsesAdapter.fromChatRequest(
 		request.body,
 		functionTools,
 		reasoningEffort = request.reasoningEffort,
+		webSearch = !toolService.usesSearXNG(),
 	)
 	var totalUsage: LLMServices.Usage? = null
 	repeat(maxToolRounds) { round ->
@@ -228,8 +229,8 @@ internal fun LLMServices.streamFromUpstream(
 	provider: LLMProvider,
 	quotaReservation: LLMQuotaReservation,
 ): Flow<String> = flow {
-	val functionTools = if (toolService.enabled()) toolService.definitions() else JsonArray()
-	val upstreamBody = LLMWebSearchAdapter.enableChatCompletions(request.body, functionTools).toString()
+	val functionTools = toolService.definitions()
+	val upstreamBody = LLMWebSearchAdapter.enableChatCompletions(request.body, functionTools, !toolService.usesSearXNG()).toString()
 	var upstreamAccepted = false
 	var latestUsage: LLMServices.Usage? = null
 	var lastProgressKey: String? = null
@@ -241,6 +242,41 @@ internal fun LLMServices.streamFromUpstream(
 	}
 
 	emitProgress("analyzing", "正在分析问题…")
+	if (toolService.usesSearXNG()) {
+		try {
+			val nonStreamingBody = JsonParser.parseString(request.body).asJsonObject.apply {
+				addProperty("stream", false)
+				remove("stream_options")
+			}.toString()
+			val (status, body) = completeWithOptionalTools(request.copy(body = nonStreamingBody), requester, source, provider)
+			latestUsage = parseUsage(body)
+			if (status !in 200..299) {
+				refundUsage(quotaReservation, latestUsage, request, provider, requester.conversationId)
+				updateAccessRecord(requestId, "failed", errorMessage = body.take(512), groupName = requester.groupName ?: requester.groupId?.let { "group:$it" }, qqUid = requester.uid)
+				emit(normalizeUpstreamError(body))
+				return@flow
+			}
+			val converted = nonStreamCompletionToStreamChunk(body)
+			if (converted == null) {
+				refundUsage(quotaReservation, latestUsage, request, provider, requester.conversationId)
+				updateAccessRecord(requestId, "failed", errorMessage = "Invalid chat completion", groupName = requester.groupName, qqUid = requester.uid)
+				emit(errorJson("upstream_error", "LLM 返回了无效的回复"))
+				return@flow
+			}
+			emitProgress("generating", "正在生成回复…")
+			emit(converted.first)
+			val settled = settleUsage(quotaReservation, latestUsage, request, provider, requester.conversationId)
+			emit(attachQuota("{}", settled))
+			updateAccessRecord(requestId, "completed", latestUsage, groupName = requester.groupName ?: requester.groupId?.let { "group:$it" }, qqUid = requester.uid)
+			if (converted.second.isNotBlank()) recordConversationAnswer(requester, request.userContent, converted.second, provider)
+		} catch (error: Exception) {
+			if (error is kotlinx.coroutines.CancellationException) throw error
+			if (error !is QuotaSettlementException) refundUsage(quotaReservation, latestUsage, request, provider, requester.conversationId)
+			updateAccessRecord(requestId, "failed", errorMessage = error.message, groupName = requester.groupName ?: requester.groupId?.let { "group:$it" }, qqUid = requester.uid)
+			emit(errorJson("upstream_error", error.message ?: "LLM 上游请求失败"))
+		}
+		return@flow
+	}
 	try {
 		client.preparePost(provider.chatCompletionsUrl) {
 			logUpstreamRequest(source, upstreamBody, provider, "chat-completions")
@@ -329,12 +365,13 @@ internal fun LLMServices.streamFromResponses(
 	provider: LLMProvider,
 	quotaReservation: LLMQuotaReservation,
 ): Flow<String> = flow {
-	val functionTools = if (toolService.enabled()) toolService.definitions() else JsonArray()
+	val functionTools = toolService.definitions()
 	val upstreamBody = LLMResponsesAdapter.fromChatRequest(
 		request.body,
 		functionTools,
 		reasoningEffort = request.reasoningEffort,
 		stream = true,
+		webSearch = !toolService.usesSearXNG(),
 	)
 	val assistantContent = StringBuilder()
 	var totalUsage: LLMServices.Usage? = null

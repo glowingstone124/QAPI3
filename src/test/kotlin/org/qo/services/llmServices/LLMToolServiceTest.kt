@@ -5,6 +5,8 @@ import com.google.gson.JsonParser
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Test
 import org.qo.services.llmServices.tools.Tools
+import org.qo.services.llmServices.tools.SearXNGWebSearchTool
+import org.qo.services.llmServices.tools.RemoteWebFetchTool
 import kotlin.test.assertEquals
 
 class LLMToolServiceTest {
@@ -27,7 +29,8 @@ class LLMToolServiceTest {
 		"set_msg_emoji_like",
 	)
 
-	private val service = LLMToolService(toolIds.map(::StubTool))
+	private val searxng = SearXNGWebSearchTool()
+	private val service = LLMToolService(toolIds.map(::StubTool), searxng, RemoteWebFetchTool(searxng))
 
 	@Test
 	fun `minecraft requests can execute qo scoped tools without group mapping`(): Unit = runBlocking {
@@ -57,6 +60,8 @@ class LLMToolServiceTest {
 		val names = service.definitions(excluded).map { it.asJsonObject.getAsJsonObject("function").get("name").asString }
 		assertEquals(false, "get_remain_balance" in names)
 		assertEquals(true, "get_user_quota" in names)
+		assertEquals(true, "web_search" in names)
+		assertEquals(true, "web_fetch" in names)
 		val result = service.execute(
 			"get_remain_balance", "{}",
 			LLMToolContext(groupId = null, uid = "10001", name = "user", source = "web"), excluded,

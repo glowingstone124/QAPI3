@@ -259,6 +259,7 @@ internal fun LLMServices.toolProgress(name: String): Pair<String, String> {
 	return when (name.trim().lowercase()) {
 		"search_chat_history" -> "query" to "正在查询聊天记录…"
 		"search_minecraft_knowledge" -> "query" to "正在查询 Minecraft 资料…"
+		"web_fetch" -> "web_search" to "正在读取网页…"
 		"search_memory" -> "query" to "正在查询相关记忆…"
 		"get_qo_player_profile" -> "query" to "正在查询玩家资料…"
 		"get_current_date" -> "query" to "正在查询当前日期…"
