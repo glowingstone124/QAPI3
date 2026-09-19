@@ -59,6 +59,7 @@ internal suspend fun LLMServices.normalizeRequest(
 	provider: LLMProvider,
 ): LLMServices.NormalizedRequest {
 	val obj = JsonParser.parseString(body).asJsonObject
+	val clientTools = extractClientTools(obj, requester?.source)
 	obj.remove("conversation_id")
 	obj.remove("conversationId")
 	val enableMarkdown = extractEnableMarkdownFlag(obj)
@@ -143,16 +144,23 @@ internal suspend fun LLMServices.normalizeRequest(
 		resolvedModel,
 		enableMarkdown,
 	)
-	obj.add("messages", limitMessagesToContextWindow(enrichedTurn.messages, provider.contextWindow, obj))
+	if (clientTools != null) {
+		// Keep native assistant/tool-result pairs intact; never truncate a tool chain.
+		require(estimateTokens(clientContextForEstimate(enrichedTurn.messages)) + estimateTokens(clientTools) <=
+			provider.contextWindow - requestedOutputTokens(obj, provider.contextWindow)) { "建筑工具上下文过大，请开始新对话或缩小选区" }
+		obj.add("messages", enrichedTurn.messages)
+	} else obj.add("messages", limitMessagesToContextWindow(enrichedTurn.messages, provider.contextWindow, obj))
 	return LLMServices.NormalizedRequest(
 		preset = model,
 		model = obj.get("model").asString,
 		body = obj.toString(),
-		userContent = enrichedTurn.persistedUserContent,
+		userContent = if (clientTools != null) clientOriginalUserMessage(requestMessages)?.get("content")?.deepCopy()
+			?: enrichedTurn.persistedUserContent else enrichedTurn.persistedUserContent,
 		currentUserText = userQuestion,
 		enableMarkdown = enableMarkdown,
 		reasoningEffort = reasoningEffort,
 		pricing = provider.modelConfig(model).pricing?.at(java.time.Instant.now()),
+		clientTools = clientTools,
 	)
 }
 

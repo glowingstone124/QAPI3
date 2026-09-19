@@ -76,11 +76,28 @@ internal object LLMResponsesAdapter {
             messages.forEach { item ->
                 val message = item.takeIf { it.isJsonObject }?.asJsonObject
                     ?: throw IllegalArgumentException("messages must contain objects")
+                if (message.get("role")?.asString == "tool") {
+                    add(JsonObject().apply {
+                        addProperty("type", "function_call_output")
+                        add("call_id", message.get("tool_call_id"))
+                        add("output", message.get("content"))
+                    })
+                    return@forEach
+                }
                 val converted = message.deepCopy()
+                val calls = converted.remove("tool_calls")?.asJsonArray
                 message.get("content")?.let { content ->
                     converted.add("content", convertContent(content))
                 }
-                add(converted)
+                if (calls == null || message.get("content")?.let { !it.isJsonNull && (!it.isJsonPrimitive || it.asString.isNotEmpty()) } == true) add(converted)
+                calls?.forEach { callItem ->
+                    val call = callItem.asJsonObject
+                    val function = call.getAsJsonObject("function")
+                    add(JsonObject().apply {
+                        addProperty("type", "function_call")
+                        add("call_id", call.get("id")); add("name", function.get("name")); add("arguments", function.get("arguments"))
+                    })
+                }
             }
         }
     }
@@ -196,6 +213,7 @@ internal object LLMResponsesAdapter {
     fun toChatCompletion(responseBody: String): String {
         val response = JsonParser.parseString(responseBody).asJsonObject
         val content = extractText(response)
+        val calls = functionCalls(responseBody)
         val usage = response.getAsJsonObject("usage")
         val promptTokens = usage?.get("input_tokens")?.asInt ?: 0
         val completionTokens = usage?.get("output_tokens")?.asInt ?: 0
@@ -210,10 +228,11 @@ internal object LLMResponsesAdapter {
             add("choices", JsonArray().apply {
                 add(JsonObject().apply {
                     addProperty("index", 0)
-                    addProperty("finish_reason", if (response.get("status")?.asString == "incomplete") "length" else "stop")
+                    addProperty("finish_reason", if (response.get("status")?.asString == "incomplete") "length" else if (calls.isNotEmpty()) "tool_calls" else "stop")
                     add("message", JsonObject().apply {
                         addProperty("role", "assistant")
                         addProperty("content", content)
+                        if (calls.isNotEmpty()) add("tool_calls", nativeToolCalls(calls))
                     })
                 })
             })

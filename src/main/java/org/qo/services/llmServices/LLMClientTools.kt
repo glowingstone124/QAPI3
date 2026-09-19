@@ -1,0 +1,195 @@
+package org.qo.services.llmServices
+
+import com.google.gson.JsonArray
+import com.google.gson.JsonElement
+import com.google.gson.JsonObject
+import com.google.gson.JsonParser
+import io.ktor.client.HttpClient
+import io.ktor.client.request.header
+import io.ktor.client.request.post
+import io.ktor.client.request.setBody
+import io.ktor.client.statement.bodyAsText
+import io.ktor.http.ContentType
+import io.ktor.http.HttpHeaders
+import io.ktor.http.contentType
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.flow
+
+internal val builderToolNames = setOf("set", "fill", "replace", "blend_fill", "generate_preview_image")
+
+/** Tool feedback is not a new user task when recording the final conversation. */
+internal fun clientOriginalUserMessage(messages: JsonArray): JsonObject? {
+    val beforeTools = messages.toList().takeWhile { !it.asJsonObject.has("tool_calls") }
+    return beforeTools.lastOrNull { it.asJsonObject.get("role")?.asString == "user" }?.asJsonObject
+}
+
+/** Opt-in Web-only relay. These tools must never reach LLMToolService.execute. */
+internal fun extractClientTools(request: JsonObject, source: String?): JsonArray? {
+    val execution = request.remove("tool_execution")?.asString
+    if (execution == null) return null
+    require(execution == "client" && source == "web") { "客户端工具仅用于 Web Builder" }
+    val tools = request.getAsJsonArray("tools") ?: error("客户端工具缺少 tools 定义")
+    require(tools.size() in 1..5 && tools.toString().length <= 32768) { "客户端工具定义过多或过大" }
+    val names = mutableSetOf<String>()
+    tools.forEach { item ->
+        val tool = item.asJsonObject
+        require(tool.get("type")?.asString == "function") { "仅支持客户端 function 工具" }
+        val function = tool.getAsJsonObject("function") ?: error("缺少 function 定义")
+        val name = function.get("name")?.asString
+        require(name in builderToolNames && names.add(requireNotNull(name))) { "未知或重复的 Builder 工具" }
+        require(function.getAsJsonObject("parameters")?.get("type")?.asString == "object") { "工具参数必须为 object schema" }
+    }
+    require(request.get("tool_choice")?.asString in setOf(null, "auto", "none")) { "客户端 tool_choice 只支持 auto 或 none" }
+    validateClientToolHistory(request.getAsJsonArray("messages") ?: error("缺少 messages"))
+    return tools.deepCopy()
+}
+
+internal fun validateClientToolHistory(messages: JsonArray) {
+    val seen = mutableSetOf<String>()
+    val pending = mutableSetOf<String>()
+    messages.forEach { item ->
+        val message = item.asJsonObject
+        val role = message.get("role")?.asString
+        if (role == "tool") {
+            require(pending.remove(message.get("tool_call_id")?.asString)) { "工具结果缺少对应调用或重复回传" }
+            require(message.get("content")?.isJsonPrimitive == true) { "工具结果必须为字符串；图片另附 user 消息" }
+        } else {
+            require(pending.isEmpty()) { "工具调用结果不完整" }
+            message.getAsJsonArray("tool_calls")?.let { calls ->
+                require(role == "assistant" && calls.size() in 1..256) { "无效的 assistant 工具调用" }
+                calls.forEach { callItem ->
+                    val call = callItem.asJsonObject
+                    val id = call.get("id")?.asString.orEmpty()
+                    require(id.isNotBlank() && id.length <= 256 && seen.add(id)) { "工具调用 ID 无效或重复" }
+                    require(call.get("type")?.asString == "function" && call.getAsJsonObject("function")?.get("name")?.asString in builderToolNames) { "未知客户端工具调用" }
+                    pending.add(id)
+                }
+            }
+        }
+    }
+    require(pending.isEmpty()) { "工具调用结果不完整" }
+}
+
+// Data URLs are images, not hundreds of thousands of text tokens.
+internal fun clientContextForEstimate(value: JsonElement): JsonElement = when {
+    value.isJsonArray -> JsonArray().apply { value.asJsonArray.forEach { add(clientContextForEstimate(it)) } }
+    value.isJsonObject -> if (value.asJsonObject.get("type")?.asString == "image_url") {
+        com.google.gson.JsonPrimitive("i".repeat(16384))
+    } else JsonObject().apply { value.asJsonObject.entrySet().forEach { (key, child) -> add(key, clientContextForEstimate(child)) } }
+    else -> value.deepCopy()
+}
+
+internal fun nativeToolCalls(calls: List<ResponseFunctionCall>) = JsonArray().apply {
+    calls.forEach { call -> add(JsonObject().apply {
+        addProperty("id", call.callId); addProperty("type", "function")
+        add("function", JsonObject().apply { addProperty("name", call.name); addProperty("arguments", call.arguments ?: "{}") })
+    }) }
+}
+
+/** Exactly one model turn, with no local executor and no server-side tool loop. */
+internal suspend fun runClientToolUpstream(
+    client: HttpClient, url: String, token: String, protocol: LLMProtocol,
+    chat: JsonObject, tools: JsonArray, effort: LLMReasoningEffort,
+    onRequest: (String) -> Unit = {},
+): Pair<Int, String> {
+    val allowTools = chat.get("tool_choice")?.asString != "none"
+    val definitions = if (allowTools) tools else JsonArray()
+    val outgoing = when (protocol) {
+        LLMProtocol.RESPONSES -> LLMResponsesAdapter.fromChatRequest(chat.toString(), tools, effort, webSearch = false).apply {
+            if (!allowTools) addProperty("tool_choice", "none")
+        }
+        // Stateless browser continuations cannot echo native signed thinking blocks.
+        LLMProtocol.ANTHROPIC -> LLMAnthropicAdapter.fromChatRequest(chat.toString(), tools, LLMReasoningEffort.NONE, webSearch = false).apply {
+            if (!allowTools) add("tool_choice", JsonObject().apply { addProperty("type", "none") })
+        }
+        LLMProtocol.COMMANDCODE -> LLMCommandCodeAdapter.fromChatRequest(chat, definitions, effort)
+        LLMProtocol.CHAT_COMPLETIONS -> chat.deepCopy().apply {
+            addProperty("stream", false); remove("stream_options")
+            add("tools", tools); addProperty("tool_choice", if (allowTools) "auto" else "none")
+        }
+    }
+    if (protocol == LLMProtocol.COMMANDCODE) return runCommandCodeUpstream(client, url, token, outgoing, onRequest = onRequest)
+    onRequest(outgoing.toString())
+    val response = client.post(url) {
+        if (protocol == LLMProtocol.ANTHROPIC) {
+            header("x-api-key", token); header("anthropic-version", "2023-06-01")
+        } else header(HttpHeaders.Authorization, "Bearer $token")
+        contentType(ContentType.Application.Json); setBody(outgoing.toString())
+    }
+    val text = response.bodyAsText()
+    if (response.status.value !in 200..299) return response.status.value to text
+    val converted = when (protocol) {
+        LLMProtocol.RESPONSES -> {
+            val root = JsonParser.parseString(text).asJsonObject
+            require(!root.has("error") && root.get("status")?.asString !in setOf("failed", "incomplete")) { "Responses 请求未完整完成" }
+            LLMResponsesAdapter.toChatCompletion(text)
+        }
+        LLMProtocol.ANTHROPIC -> {
+            val root = JsonParser.parseString(text).asJsonObject
+            require(root.get("type")?.asString == "message" && root.get("stop_reason")?.asString in setOf("end_turn", "tool_use", "stop_sequence")) { "Anthropic 请求未完整完成" }
+            LLMAnthropicAdapter.toChatCompletion(root)
+        }
+        else -> text
+    }
+    return response.status.value to converted
+}
+
+internal suspend fun LLMServices.completeClientTools(request: LLMServices.NormalizedRequest, source: String, provider: LLMProvider): Pair<Int, String> {
+    val protocol = provider.protocol(request.preset)
+    val chat = JsonParser.parseString(request.body).asJsonObject
+    // DeepSeek requires hidden reasoning history for thinking tool continuations.
+    if (protocol == LLMProtocol.CHAT_COMPLETIONS && provider.name.contains("deepseek", true)) {
+        chat.add("thinking", JsonObject().apply { addProperty("type", "disabled") })
+        chat.addProperty("reasoning_effort", "none")
+    }
+    val (status, body) = runClientToolUpstream(client, provider.endpoint(protocol), provider.apiToken, protocol,
+        chat, requireNotNull(request.clientTools), request.reasoningEffort,
+        onRequest = { logUpstreamRequest(source, it, provider, protocol.wireValue); debugPrompt(source, it) })
+    if (status !in 200..299) return status to body
+    // Only expose the native assistant content/calls, never provider reasoning.
+    val root = JsonParser.parseString(body).asJsonObject
+    val choice = root.getAsJsonArray("choices")?.firstOrNull()?.asJsonObject ?: error("模型缺少 choices")
+    require(choice.get("finish_reason")?.asString in setOf("stop", "tool_calls")) { "模型回复未完整完成" }
+    val message = choice.getAsJsonObject("message") ?: error("模型缺少 message")
+    message.remove("reasoning_content"); message.remove("reasoning")
+    message.getAsJsonArray("tool_calls")?.let { calls ->
+        require(calls.size() in 1..256 && calls.toString().length <= 128 * 1024) { "模型工具调用过多或过大" }
+        val ids = mutableSetOf<String>()
+        calls.forEach { item ->
+            val call = item.asJsonObject
+            require(call.get("type")?.asString == "function" && call.getAsJsonObject("function")?.get("name")?.asString in builderToolNames) { "模型返回未知客户端工具" }
+            val id = call.get("id")?.asString.orEmpty()
+            require(id.isNotBlank() && id.length <= 256 && ids.add(id)) { "模型返回无效工具 ID" }
+        }
+    }
+    return status to root.toString()
+}
+
+internal fun LLMServices.streamClientTools(
+    request: LLMServices.NormalizedRequest, requester: LLMServices.LLMRequester, requestId: Long,
+    provider: LLMProvider, reservation: LLMQuotaReservation,
+) = flow {
+    var usage: LLMServices.Usage? = null
+    try {
+        emit(progressChunk("analyzing", "正在规划建筑操作…"))
+        val (status, body) = completeClientTools(request, "client-tools", provider)
+        usage = parseUsage(body)
+        if (status !in 200..299) {
+            refundUsage(reservation, usage, request, provider, requester.conversationId)
+            updateAccessRecord(requestId, "failed", errorMessage = body.take(512), qqUid = requester.uid)
+            emit(normalizeUpstreamError(body)); return@flow
+        }
+        val settled = settleUsage(reservation, usage, request, provider, requester.conversationId)
+        // Buffered native completion: the client executes only after quota + [DONE].
+        emit(body)
+        emit(attachQuota("{}", settled))
+        updateAccessRecord(requestId, "completed", usage, qqUid = requester.uid)
+        val message = JsonParser.parseString(body).asJsonObject.getAsJsonArray("choices")[0].asJsonObject.getAsJsonObject("message")
+        if (!message.has("tool_calls")) extractAssistantContent(body)?.let { recordConversationAnswer(requester, request.userContent, it, provider) }
+    } catch (error: Exception) {
+        if (error is CancellationException) throw error
+        if (error !is QuotaSettlementException) refundUsage(reservation, usage, request, provider, requester.conversationId)
+        updateAccessRecord(requestId, "failed", errorMessage = error.message, qqUid = requester.uid)
+        emit(errorJson("client_tool_error", error.message ?: "客户端工具请求失败"))
+    }
+}

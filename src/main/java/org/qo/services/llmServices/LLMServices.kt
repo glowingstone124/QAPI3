@@ -252,7 +252,9 @@ class LLMServices(
 				qqUid = requester.uid,
 			)
 			if (statusCode in 200..299) {
-				recordConversation(requester, request.userContent, text, actualProvider)
+				if (request.clientTools == null || extractToolCalls(rawText).isEmpty()) {
+					recordConversation(requester, request.userContent, text, actualProvider)
+				}
 			} else {
 				refundUsage(reservation,usage,actualRequest,actualProvider,requester.conversationId)
 			}
@@ -302,7 +304,7 @@ class LLMServices(
 		}
 		val reservation = requireNotNull(quota.reservation)
 
-		val chunks = when (provider.protocol(request.preset)) {
+		val chunks = if (request.clientTools != null) streamClientTools(request, requester, requestId, provider, reservation) else when (provider.protocol(request.preset)) {
 			LLMProtocol.RESPONSES -> streamFromResponses(request, requester, requestId, "stream", provider, reservation)
 			LLMProtocol.ANTHROPIC -> streamFromAnthropic(request, requester, requestId, "stream", provider, reservation)
 			LLMProtocol.CHAT_COMPLETIONS -> streamFromUpstream(request, requester, requestId, "stream", provider, reservation)
@@ -550,7 +552,8 @@ class LLMServices(
 				  {"username": "KnownPlayerName"}
 				  ```
 				  输出玩家卡之前必须先调用 get_qo_player_profile 查询该用户名。只有工具返回 found=true 时才能输出；found=false 时明确说明未找到玩家，不得输出玩家卡。卡片中只填写工具确认过的 username，不要猜测或输出 QQ、在线状态、游玩时间、封禁状态、头像地址及统计数据；Kotshi 会从 QAPI 查询权威资料。若没有确定用户名，先向用户询问。
-				- 上述 fenced JSON 是 Kotshi 的展示标记，不是工具调用；除此之外仍禁止向用户暴露 JSON 工具参数。
+				- 【Kotshi Builder 原生工具】：当 Web 用户消息包含 [Kotshi Builder 工作区上下文] 且 API 提供建筑工具时，使用原生 function 调用 set、fill、replace、blend_fill 或 generate_preview_image。所有建筑操作均由 Web 客户端执行；必须等待真实 tool 结果或图片再继续。严格遵循 revision、选区边界和数量限制；同批使用同一修订号，编辑后再生成预览。不要输出 kotshi-builder 或 kotshi-preview 代码块来执行操作；没有工具定义时不要声称已经编辑建筑。
+				- 上述合成表、熔炉和玩家卡 fenced JSON 是 Kotshi 的展示标记；原生工具参数仅放在 API 工具调用字段中，不要写入回复正文。
 				""".trimIndent()
 			} else ""
 
@@ -654,6 +657,7 @@ class LLMServices(
 		val enableMarkdown: Boolean,
 		val reasoningEffort: LLMReasoningEffort,
 		val pricing: LLMModelPricing? = null,
+		val clientTools: JsonArray? = null,
 	)
 
 	internal data class LLMRequester(

@@ -57,6 +57,7 @@ internal suspend fun LLMServices.completeWithOptionalTools(
 	source: String,
 	provider: LLMProvider,
 ): Pair<Int, String> {
+	if (request.clientTools != null) return completeClientTools(request, source, provider)
 	if (provider.protocol(request.preset) == LLMProtocol.COMMANDCODE) {
 		val attempt = completeWithCommandCodeApi(request, requester, source, provider)
 		return attempt.status to attempt.body

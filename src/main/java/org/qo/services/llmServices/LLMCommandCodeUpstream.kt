@@ -187,7 +187,7 @@ internal suspend fun LLMServices.completeWithFallback(
     provider: LLMProvider,
 ): LLMCompletionOutcome {
     val fallback = provider.fallback
-    if (fallback == null || provider.protocol(request.preset) != LLMProtocol.COMMANDCODE) {
+    if (request.clientTools != null || fallback == null || provider.protocol(request.preset) != LLMProtocol.COMMANDCODE) {
         val (status, body) = completeWithOptionalTools(request, requester, source, provider)
         return LLMCompletionOutcome(status, body, request, provider)
     }

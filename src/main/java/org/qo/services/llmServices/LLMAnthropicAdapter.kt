@@ -220,7 +220,11 @@ internal object LLMAnthropicAdapter {
                     "refusal" -> "content_filter"
                     else -> "stop"
                 })
-                add("message", JsonObject().apply { addProperty("role", "assistant"); addProperty("content", text(response)) })
+                add("message", JsonObject().apply {
+                    addProperty("role", "assistant"); addProperty("content", text(response))
+                    val calls = functionCalls(response)
+                    if (calls.isNotEmpty()) add("tool_calls", nativeToolCalls(calls))
+                })
             })
         })
         response.getAsJsonObject("usage")?.let { usage ->
