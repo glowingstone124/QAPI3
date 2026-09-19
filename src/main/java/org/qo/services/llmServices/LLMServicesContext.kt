@@ -111,6 +111,19 @@ internal suspend fun LLMServices.normalizeRequest(
 		currentUid = requester?.uid,
 		summarize = ::summarizeGroupContext,
 	)
+	val recentGroupMessages = requester
+		?.takeIf { it.source == LLMSource.QQ.value && it.groupId != null }
+		?.let { current ->
+			runCatching { chatHistoryService.search(current.groupId!!, "", limit = 24) }
+				.onFailure { println("[LLM] recent group messages lookup failed: ${it.message}") }
+				.getOrDefault(emptyList())
+		}
+	val groupConversationContext = withRecentGroupMessages(
+		preparedGroupContext,
+		recentGroupMessages.orEmpty(),
+		requester?.messageId,
+		requester?.uid,
+	)
 	val profileUids = participantUids(memberMemories, effectiveGroupContext, requester?.uid)
 	val storedProfiles = try {
 		requester?.takeIf { it.source in setOf(LLMSource.QQ.value, LLMSource.WEB.value) }?.let {
@@ -125,7 +138,7 @@ internal suspend fun LLMServices.normalizeRequest(
 	val enrichedTurn = enrichMessages(
 		requestMessages,
 		requester,
-		preparedGroupContext,
+		groupConversationContext,
 		memberProfileContext,
 		resolvedModel,
 		enableMarkdown,
@@ -141,6 +154,44 @@ internal suspend fun LLMServices.normalizeRequest(
 		reasoningEffort = reasoningEffort,
 		pricing = provider.modelConfig(model).pricing?.at(java.time.Instant.now()),
 	)
+}
+
+internal fun withRecentGroupMessages(
+	groupContext: JsonObject?,
+	messages: List<LLMChatHistoryRecord>,
+	currentMessageId: Long?,
+	currentUid: Long?,
+): JsonObject? {
+	if (groupContext == null || messages.isEmpty()) return groupContext
+	val currentSourceId = currentMessageId?.let { "onebot:$it" }
+	val recent = messages
+		.filterNot { it.sourceId == currentSourceId }
+		.take(20)
+		.asReversed()
+	if (recent.isEmpty()) return groupContext
+	return groupContext.deepCopy().apply {
+		add("recent_participants", JsonArray().apply {
+			recent.asReversed().distinctBy { it.uid }.forEach { record ->
+				add(JsonObject().apply {
+					addProperty("qquid", record.uid)
+					addProperty("latest_nickname", record.name)
+					addProperty("is_current_sender", record.uid == currentUid)
+				})
+			}
+		})
+		add("recent_messages", JsonArray().apply {
+			recent.forEach { record ->
+				add(JsonObject().apply {
+					addProperty("source_id", record.sourceId)
+					addProperty("qquid", record.uid)
+					addProperty("nickname", record.name)
+					addProperty("is_current_sender", record.uid == currentUid)
+					addProperty("time", record.time)
+					addProperty("text", record.content.take(500))
+				})
+			}
+		})
+	}
 }
 
 internal suspend fun LLMServices.enrichMessages(
