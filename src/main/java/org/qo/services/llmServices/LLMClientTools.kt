@@ -17,6 +17,23 @@ import kotlinx.coroutines.flow.flow
 
 internal val builderToolNames = setOf("set", "fill", "replace", "blend_fill", "generate_preview_image")
 internal const val CLIENT_TOOL_OUTPUT_TOKENS = 32_768
+private const val CLIENT_TOOL_RETRY_OUTPUT_TOKENS = 131_072
+
+private fun prependClientInstruction(chat: JsonObject, instruction: String) {
+    val previous = chat.getAsJsonArray("messages")
+    chat.add("messages", JsonArray().apply {
+        add(JsonObject().apply {
+            addProperty("role", "system")
+            addProperty("content", instruction)
+        })
+        previous.forEach(::add)
+    })
+}
+
+internal fun clientToolStepChat(chat: JsonObject): JsonObject = chat.deepCopy().apply {
+    if (get("tool_choice")?.asString == "none") return@apply
+    prependClientInstruction(this, "Kotshi Builder 是逐步执行的客户端 Agent。每次回复最多调用一个建筑工具；等待浏览器返回结果和最新结构后再决定下一步。优先用 fill、replace、blend_fill 处理区域。不要一次输出完整施工计划或大量工具调用。若已完成则直接回复。")
+}
 
 /** Tool feedback is not a new user task when recording the final conversation. */
 internal fun clientOriginalUserMessage(messages: JsonArray): JsonObject? {
@@ -141,6 +158,16 @@ internal fun nativeToolCalls(calls: List<ResponseFunctionCall>) = JsonArray().ap
     }) }
 }
 
+private fun truncatedClientCompletion(root: JsonObject): String = JsonObject().apply {
+    root.get("id")?.let { add("id", it.deepCopy()) }
+    root.get("model")?.let { add("model", it.deepCopy()) }
+    add("choices", JsonArray().apply { add(JsonObject().apply {
+        addProperty("finish_reason", "length")
+        add("message", JsonObject().apply { addProperty("role", "assistant"); addProperty("content", "") })
+    }) })
+    root.get("usage")?.let { add("usage", it.deepCopy()) }
+}.toString()
+
 /** Exactly one model turn, with no local executor and no server-side tool loop. */
 internal suspend fun runClientToolUpstream(
     client: HttpClient, url: String, token: String, protocol: LLMProtocol,
@@ -152,10 +179,12 @@ internal suspend fun runClientToolUpstream(
     val outgoing = when (protocol) {
         LLMProtocol.RESPONSES -> LLMResponsesAdapter.fromChatRequest(chat.toString(), tools, effort, webSearch = false).apply {
             if (!allowTools) addProperty("tool_choice", "none")
+            else addProperty("parallel_tool_calls", false)
         }
         // Stateless browser continuations cannot echo native signed thinking blocks.
         LLMProtocol.ANTHROPIC -> LLMAnthropicAdapter.fromChatRequest(chat.toString(), tools, LLMReasoningEffort.NONE, webSearch = false).apply {
             if (!allowTools) add("tool_choice", JsonObject().apply { addProperty("type", "none") })
+            else getAsJsonObject("tool_choice")?.addProperty("disable_parallel_tool_use", true)
         }
         LLMProtocol.COMMANDCODE -> LLMCommandCodeAdapter.fromChatRequest(chat, definitions, effort)
         LLMProtocol.CHAT_COMPLETIONS -> chat.deepCopy().apply {
@@ -176,33 +205,89 @@ internal suspend fun runClientToolUpstream(
     val converted = when (protocol) {
         LLMProtocol.RESPONSES -> {
             val root = JsonParser.parseString(text).asJsonObject
-            require(!root.has("error") && root.get("status")?.asString !in setOf("failed", "incomplete")) { "Responses 请求未完整完成" }
-            LLMResponsesAdapter.toChatCompletion(text)
+            require((root.get("error") == null || root.get("error").isJsonNull) && root.get("status")?.asString != "failed") { "Responses 请求失败" }
+            if (root.get("status")?.asString == "incomplete") truncatedClientCompletion(root)
+            else LLMResponsesAdapter.toChatCompletion(text)
         }
         LLMProtocol.ANTHROPIC -> {
             val root = JsonParser.parseString(text).asJsonObject
-            require(root.get("type")?.asString == "message" && root.get("stop_reason")?.asString in setOf("end_turn", "tool_use", "stop_sequence")) { "Anthropic 请求未完整完成" }
-            LLMAnthropicAdapter.toChatCompletion(root)
+            require(root.get("type")?.asString == "message" && root.get("stop_reason")?.asString in setOf("end_turn", "tool_use", "stop_sequence", "max_tokens")) { "Anthropic 请求未完整完成" }
+            if (root.get("stop_reason")?.asString == "max_tokens") truncatedClientCompletion(root)
+            else LLMAnthropicAdapter.toChatCompletion(root)
         }
         else -> text
     }
     return response.status.value to converted
 }
 
+private fun clientToolFinishReason(body: String): String? = runCatching {
+    JsonParser.parseString(body).asJsonObject.getAsJsonArray("choices")
+        ?.firstOrNull()?.asJsonObject?.get("finish_reason")?.asString
+}.getOrNull()
+
+internal fun LLMServices.clientToolRetryChat(chat: JsonObject, tools: JsonArray, contextWindow: Int): JsonObject? {
+    val retry = chat.deepCopy()
+    prependClientInstruction(retry, "上一尝试达到长度上限，任何工具都没有执行。现在只决定下一项最小的建筑操作：最多调用一个工具，不要输出完整计划；如果当前任务已完成，直接简短回复。")
+    val inputTokens = estimateTokens(clientContextForEstimate(retry.getAsJsonArray("messages"))) + estimateTokens(tools)
+    val retryLimit = minOf(CLIENT_TOOL_RETRY_OUTPUT_TOKENS, contextWindow - inputTokens)
+    if (retryLimit <= (chat.get("max_tokens")?.asInt ?: CLIENT_TOOL_OUTPUT_TOKENS)) return null
+    retry.addProperty("max_tokens", retryLimit)
+    return retry
+}
+
+/** Retry a truncated model step once from the same unmodified browser state. */
+internal suspend fun LLMServices.runClientToolAgentTurn(
+    client: HttpClient, url: String, token: String, protocol: LLMProtocol,
+    chat: JsonObject, tools: JsonArray, effort: LLMReasoningEffort, contextWindow: Int,
+    onRequest: (String) -> Unit = {},
+): Pair<Int, String> {
+    val first = runClientToolUpstream(client, url, token, protocol, chat, tools, effort, onRequest)
+    if (first.first !in 200..299 || clientToolFinishReason(first.second) != "length") return first
+    val firstUsage = parseUsage(first.second)
+    println("[LLM] Builder step truncated protocol=${protocol.wireValue} requested_output=${chat.get("max_tokens")?.asInt} output_tokens=${firstUsage?.completionTokens} reasoning_tokens=${firstUsage?.reasoningTokens}")
+    val retryChat = clientToolRetryChat(chat, tools, contextWindow)
+        ?: return 422 to withUsage(errorJson("client_tool_length", clientToolFinishError("length")), firstUsage)
+    val second = runClientToolUpstream(client, url, token, protocol, retryChat, tools,
+        if (effort == LLMReasoningEffort.NONE) effort else LLMReasoningEffort.LOW, onRequest)
+    val usage = if (firstUsage == null) parseUsage(second.second) else accumulateUsage(firstUsage, parseUsage(second.second))
+    if (second.first !in 200..299) return second.first to withUsage(second.second, usage)
+    if (clientToolFinishReason(second.second) == "length") {
+        println("[LLM] Builder retry truncated protocol=${protocol.wireValue} requested_output=${retryChat.get("max_tokens")?.asInt} total_output_tokens=${usage?.completionTokens} reasoning_tokens=${usage?.reasoningTokens}")
+        return 422 to withUsage(errorJson("client_tool_length", "模型连续两次达到建筑操作长度上限，本批工具未执行；请继续分步操作"), usage)
+    }
+    return second.first to withUsage(second.second, usage)
+}
+
+/** A browser agent step observes one edit before deciding what to do next. */
+internal fun limitClientToolStep(root: JsonObject): JsonObject {
+    val choice = root.getAsJsonArray("choices")?.firstOrNull()?.asJsonObject ?: return root
+    val message = choice.getAsJsonObject("message") ?: return root
+    val calls = message.getAsJsonArray("tool_calls") ?: return root
+    if (calls.size() <= 1) return root
+    println("[LLM] Builder model returned ${calls.size()} calls in one step; forwarding the first")
+    message.add("tool_calls", JsonArray().apply { add(calls[0].deepCopy()) })
+    message.addProperty("content", "")
+    choice.addProperty("finish_reason", "tool_calls")
+    return root
+}
+
 internal suspend fun LLMServices.completeClientTools(request: LLMServices.NormalizedRequest, source: String, provider: LLMProvider): Pair<Int, String> {
     val protocol = provider.protocol(request.preset)
-    val chat = JsonParser.parseString(request.body).asJsonObject
+    val chat = clientToolStepChat(JsonParser.parseString(request.body).asJsonObject)
     // DeepSeek requires hidden reasoning history for thinking tool continuations.
-    if (protocol == LLMProtocol.CHAT_COMPLETIONS && provider.name.contains("deepseek", true)) {
+    if (protocol == LLMProtocol.CHAT_COMPLETIONS &&
+        (provider.name.contains("deepseek", true) || chat.get("model")?.asString?.contains("deepseek", true) == true)) {
         chat.add("thinking", JsonObject().apply { addProperty("type", "disabled") })
         chat.addProperty("reasoning_effort", "none")
     }
-    val (status, body) = runClientToolUpstream(client, provider.endpoint(protocol), provider.apiToken, protocol,
-        chat, requireNotNull(request.clientTools), request.reasoningEffort,
+    val allowTools = chat.get("tool_choice")?.asString != "none"
+    val (status, body) = runClientToolAgentTurn(client, provider.endpoint(protocol), provider.apiToken, protocol,
+        chat, requireNotNull(request.clientTools), if (allowTools) LLMReasoningEffort.NONE else request.reasoningEffort,
+        provider.contextWindow,
         onRequest = { logUpstreamRequest(source, it, provider, protocol.wireValue); debugPrompt(source, it) })
     if (status !in 200..299) return status to body
     // Only expose the native assistant content/calls, never provider reasoning.
-    val root = JsonParser.parseString(body).asJsonObject
+    val root = limitClientToolStep(JsonParser.parseString(body).asJsonObject)
     val choice = root.getAsJsonArray("choices")?.firstOrNull()?.asJsonObject ?: error("模型缺少 choices")
     val finishReason = choice.get("finish_reason")?.asString
     require(finishReason in setOf("stop", "tool_calls")) { clientToolFinishError(finishReason) }
