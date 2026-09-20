@@ -43,13 +43,13 @@ class LLMBalanceService(
 
 		return when (balance.balanceStruct) {
 			BalanceStructParse.DEEPSEEK -> true to (
-				result.getAsJsonArray("balance_infos")
-					.firstOrNull { it.asJsonObject.get("currency").asString == "CNY" }
-					?.asJsonObject
-					?.get("total_balance")
-					?.asDouble
-					?: 0.0
-			)
+					result.getAsJsonArray("balance_infos")
+						.firstOrNull { it.asJsonObject.get("currency").asString == "CNY" }
+						?.asJsonObject
+						?.get("total_balance")
+						?.asDouble
+						?: 0.0
+					)
 
 			BalanceStructParse.TEAMOROUTER ->
 				true to result.getAsJsonObject("balance").get("value").asDouble

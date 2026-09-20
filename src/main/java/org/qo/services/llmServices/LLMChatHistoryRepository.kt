@@ -13,9 +13,22 @@ import org.springframework.stereotype.Repository
 
 interface LLMChatHistoryRepository {
 	suspend fun insert(records: List<LLMChatHistoryRecord>): Int
-	suspend fun search(groupId: Long, query: String, uid: Long?, fromTime: Long?, toTime: Long?, limit: Int): List<LLMChatHistoryRecord>
+	suspend fun search(
+		groupId: Long,
+		query: String,
+		uid: Long?,
+		fromTime: Long?,
+		toTime: Long?,
+		limit: Int
+	): List<LLMChatHistoryRecord>
+
 	suspend fun findGroupIds(limit: Int): List<Long>
-	suspend fun findForSummary(groupId: Long, afterArchiveId: Long, fromTime: Long, limit: Int): List<LLMChatHistoryRecord>
+	suspend fun findForSummary(
+		groupId: Long,
+		afterArchiveId: Long,
+		fromTime: Long,
+		limit: Int
+	): List<LLMChatHistoryRecord>
 }
 
 @Repository

@@ -280,7 +280,7 @@ internal suspend fun LLMServices.enrichMessages(
 
 internal fun LLMServices.requesterSpecificRules(requester: LLMServices.LLMRequester): String? = when {
 	requester.uid in ultraBriefQqUids ->
-		"当前用户需要最简短回答：除非必须澄清安全或事实风险，否则只用一句自然的话回答。"
+		"当前用户需要只用一句自然的话回答。"
 	requester.source != LLMSource.MINECRAFT.value && qoGroupId != null && requester.groupId != qoGroupId ->
 		"本条消息不来自 QO 唯一官方群。不要提及、检索、推断或泄露 QO 服务器的内部资料、规则、账号、状态、指令或群聊历史；普通知识和日常聊天仍可正常回答。"
 	else -> null
@@ -293,7 +293,7 @@ internal fun LLMServices.modelConversationAdapter(model: String): String? = when
 		""".trimIndent()
 	model.contains("deepseek", ignoreCase = true) ->
 		"""
-		DeepSeek 对话适配：保持自然口语，但不要过度演绎角色、擅自增加亲密关系或虚构共同经历。角色感应来自措辞和反应方式，不要频繁复述东方设定。
+		DeepSeek 对话适配：保持自然口语。角色感应来自措辞和反应方式，不要频繁复述东方设定。
 		""".trimIndent()
 	else -> null
 }
