@@ -6,11 +6,13 @@ import com.google.gson.JsonParser
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
+import io.ktor.client.plugins.HttpTimeout
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.content.TextContent
 import io.ktor.http.headersOf
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.delay
 import kotlin.test.*
 
 class LLMClientToolsTest {
@@ -34,6 +36,58 @@ class LLMClientToolsTest {
         assertEquals("call_1", message.getAsJsonArray("tool_calls")[0].asJsonObject.get("id").asString)
         assertEquals("", message.get("content").asString)
         assertEquals(200, limited.getAsJsonObject("usage").get("completion_tokens").asInt)
+    }
+
+    @Test fun `commandcode builder steps have a small budget and explicit low reasoning`() {
+        val step = chat().apply { addProperty("max_tokens", 32768) }
+        assertEquals(LLMReasoningEffort.LOW,
+            configureClientToolStep(step, LLMProtocol.COMMANDCODE, LLMReasoningEffort.HIGH))
+        assertEquals(8192, step.get("max_tokens").asInt)
+        val final = chat().apply { addProperty("tool_choice", "none"); addProperty("max_tokens", 32768) }
+        assertEquals(LLMReasoningEffort.HIGH,
+            configureClientToolStep(final, LLMProtocol.COMMANDCODE, LLMReasoningEffort.HIGH))
+        assertEquals(32768, final.get("max_tokens").asInt)
+    }
+
+    @Test fun `commandcode builder request overrides the shared 120 second timeout`() = runBlocking {
+        val engine = MockEngine {
+            delay(100)
+            respond("""{"type":"finish","finishReason":"end-turn","totalUsage":{"inputTokens":1,"outputTokens":1}}
+""", HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
+        }
+        HttpClient(engine) { install(HttpTimeout) { requestTimeoutMillis = 20 } }.use { client ->
+            val body = LLMCommandCodeAdapter.fromChatRequest(chat(), tools, LLMReasoningEffort.LOW)
+            val (status, response) = runCommandCodeUpstream(client, "https://model.example/api", "token", body,
+                requestTimeoutMillis = 1000)
+            assertEquals(200, status)
+            assertEquals("stop", obj(response).getAsJsonArray("choices")[0].asJsonObject.get("finish_reason").asString)
+        }
+    }
+
+    @Test fun `commandcode truncated step retries with a bounded larger output`() = runBlocking {
+        val outgoing = mutableListOf<JsonObject>()
+        val engine = MockEngine { request ->
+            outgoing += obj((request.body as TextContent).text)
+            val response = if (outgoing.size == 1)
+                """{"type":"finish","finishReason":"max-tokens","totalUsage":{"inputTokens":30,"outputTokens":8192}}
+"""
+            else """{"type":"tool-call","toolCallId":"call_1","toolName":"fill","input":{"revision":0}}
+{"type":"finish","finishReason":"tool-calls","totalUsage":{"inputTokens":35,"outputTokens":20}}
+"""
+            respond(response, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
+        }
+        val services = org.mockito.Mockito.mock(LLMServices::class.java)
+        HttpClient(engine).use { client ->
+            val step = clientToolStepChat(chat().apply { addProperty("max_tokens", 32768) })
+            val effort = configureClientToolStep(step, LLMProtocol.COMMANDCODE, LLMReasoningEffort.HIGH)
+            val (status, body) = services.runClientToolAgentTurn(client, "https://model.example/api", "token",
+                LLMProtocol.COMMANDCODE, step, tools, effort, 524288)
+            assertEquals(200, status)
+            assertEquals(listOf(8192, 32768), outgoing.map { it.getAsJsonObject("params").get("max_tokens").asInt })
+            assertTrue(outgoing.all { it.getAsJsonObject("params").get("reasoning_effort").asString == "low" })
+            assertEquals("tool_calls", obj(body).getAsJsonArray("choices")[0].asJsonObject.get("finish_reason").asString)
+            assertEquals(2, obj(body).getAsJsonObject("usage").get("qapi_api_calls").asInt)
+        }
     }
 
     @Test fun `old builder turns are compacted while current tool results stay paired`() {

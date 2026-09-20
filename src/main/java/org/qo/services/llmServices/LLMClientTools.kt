@@ -5,6 +5,7 @@ import com.google.gson.JsonElement
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import io.ktor.client.HttpClient
+import io.ktor.client.plugins.HttpRequestTimeoutException
 import io.ktor.client.request.header
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
@@ -18,6 +19,9 @@ import kotlinx.coroutines.flow.flow
 internal val builderToolNames = setOf("set", "fill", "replace", "blend_fill", "generate_preview_image")
 internal const val CLIENT_TOOL_OUTPUT_TOKENS = 32_768
 private const val CLIENT_TOOL_RETRY_OUTPUT_TOKENS = 131_072
+private const val COMMANDCODE_CLIENT_TOOL_OUTPUT_TOKENS = 8_192
+private const val COMMANDCODE_CLIENT_TOOL_RETRY_OUTPUT_TOKENS = 32_768
+private const val COMMANDCODE_CLIENT_TOOL_TIMEOUT_MILLIS = 300_000L
 
 private fun prependClientInstruction(chat: JsonObject, instruction: String) {
     val previous = chat.getAsJsonArray("messages")
@@ -173,6 +177,7 @@ internal suspend fun runClientToolUpstream(
     client: HttpClient, url: String, token: String, protocol: LLMProtocol,
     chat: JsonObject, tools: JsonArray, effort: LLMReasoningEffort,
     onRequest: (String) -> Unit = {},
+    onCommandCodeUpdate: suspend (CommandCodeUpdate) -> Unit = {},
 ): Pair<Int, String> {
     val allowTools = chat.get("tool_choice")?.asString != "none"
     val definitions = if (allowTools) tools else JsonArray()
@@ -192,7 +197,8 @@ internal suspend fun runClientToolUpstream(
             add("tools", tools); addProperty("tool_choice", if (allowTools) "auto" else "none")
         }
     }
-    if (protocol == LLMProtocol.COMMANDCODE) return runCommandCodeUpstream(client, url, token, outgoing, onRequest = onRequest)
+    if (protocol == LLMProtocol.COMMANDCODE) return runCommandCodeUpstream(client, url, token, outgoing,
+        onUpdate = onCommandCodeUpdate, onRequest = onRequest, requestTimeoutMillis = COMMANDCODE_CLIENT_TOOL_TIMEOUT_MILLIS)
     onRequest(outgoing.toString())
     val response = client.post(url) {
         if (protocol == LLMProtocol.ANTHROPIC) {
@@ -225,11 +231,14 @@ private fun clientToolFinishReason(body: String): String? = runCatching {
         ?.firstOrNull()?.asJsonObject?.get("finish_reason")?.asString
 }.getOrNull()
 
-internal fun LLMServices.clientToolRetryChat(chat: JsonObject, tools: JsonArray, contextWindow: Int): JsonObject? {
+internal fun LLMServices.clientToolRetryChat(
+    chat: JsonObject, tools: JsonArray, contextWindow: Int,
+    retryOutputTokens: Int = CLIENT_TOOL_RETRY_OUTPUT_TOKENS,
+): JsonObject? {
     val retry = chat.deepCopy()
     prependClientInstruction(retry, "上一尝试达到长度上限，任何工具都没有执行。现在只决定下一项最小的建筑操作：最多调用一个工具，不要输出完整计划；如果当前任务已完成，直接简短回复。")
     val inputTokens = estimateTokens(clientContextForEstimate(retry.getAsJsonArray("messages"))) + estimateTokens(tools)
-    val retryLimit = minOf(CLIENT_TOOL_RETRY_OUTPUT_TOKENS, contextWindow - inputTokens)
+    val retryLimit = minOf(retryOutputTokens, contextWindow - inputTokens)
     if (retryLimit <= (chat.get("max_tokens")?.asInt ?: CLIENT_TOOL_OUTPUT_TOKENS)) return null
     retry.addProperty("max_tokens", retryLimit)
     return retry
@@ -240,15 +249,17 @@ internal suspend fun LLMServices.runClientToolAgentTurn(
     client: HttpClient, url: String, token: String, protocol: LLMProtocol,
     chat: JsonObject, tools: JsonArray, effort: LLMReasoningEffort, contextWindow: Int,
     onRequest: (String) -> Unit = {},
+    onCommandCodeUpdate: suspend (CommandCodeUpdate) -> Unit = {},
 ): Pair<Int, String> {
-    val first = runClientToolUpstream(client, url, token, protocol, chat, tools, effort, onRequest)
+    val first = runClientToolUpstream(client, url, token, protocol, chat, tools, effort, onRequest, onCommandCodeUpdate)
     if (first.first !in 200..299 || clientToolFinishReason(first.second) != "length") return first
     val firstUsage = parseUsage(first.second)
     println("[LLM] Builder step truncated protocol=${protocol.wireValue} requested_output=${chat.get("max_tokens")?.asInt} output_tokens=${firstUsage?.completionTokens} reasoning_tokens=${firstUsage?.reasoningTokens}")
-    val retryChat = clientToolRetryChat(chat, tools, contextWindow)
+    val retryChat = clientToolRetryChat(chat, tools, contextWindow,
+        if (protocol == LLMProtocol.COMMANDCODE) COMMANDCODE_CLIENT_TOOL_RETRY_OUTPUT_TOKENS else CLIENT_TOOL_RETRY_OUTPUT_TOKENS)
         ?: return 422 to withUsage(errorJson("client_tool_length", clientToolFinishError("length")), firstUsage)
     val second = runClientToolUpstream(client, url, token, protocol, retryChat, tools,
-        if (effort == LLMReasoningEffort.NONE) effort else LLMReasoningEffort.LOW, onRequest)
+        if (effort == LLMReasoningEffort.NONE) effort else LLMReasoningEffort.LOW, onRequest, onCommandCodeUpdate)
     val usage = if (firstUsage == null) parseUsage(second.second) else accumulateUsage(firstUsage, parseUsage(second.second))
     if (second.first !in 200..299) return second.first to withUsage(second.second, usage)
     if (clientToolFinishReason(second.second) == "length") {
@@ -271,7 +282,20 @@ internal fun limitClientToolStep(root: JsonObject): JsonObject {
     return root
 }
 
-internal suspend fun LLMServices.completeClientTools(request: LLMServices.NormalizedRequest, source: String, provider: LLMProvider): Pair<Int, String> {
+internal fun configureClientToolStep(chat: JsonObject, protocol: LLMProtocol, requestedEffort: LLMReasoningEffort): LLMReasoningEffort {
+    if (chat.get("tool_choice")?.asString == "none") return requestedEffort
+    if (protocol == LLMProtocol.COMMANDCODE) {
+        chat.addProperty("max_tokens", minOf(chat.get("max_tokens")?.asInt ?: CLIENT_TOOL_OUTPUT_TOKENS,
+            COMMANDCODE_CLIENT_TOOL_OUTPUT_TOKENS))
+        return LLMReasoningEffort.LOW
+    }
+    return LLMReasoningEffort.NONE
+}
+
+internal suspend fun LLMServices.completeClientTools(
+    request: LLMServices.NormalizedRequest, source: String, provider: LLMProvider,
+    onCommandCodeUpdate: suspend (CommandCodeUpdate) -> Unit = {},
+): Pair<Int, String> {
     val protocol = provider.protocol(request.preset)
     val chat = clientToolStepChat(JsonParser.parseString(request.body).asJsonObject)
     // DeepSeek requires hidden reasoning history for thinking tool continuations.
@@ -280,11 +304,12 @@ internal suspend fun LLMServices.completeClientTools(request: LLMServices.Normal
         chat.add("thinking", JsonObject().apply { addProperty("type", "disabled") })
         chat.addProperty("reasoning_effort", "none")
     }
-    val allowTools = chat.get("tool_choice")?.asString != "none"
+    val effort = configureClientToolStep(chat, protocol, request.reasoningEffort)
     val (status, body) = runClientToolAgentTurn(client, provider.endpoint(protocol), provider.apiToken, protocol,
-        chat, requireNotNull(request.clientTools), if (allowTools) LLMReasoningEffort.NONE else request.reasoningEffort,
+        chat, requireNotNull(request.clientTools), effort,
         provider.contextWindow,
-        onRequest = { logUpstreamRequest(source, it, provider, protocol.wireValue); debugPrompt(source, it) })
+        onRequest = { logUpstreamRequest(source, it, provider, protocol.wireValue); debugPrompt(source, it) },
+        onCommandCodeUpdate = onCommandCodeUpdate)
     if (status !in 200..299) return status to body
     // Only expose the native assistant content/calls, never provider reasoning.
     val root = limitClientToolStep(JsonParser.parseString(body).asJsonObject)
@@ -320,7 +345,19 @@ internal fun LLMServices.streamClientTools(
     var usage: LLMServices.Usage? = null
     try {
         emit(progressChunk("analyzing", "正在规划建筑操作…"))
-        val (status, body) = completeClientTools(request, "client-tools", provider)
+        var lastProgressAt = 0L
+        var lastPhase: String? = null
+        val (status, body) = completeClientTools(request, "client-tools", provider,
+            onCommandCodeUpdate = { update ->
+                val phase = update.phase
+                val now = System.currentTimeMillis()
+                if (phase != null && (phase != lastPhase || now - lastProgressAt >= 15_000)) {
+                    emit(progressChunk(if (phase == "thinking") "analyzing" else "generating",
+                        if (phase == "thinking") "模型正在规划下一步建筑操作…" else "模型正在生成下一项建筑工具…"))
+                    lastPhase = phase
+                    lastProgressAt = now
+                }
+            })
         usage = parseUsage(body)
         if (status !in 200..299) {
             refundUsage(reservation, usage, request, provider, requester.conversationId)
@@ -338,6 +375,8 @@ internal fun LLMServices.streamClientTools(
         if (error is CancellationException) throw error
         if (error !is QuotaSettlementException) refundUsage(reservation, usage, request, provider, requester.conversationId)
         updateAccessRecord(requestId, "failed", errorMessage = error.message, qqUid = requester.uid)
-        emit(errorJson("client_tool_error", error.message ?: "客户端工具请求失败"))
+        val timedOut = error is HttpRequestTimeoutException || error is java.net.SocketTimeoutException
+        emit(errorJson(if (timedOut) "client_tool_timeout" else "client_tool_error",
+            if (timedOut) "模型服务响应超时，本步建筑工具未执行；请重试" else error.message ?: "客户端工具请求失败"))
     }
 }

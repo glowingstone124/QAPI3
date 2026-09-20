@@ -4,6 +4,7 @@ import com.google.gson.JsonArray
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import io.ktor.client.HttpClient
+import io.ktor.client.plugins.timeout
 import io.ktor.client.request.header
 import io.ktor.client.request.preparePost
 import io.ktor.client.request.setBody
@@ -30,12 +31,17 @@ internal suspend fun runCommandCodeUpstream(
     onUpdate: suspend (CommandCodeUpdate) -> Unit = {},
     onAccepted: () -> Unit = {},
     onRequest: (String) -> Unit = {},
+    requestTimeoutMillis: Long? = null,
 ): Pair<Int, String> {
     val outgoing = body.toString()
     onRequest(outgoing)
     var status = 502
     var result = ""
     client.preparePost(url) {
+        if (requestTimeoutMillis != null) timeout {
+            this.requestTimeoutMillis = requestTimeoutMillis
+            socketTimeoutMillis = requestTimeoutMillis
+        }
         header(HttpHeaders.Authorization, "Bearer $token")
         header(HttpHeaders.UserAgent, "cli")
         header("x-command-code-version", "1.54.2")
