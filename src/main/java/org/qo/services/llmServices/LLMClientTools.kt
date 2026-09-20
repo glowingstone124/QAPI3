@@ -79,6 +79,60 @@ internal fun clientContextForEstimate(value: JsonElement): JsonElement = when {
     else -> value.deepCopy()
 }
 
+private fun clientMessageText(value: JsonElement?): String = when {
+    value == null || value.isJsonNull -> ""
+    value.isJsonPrimitive -> value.asString
+    value.isJsonArray -> value.asJsonArray.mapNotNull { part ->
+        part.takeIf { it.isJsonObject && it.asJsonObject.get("type")?.asString in setOf("text", "input_text") }
+            ?.asJsonObject?.get("text")?.takeIf { it.isJsonPrimitive }?.asString
+    }.joinToString("\n")
+    else -> ""
+}
+
+/** Keep the live structure and current tool chain; spend spare context on recent text turns. */
+internal fun LLMServices.compactClientToolMessages(messages: JsonArray, tools: JsonArray, contextWindow: Int): JsonArray {
+    val entries = messages.map { it.asJsonObject }
+    val contextIndex = entries.indexOfLast { message ->
+        message.get("role")?.asString == "user" &&
+            clientMessageText(message.get("content")).contains("[Kotshi Builder 工作区上下文]")
+    }
+    if (contextIndex < 0) return messages
+
+    val stable = entries.take(contextIndex).filter { it.get("role")?.asString in setOf("system", "developer") }
+    val current = entries.drop(contextIndex)
+    val essential = JsonArray().apply { stable.forEach(::add); current.forEach(::add) }
+    val essentialTokens = estimateTokens(clientContextForEstimate(essential)) + estimateTokens(tools)
+    val historyBudget = (contextWindow - 8192 - essentialTokens).coerceIn(0, 8192)
+
+    val turns = mutableListOf<MutableList<JsonObject>>()
+    for (message in entries.take(contextIndex)) {
+        val role = message.get("role")?.asString
+        if (role !in setOf("user", "assistant") || message.has("tool_calls")) continue
+        val content = clientMessageText(message.get("content")).trim()
+        if (content.isEmpty() || content.startsWith("[generate_preview_image 返回结果]") ||
+            content.startsWith("[Builder 执行进度]")) continue
+        if (role == "user") turns.add(mutableListOf())
+        if (turns.isEmpty()) continue
+        turns.last().add(JsonObject().apply {
+            addProperty("role", role)
+            addProperty("content", content)
+        })
+    }
+    val retained = mutableListOf<List<JsonObject>>()
+    var used = 0
+    for (turn in turns.asReversed()) {
+        val cost = estimateTokens(JsonArray().apply { turn.forEach(::add) })
+        if (used + cost > historyBudget) break
+        retained.add(turn)
+        used += cost
+    }
+    return JsonArray().apply {
+        stable.forEach(::add)
+        retained.asReversed().forEach { turn -> turn.forEach(::add) }
+        current.forEach(::add)
+    }
+}
+
 internal fun nativeToolCalls(calls: List<ResponseFunctionCall>) = JsonArray().apply {
     calls.forEach { call -> add(JsonObject().apply {
         addProperty("id", call.callId); addProperty("type", "function")
@@ -149,7 +203,8 @@ internal suspend fun LLMServices.completeClientTools(request: LLMServices.Normal
     // Only expose the native assistant content/calls, never provider reasoning.
     val root = JsonParser.parseString(body).asJsonObject
     val choice = root.getAsJsonArray("choices")?.firstOrNull()?.asJsonObject ?: error("模型缺少 choices")
-    require(choice.get("finish_reason")?.asString in setOf("stop", "tool_calls")) { "模型回复未完整完成" }
+    val finishReason = choice.get("finish_reason")?.asString
+    require(finishReason in setOf("stop", "tool_calls")) { clientToolFinishError(finishReason) }
     val message = choice.getAsJsonObject("message") ?: error("模型缺少 message")
     message.remove("reasoning_content"); message.remove("reasoning")
     message.getAsJsonArray("tool_calls")?.let { calls ->
@@ -163,6 +218,13 @@ internal suspend fun LLMServices.completeClientTools(request: LLMServices.Normal
         }
     }
     return status to root.toString()
+}
+
+internal fun clientToolFinishError(reason: String?): String = when (reason) {
+    "length" -> "建筑操作输出达到模型长度上限，请缩小本轮操作范围后重试"
+    "content_filter" -> "模型未完成建筑操作，请调整请求后重试"
+    null -> "模型未返回完整的建筑操作结束标记，请重试"
+    else -> "模型中断了建筑操作（$reason），请重试"
 }
 
 internal fun LLMServices.streamClientTools(

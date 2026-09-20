@@ -19,6 +19,36 @@ class LLMClientToolsTest {
     private fun chat() = obj("""{"model":"test","messages":[{"role":"user","content":"build"}],"max_tokens":2048,"tool_choice":"auto"}""")
     private val nativeCall = """{"id":"call_1","type":"function","function":{"name":"fill","arguments":"{\"revision\":0}"}}"""
 
+    @Test fun `builder reserves enough output space for complete native tool calls`() {
+        assertEquals(8192, clientToolOutputTokens(12000, 32768))
+        assertEquals(4096, clientToolOutputTokens(28672, 32768))
+        assertFailsWith<IllegalArgumentException> { clientToolOutputTokens(31000, 32768) }
+        assertTrue(clientToolFinishError("length").contains("长度上限"))
+    }
+
+    @Test fun `old builder turns are compacted while current tool results stay paired`() {
+        val messages = JsonArray().apply {
+            add(obj("""{"role":"system","content":"instructions"}"""))
+            add(JsonObject().apply { addProperty("role", "user"); addProperty("content", "old request ".repeat(7000)) })
+            add(obj("""{"role":"assistant","content":"old answer"}"""))
+            add(obj("""{"role":"user","content":"recent request"}"""))
+            add(obj("""{"role":"assistant","content":"recent answer"}"""))
+            add(obj("""{"role":"user","content":"[Kotshi Builder 工作区上下文] current snapshot"}"""))
+            add(obj("""{"role":"user","content":"add a roof"}"""))
+            add(obj("""{"role":"assistant","content":"","tool_calls":[$nativeCall]}"""))
+            add(obj("""{"role":"tool","tool_call_id":"call_1","content":"{\"ok\":true}"}"""))
+            add(obj("""{"role":"user","content":"[Builder 执行进度] continue"}"""))
+        }
+        val services = org.mockito.Mockito.mock(LLMServices::class.java)
+        val compacted = services.compactClientToolMessages(messages, tools, 32768)
+        val text = compacted.toString()
+        assertFalse(text.contains("old request"))
+        assertTrue(text.contains("recent request"))
+        assertTrue(text.contains("current snapshot"))
+        assertTrue(text.contains("call_1"))
+        validateClientToolHistory(compacted)
+    }
+
     @Test fun `client tools are explicitly web only and restricted to builder names`() {
         fun request() = chat().apply { addProperty("tool_execution","client");add("tools",tools.deepCopy()) }
         assertEquals(1, extractClientTools(request(),"web")!!.size())

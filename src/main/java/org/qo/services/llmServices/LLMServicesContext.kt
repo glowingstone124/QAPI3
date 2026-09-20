@@ -145,9 +145,10 @@ internal suspend fun LLMServices.normalizeRequest(
 	)
 	if (clientTools != null) {
 		// Keep native assistant/tool-result pairs intact; never truncate a tool chain.
-		require(estimateTokens(clientContextForEstimate(enrichedTurn.messages)) + estimateTokens(clientTools) <=
-			provider.contextWindow - requestedOutputTokens(obj, provider.contextWindow)) { "建筑工具上下文过大，请开始新对话或缩小选区" }
-		obj.add("messages", enrichedTurn.messages)
+		val compacted = compactClientToolMessages(enrichedTurn.messages, clientTools, provider.contextWindow)
+		val inputTokens = estimateTokens(clientContextForEstimate(compacted)) + estimateTokens(clientTools)
+		obj.addProperty("max_tokens", clientToolOutputTokens(inputTokens, provider.contextWindow))
+		obj.add("messages", compacted)
 	} else obj.add("messages", limitMessagesToContextWindow(enrichedTurn.messages, provider.contextWindow, obj))
 	return LLMServices.NormalizedRequest(
 		preset = model,
@@ -161,6 +162,12 @@ internal suspend fun LLMServices.normalizeRequest(
 		pricing = provider.modelConfig(model).pricing?.at(java.time.Instant.now()),
 		clientTools = clientTools,
 	)
+}
+
+internal fun clientToolOutputTokens(inputTokens: Int, contextWindow: Int): Int {
+	val available = contextWindow - inputTokens
+	require(available >= 2048) { "建筑工具上下文过大，请开始新对话或缩小选区" }
+	return minOf(8192, available)
 }
 
 internal fun withRecentGroupMessages(
