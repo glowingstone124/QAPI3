@@ -167,7 +167,7 @@ internal suspend fun LLMServices.normalizeRequest(
 internal fun clientToolOutputTokens(inputTokens: Int, contextWindow: Int): Int {
 	val available = contextWindow - inputTokens
 	require(available >= 2048) { "建筑工具上下文过大，请开始新对话或缩小选区" }
-	return minOf(8192, available)
+	return minOf(CLIENT_TOOL_OUTPUT_TOKENS, available)
 }
 
 internal fun withRecentGroupMessages(

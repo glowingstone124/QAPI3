@@ -16,6 +16,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.flow
 
 internal val builderToolNames = setOf("set", "fill", "replace", "blend_fill", "generate_preview_image")
+internal const val CLIENT_TOOL_OUTPUT_TOKENS = 32_768
 
 /** Tool feedback is not a new user task when recording the final conversation. */
 internal fun clientOriginalUserMessage(messages: JsonArray): JsonObject? {
@@ -102,7 +103,7 @@ internal fun LLMServices.compactClientToolMessages(messages: JsonArray, tools: J
     val current = entries.drop(contextIndex)
     val essential = JsonArray().apply { stable.forEach(::add); current.forEach(::add) }
     val essentialTokens = estimateTokens(clientContextForEstimate(essential)) + estimateTokens(tools)
-    val historyBudget = (contextWindow - 8192 - essentialTokens).coerceIn(0, 8192)
+    val historyBudget = (contextWindow - CLIENT_TOOL_OUTPUT_TOKENS - essentialTokens).coerceIn(0, 8192)
 
     val turns = mutableListOf<MutableList<JsonObject>>()
     for (message in entries.take(contextIndex)) {

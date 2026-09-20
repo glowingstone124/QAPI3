@@ -20,7 +20,7 @@ class LLMClientToolsTest {
     private val nativeCall = """{"id":"call_1","type":"function","function":{"name":"fill","arguments":"{\"revision\":0}"}}"""
 
     @Test fun `builder reserves enough output space for complete native tool calls`() {
-        assertEquals(8192, clientToolOutputTokens(12000, 32768))
+        assertEquals(32768, clientToolOutputTokens(12000, 65536))
         assertEquals(4096, clientToolOutputTokens(28672, 32768))
         assertFailsWith<IllegalArgumentException> { clientToolOutputTokens(31000, 32768) }
         assertTrue(clientToolFinishError("length").contains("长度上限"))
@@ -40,7 +40,7 @@ class LLMClientToolsTest {
             add(obj("""{"role":"user","content":"[Builder 执行进度] continue"}"""))
         }
         val services = org.mockito.Mockito.mock(LLMServices::class.java)
-        val compacted = services.compactClientToolMessages(messages, tools, 32768)
+        val compacted = services.compactClientToolMessages(messages, tools, 65536)
         val text = compacted.toString()
         assertFalse(text.contains("old request"))
         assertTrue(text.contains("recent request"))
