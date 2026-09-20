@@ -47,7 +47,6 @@ import org.springframework.context.event.EventListener
 import org.springframework.stereotype.Service
 import java.net.URLDecoder
 import java.nio.file.Path
-import java.nio.charset.StandardCharsets
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -664,16 +663,13 @@ internal suspend fun LLMServices.reserveQuota(principal: LLMPrincipal, clientReq
                 provider.name,request.preset,request.model,request.preset)
             return LLMQuotaDecision(LLMQuotaStatus.PRICING_UNAVAILABLE, dailyQuotaService.snapshot(principal.qqUid, principal.hasAccount).view)
         }
-        // QQ admission depends on the shared user's balance, not group history size.
-        // Reserve one unit atomically; settlement still charges real upstream usage.
-        val estimated = if (principal.source == LLMSource.QQ) LLMDailyQuotaService.COST_PER_UNIT else {
-            val obj = JsonParser.parseString(request.body).asJsonObject
-            val output = obj.get("max_tokens")?.asInt ?: 2048
-            pricing.cost(request.body.toByteArray(StandardCharsets.UTF_8).size.toLong(), output.toLong(), 0)
-        }
+        // A chat turn only needs a positive shared balance for admission. The
+        // maximum possible output and serialized request size are not a bill:
+        // reserve one unit atomically, then settle the actual provider usage.
+        val admissionCost = LLMDailyQuotaService.COST_PER_UNIT
         dailyQuotaService.reserve(principal, clientRequestId?.takeIf { it.isNotBlank() } ?: java.util.UUID.randomUUID().toString(),
-            estimatedUnits = LLMDailyQuotaService.units(estimated), mode = request.preset,
-            provider = provider.name, model = request.model, estimatedCost = estimated)
+            estimatedUnits = 1, mode = request.preset,
+            provider = provider.name, model = request.model, estimatedCost = admissionCost)
     } catch (error: Exception) {
         if (error is kotlinx.coroutines.CancellationException) throw error
         val sqlError = generateSequence<Throwable>(error) { it.cause }.filterIsInstance<io.r2dbc.spi.R2dbcException>().firstOrNull()

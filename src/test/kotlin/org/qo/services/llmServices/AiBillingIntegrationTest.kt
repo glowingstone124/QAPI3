@@ -138,6 +138,31 @@ class AiBillingIntegrationTest {
         assertEquals(LLMQuotaStatus.EXCEEDED, service.reserve(qq, "qq:200:3").status)
     }
 
+    @Test fun `web chat with one credit admits a long request and settles actual cost`() = runBlocking {
+        db.execute("INSERT INTO ai_weekly_usage VALUES (?,?,90)", listOf(principal.qqUid, service.period(now).toString()))
+        db.execute("INSERT INTO ai_quota_account VALUES (?,1)", listOf(principal.qqUid))
+        val services = Mockito.mock(LLMServices::class.java)
+        Mockito.`when`(services.dailyQuotaService).thenReturn(service)
+        val provider = Mockito.mock(LLMProvider::class.java)
+        Mockito.`when`(provider.name).thenReturn("test")
+        val pricing = LLMModelPricing(BigDecimal.ONE, BigDecimal("4"), BigDecimal.ZERO)
+        val body = JsonObject().apply {
+            addProperty("max_tokens", 4096)
+            addProperty("context", "large context ".repeat(5000))
+        }.toString()
+        val request = LLMServices.NormalizedRequest("fast", "chat-model", body,
+            JsonObject(), "hello", false, LLMReasoningEffort.NONE, pricing=pricing)
+        val decision = services.reserveQuota(principal, "web-last-credit", request, provider)
+        assertEquals(LLMQuotaStatus.ACCEPTED, decision.status)
+        assertEquals(1, assertNotNull(decision.reservation).reservedUnits)
+        assertEquals(0, decision.view.paidCredits)
+        val settled = service.settle(assertNotNull(decision.reservation), usage(3))
+        assertEquals(92, settled.used)
+        assertEquals(-2, settled.remaining)
+        assertEquals(0, settled.paidCredits)
+        assertEquals(LLMQuotaStatus.EXCEEDED, service.reserve(principal, "web-after-exhaustion").status)
+    }
+
     @Test fun `summary cost reservations continue beyond the former monthly cap`() = runBlocking {
         val month = now.atZone(java.time.ZoneId.of("Asia/Shanghai")).toLocalDate().withDayOfMonth(1).toString()
         db.execute("INSERT INTO ai_free_budget VALUES (?,100,0)", listOf(month))

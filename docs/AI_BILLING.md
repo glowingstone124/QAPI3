@@ -79,7 +79,7 @@ Checkout URL 是每档商品的 HTTPS 购买链接，必须指向 ifdian.net、a
 
 `ai_quota_account` 保存 Paid Credits；`ai_weekly_usage` 按用户/周保存已用及预留 Units；`ai_quota_reservation` 保存预留池拆分及真实 provider/model。`ai_usage` 保存真实 token、成本与最终扣费；`ai_credit_ledger` 保存充值、消费、退款。所有用户扣费操作先锁用户账户，再更新周账本与成本统计。
 
-QQ 请求统一原子预留 1 Unit，准入只取决于该 QQ UID 的共享周额度、Paid Credits 和并发状态，不根据群历史长度预占最大输出费用。每轮完成后按完整上游 Usage 结算，1 Unit 预留不代表每轮固定收费 1 Unit。
+所有聊天入口统一原子预留 1 Unit，准入只取决于该 QQ UID 的共享周额度、Paid Credits 和并发状态，不根据上下文长度或最大输出上限预占费用。每轮完成后按完整上游 Usage 结算，1 Unit 预留不代表每轮固定收费 1 Unit。
 
 已通过准入的单轮对话允许透支：先使用可用周额度，再使用可用 Paid Credits，差额计入本周已用 Units，`remaining` 可以为负。本轮正常返回，不因真实成本超过余额转为 pending；后续请求仍检查共享余额。负周额度随下周账本重置，Paid Credits 不扣为负数。并发已准入请求也各自完整结算。
 
