@@ -125,6 +125,7 @@ internal suspend fun runCommandCodeUpstream(
             result = commandCodeError("Command Code stream ended without finish")
             return@execute
         }
+        println("[LLM] CommandCode completed finish=$finish output_tokens=${usage?.get("completion_tokens")} reasoning_chars=${reasoning.length} text_chars=${text.length} tool_calls=${calls.size()}")
         result = JsonObject().apply {
             addProperty("id", "chatcmpl-${UUID.randomUUID()}")
             addProperty("object", "chat.completion")

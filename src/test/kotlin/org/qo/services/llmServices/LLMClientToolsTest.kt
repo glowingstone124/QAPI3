@@ -22,7 +22,7 @@ class LLMClientToolsTest {
     private val nativeCall = """{"id":"call_1","type":"function","function":{"name":"fill","arguments":"{\"revision\":0}"}}"""
 
     @Test fun `builder reserves enough output space for complete native tool calls`() {
-        assertEquals(32768, clientToolOutputTokens(12000, 65536))
+        assertEquals(4096, clientToolOutputTokens(12000, 65536))
         assertEquals(4096, clientToolOutputTokens(28672, 32768))
         assertFailsWith<IllegalArgumentException> { clientToolOutputTokens(31000, 32768) }
         assertTrue(clientToolFinishError("length").contains("长度上限"))
@@ -39,14 +39,20 @@ class LLMClientToolsTest {
     }
 
     @Test fun `commandcode builder steps have a small budget and explicit low reasoning`() {
-        val step = chat().apply { addProperty("max_tokens", 32768) }
+        val step = chat().apply {
+            addProperty("max_tokens", 32768)
+            addProperty("max_completion_tokens", 131072)
+            addProperty("max_output_tokens", 131072)
+        }
         assertEquals(LLMReasoningEffort.LOW,
             configureClientToolStep(step, LLMProtocol.COMMANDCODE, LLMReasoningEffort.HIGH))
-        assertEquals(8192, step.get("max_tokens").asInt)
+        assertEquals(4096, step.get("max_tokens").asInt)
+        assertEquals(4096, LLMCommandCodeAdapter.fromChatRequest(step, tools, LLMReasoningEffort.LOW)
+            .getAsJsonObject("params").get("max_tokens").asInt)
         val final = chat().apply { addProperty("tool_choice", "none"); addProperty("max_tokens", 32768) }
         assertEquals(LLMReasoningEffort.HIGH,
             configureClientToolStep(final, LLMProtocol.COMMANDCODE, LLMReasoningEffort.HIGH))
-        assertEquals(32768, final.get("max_tokens").asInt)
+        assertEquals(4096, final.get("max_tokens").asInt)
     }
 
     @Test fun `commandcode builder request overrides the shared 120 second timeout`() = runBlocking {
@@ -64,12 +70,14 @@ class LLMClientToolsTest {
         }
     }
 
-    @Test fun `commandcode truncated step retries with a bounded larger output`() = runBlocking {
+    @Test fun `commandcode truncated step retries without growing output`() = runBlocking {
         val outgoing = mutableListOf<JsonObject>()
         val engine = MockEngine { request ->
             outgoing += obj((request.body as TextContent).text)
             val response = if (outgoing.size == 1)
-                """{"type":"finish","finishReason":"max-tokens","totalUsage":{"inputTokens":30,"outputTokens":8192}}
+                """{"type":"reasoning-delta","text":"Need to fill the next wall region"}
+{"type":"tool-call","toolCallId":"discard_this_partial","toolName":"fill","input":{"revision":0}}
+{"type":"finish","finishReason":"max-tokens","totalUsage":{"inputTokens":30,"outputTokens":4096}}
 """
             else """{"type":"tool-call","toolCallId":"call_1","toolName":"fill","input":{"revision":0}}
 {"type":"finish","finishReason":"tool-calls","totalUsage":{"inputTokens":35,"outputTokens":20}}
@@ -83,10 +91,35 @@ class LLMClientToolsTest {
             val (status, body) = services.runClientToolAgentTurn(client, "https://model.example/api", "token",
                 LLMProtocol.COMMANDCODE, step, tools, effort, 524288)
             assertEquals(200, status)
-            assertEquals(listOf(8192, 32768), outgoing.map { it.getAsJsonObject("params").get("max_tokens").asInt })
+            assertEquals(listOf(4096, 4096), outgoing.map { it.getAsJsonObject("params").get("max_tokens").asInt })
             assertTrue(outgoing.all { it.getAsJsonObject("params").get("reasoning_effort").asString == "low" })
+            val recovery = outgoing[1].getAsJsonObject("params").getAsJsonArray("messages").toString()
+            assertTrue(recovery.contains("Need to fill the next wall region"))
+            assertFalse(recovery.contains("discard_this_partial"))
+            assertFalse(body.contains("Need to fill the next wall region"))
             assertEquals("tool_calls", obj(body).getAsJsonArray("choices")[0].asJsonObject.get("finish_reason").asString)
             assertEquals(2, obj(body).getAsJsonObject("usage").get("qapi_api_calls").asInt)
+        }
+    }
+
+    @Test fun `repeated truncation stops after two small attempts without forwarding partial tools`() = runBlocking {
+        val budgets = mutableListOf<Int>()
+        val engine = MockEngine { request ->
+            budgets += obj((request.body as TextContent).text).getAsJsonObject("params").get("max_tokens").asInt
+            respond("""{"type":"tool-call","toolCallId":"partial","toolName":"fill","input":{"revision":0}}
+{"type":"finish","finishReason":"max-tokens","totalUsage":{"inputTokens":30,"outputTokens":4096}}
+""", HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
+        }
+        val services = org.mockito.Mockito.mock(LLMServices::class.java)
+        HttpClient(engine).use { client ->
+            val (status, body) = services.runClientToolAgentTurn(client, "https://model.example/api", "token",
+                LLMProtocol.COMMANDCODE, chat().apply { addProperty("max_tokens", 131072) },
+                tools, LLMReasoningEffort.HIGH, 1048576)
+            assertEquals(422, status)
+            assertEquals(listOf(4096, 4096), budgets)
+            assertFalse(body.contains("partial"))
+            assertFalse(obj(body).has("choices"))
+            assertEquals(8192, obj(body).getAsJsonObject("usage").get("completion_tokens").asInt)
         }
     }
 
@@ -190,7 +223,7 @@ class LLMClientToolsTest {
                 LLMProtocol.CHAT_COMPLETIONS,chat,tools,LLMReasoningEffort.NONE,524288)
             assertEquals(200,status)
             assertEquals(2,outgoing.size)
-            assertEquals(131072,outgoing[1].get("max_tokens").asInt)
+            assertEquals(listOf(4096, 4096),outgoing.map { it.get("max_tokens").asInt })
             assertTrue(outgoing[1].toString().contains("上一尝试达到长度上限"))
             assertEquals("tool_calls",obj(body).getAsJsonArray("choices")[0].asJsonObject.get("finish_reason").asString)
             assertEquals(32788,obj(body).getAsJsonObject("usage").get("completion_tokens").asInt)

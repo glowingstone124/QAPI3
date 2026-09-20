@@ -17,10 +17,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.flow
 
 internal val builderToolNames = setOf("set", "fill", "replace", "blend_fill", "generate_preview_image")
-internal const val CLIENT_TOOL_OUTPUT_TOKENS = 32_768
-private const val CLIENT_TOOL_RETRY_OUTPUT_TOKENS = 131_072
-private const val COMMANDCODE_CLIENT_TOOL_OUTPUT_TOKENS = 8_192
-private const val COMMANDCODE_CLIENT_TOOL_RETRY_OUTPUT_TOKENS = 32_768
+internal const val CLIENT_TOOL_OUTPUT_TOKENS = 4_096
 private const val COMMANDCODE_CLIENT_TOOL_TIMEOUT_MILLIS = 300_000L
 
 private fun prependClientInstruction(chat: JsonObject, instruction: String) {
@@ -36,7 +33,7 @@ private fun prependClientInstruction(chat: JsonObject, instruction: String) {
 
 internal fun clientToolStepChat(chat: JsonObject): JsonObject = chat.deepCopy().apply {
     if (get("tool_choice")?.asString == "none") return@apply
-    prependClientInstruction(this, "Kotshi Builder 是逐步执行的客户端 Agent。每次回复最多调用一个建筑工具；等待浏览器返回结果和最新结构后再决定下一步。优先用 fill、replace、blend_fill 处理区域。不要一次输出完整施工计划或大量工具调用。若已完成则直接回复。")
+    prependClientInstruction(this, "Kotshi Builder 会在一次用户请求中自动多次调用你。当前回复只负责下一小步：最多调用一个建筑工具，发出调用后立即结束，浏览器执行后会把最新结构和结果交给下一次调用。无需在当前回复完成整个建筑。优先用 fill、replace、blend_fill 处理一个连续区域；不要展开逐格坐标、重述完整几何或输出完整施工计划。只有实际完成用户任务后才简短总结。")
 }
 
 /** Tool feedback is not a new user task when recording the final conversation. */
@@ -233,13 +230,12 @@ private fun clientToolFinishReason(body: String): String? = runCatching {
 
 internal fun LLMServices.clientToolRetryChat(
     chat: JsonObject, tools: JsonArray, contextWindow: Int,
-    retryOutputTokens: Int = CLIENT_TOOL_RETRY_OUTPUT_TOKENS,
 ): JsonObject? {
     val retry = chat.deepCopy()
-    prependClientInstruction(retry, "上一尝试达到长度上限，任何工具都没有执行。现在只决定下一项最小的建筑操作：最多调用一个工具，不要输出完整计划；如果当前任务已完成，直接简短回复。")
+    prependClientInstruction(retry, "上一尝试达到长度上限，该尝试没有执行工具。输出预算不会增加。把当前任务拆小：仅决定并调用下一项最小工具，参数只写该工具需要的字段，然后立即结束本次回复。浏览器执行后会再次调用你继续剩余工作。不要重述几何、展开全部坐标或输出完整施工计划；任务已完成时只写简短总结。")
     val inputTokens = estimateTokens(clientContextForEstimate(retry.getAsJsonArray("messages"))) + estimateTokens(tools)
-    val retryLimit = minOf(retryOutputTokens, contextWindow - inputTokens)
-    if (retryLimit <= (chat.get("max_tokens")?.asInt ?: CLIENT_TOOL_OUTPUT_TOKENS)) return null
+    val retryLimit = minOf(CLIENT_TOOL_OUTPUT_TOKENS, chat.get("max_tokens")?.asInt ?: CLIENT_TOOL_OUTPUT_TOKENS, contextWindow - inputTokens)
+    if (retryLimit < 512) return null
     retry.addProperty("max_tokens", retryLimit)
     return retry
 }
@@ -251,15 +247,42 @@ internal suspend fun LLMServices.runClientToolAgentTurn(
     onRequest: (String) -> Unit = {},
     onCommandCodeUpdate: suspend (CommandCodeUpdate) -> Unit = {},
 ): Pair<Int, String> {
-    val first = runClientToolUpstream(client, url, token, protocol, chat, tools, effort, onRequest, onCommandCodeUpdate)
+    val step = chat.deepCopy()
+    val stepEffort = configureClientToolStep(step, protocol, effort)
+    val first = runClientToolUpstream(client, url, token, protocol, step, tools, stepEffort, onRequest, onCommandCodeUpdate)
     if (first.first !in 200..299 || clientToolFinishReason(first.second) != "length") return first
     val firstUsage = parseUsage(first.second)
-    println("[LLM] Builder step truncated protocol=${protocol.wireValue} requested_output=${chat.get("max_tokens")?.asInt} output_tokens=${firstUsage?.completionTokens} reasoning_tokens=${firstUsage?.reasoningTokens}")
-    val retryChat = clientToolRetryChat(chat, tools, contextWindow,
-        if (protocol == LLMProtocol.COMMANDCODE) COMMANDCODE_CLIENT_TOOL_RETRY_OUTPUT_TOKENS else CLIENT_TOOL_RETRY_OUTPUT_TOKENS)
+    println("[LLM] Builder step truncated protocol=${protocol.wireValue} requested_output=${step.get("max_tokens")?.asInt} output_tokens=${firstUsage?.completionTokens} reasoning_tokens=${firstUsage?.reasoningTokens}")
+    val retryChat = clientToolRetryChat(step, tools, contextWindow)
         ?: return 422 to withUsage(errorJson("client_tool_length", clientToolFinishError("length")), firstUsage)
+    if (protocol == LLMProtocol.COMMANDCODE) {
+        // The CLI continues unfinished thinking instead of restarting the same task.
+        // Keep this bounded recovery state on the server; never replay partial tool calls.
+        val reasoning = runCatching {
+            JsonParser.parseString(first.second).asJsonObject.getAsJsonArray("choices")[0].asJsonObject
+                .getAsJsonObject("message").get("reasoning_content")?.asString
+        }.getOrNull()
+        if (!reasoning.isNullOrBlank()) {
+            val messages = retryChat.getAsJsonArray("messages")
+            val continuation = JsonObject().apply {
+                addProperty("role", "assistant")
+                addProperty("content", "")
+                addProperty("reasoning_content", reasoning.takeLast(16_384))
+            }
+            val instruction = JsonObject().apply {
+                addProperty("role", "user")
+                addProperty("content", "继续上述未完成的步骤。上一尝试没有执行任何工具；现在只提交下一项最小工具调用，随后等待浏览器结果。")
+            }
+            val recoveryTokens = estimateTokens(continuation) + estimateTokens(instruction)
+            val inputTokens = estimateTokens(clientContextForEstimate(messages)) + estimateTokens(tools)
+            if (inputTokens + recoveryTokens + retryChat.get("max_tokens").asInt <= contextWindow) {
+                messages.add(continuation)
+                messages.add(instruction)
+            }
+        }
+    }
     val second = runClientToolUpstream(client, url, token, protocol, retryChat, tools,
-        if (effort == LLMReasoningEffort.NONE) effort else LLMReasoningEffort.LOW, onRequest, onCommandCodeUpdate)
+        if (stepEffort == LLMReasoningEffort.NONE) stepEffort else LLMReasoningEffort.LOW, onRequest, onCommandCodeUpdate)
     val usage = if (firstUsage == null) parseUsage(second.second) else accumulateUsage(firstUsage, parseUsage(second.second))
     if (second.first !in 200..299) return second.first to withUsage(second.second, usage)
     if (clientToolFinishReason(second.second) == "length") {
@@ -283,12 +306,11 @@ internal fun limitClientToolStep(root: JsonObject): JsonObject {
 }
 
 internal fun configureClientToolStep(chat: JsonObject, protocol: LLMProtocol, requestedEffort: LLMReasoningEffort): LLMReasoningEffort {
+    chat.remove("max_completion_tokens")
+    chat.remove("max_output_tokens")
+    chat.addProperty("max_tokens", minOf(chat.get("max_tokens")?.asInt ?: CLIENT_TOOL_OUTPUT_TOKENS, CLIENT_TOOL_OUTPUT_TOKENS))
     if (chat.get("tool_choice")?.asString == "none") return requestedEffort
-    if (protocol == LLMProtocol.COMMANDCODE) {
-        chat.addProperty("max_tokens", minOf(chat.get("max_tokens")?.asInt ?: CLIENT_TOOL_OUTPUT_TOKENS,
-            COMMANDCODE_CLIENT_TOOL_OUTPUT_TOKENS))
-        return LLMReasoningEffort.LOW
-    }
+    if (protocol == LLMProtocol.COMMANDCODE) return LLMReasoningEffort.LOW
     return LLMReasoningEffort.NONE
 }
 
