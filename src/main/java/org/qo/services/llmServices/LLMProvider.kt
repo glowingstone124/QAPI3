@@ -87,6 +87,7 @@ data class LLMProvider(
 	val summary: LLMSummaryConfig,
 	val compact: LLMCompactConfig,
 	val balanceRelated: BalanceRelated,
+	val adminUids: Set<Long> = emptySet(),
 	val routes: Map<String, LLMProvider> = emptyMap(),
 	val fallback: LLMProvider? = null,
 ) {
@@ -250,7 +251,8 @@ data class LLMProvider(
 				balanceRelated = BalanceRelated(
 					balanceUrl = balanceUrl,
 					balanceStruct = BalanceStructParse.fromProvider(selectedName),
-				)
+				),
+				adminUids = readAdminUids(root),
 			)
 		}
 
@@ -369,6 +371,15 @@ data class LLMProvider(
 			val configuredValue = configured?.get(key)?.takeIf { !it.isJsonNull } ?: return defaultValue
 			return configuredValue.asString.trim().lowercase(Locale.ROOT).toBooleanStrictOrNull()
 				?: throw IllegalArgumentException("$key must be true or false")
+		}
+
+		private fun readAdminUids(root: JsonObject?): Set<Long> {
+			val raw = root?.get("adminUids")?.takeIf { !it.isJsonNull } ?: return emptySet()
+			require(raw.isJsonArray) { "adminUids must be an array of QQ UIDs" }
+			return raw.asJsonArray.mapTo(LinkedHashSet()) { element ->
+				val text = if (element.isJsonPrimitive) element.asString.trim() else ""
+				text.toLongOrNull() ?: throw IllegalArgumentException("adminUids entries must be QQ UID numbers")
+			}
 		}
 
 		private const val DEFAULT_CONTEXT_WINDOW = 524_288

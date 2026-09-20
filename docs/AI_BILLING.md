@@ -4,6 +4,8 @@
 
 免费配额通过 QQ UID 跨入口共享，默认 QQ 80 Units/周、QO 账户 120 Units/周。周一北京时间 00:00 以周账本自然切换。Paid Credits 不过期。
 
+Reset 卡可由管理员派发，把本周免费 `used` 计数归零（不触碰 Paid Credits、历史调用与成本统计），接口与表结构见 [docs/RESET_CARDS.md](RESET_CARDS.md)。
+
 服务端 `data/llm/providers.json` 支持顶层路由：
 
 ```json

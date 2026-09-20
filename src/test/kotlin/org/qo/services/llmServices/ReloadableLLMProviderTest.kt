@@ -5,6 +5,7 @@ import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 
 class ReloadableLLMProviderTest {
 	@TempDir
@@ -36,6 +37,50 @@ class ReloadableLLMProviderTest {
 
 			assertEquals("first", providers.current().name)
 		}
+	}
+
+	@Test
+	fun `reads reset card admin uids from the provider configuration`() {
+		val file = tempDir.resolve("providers.json")
+		Files.writeString(file, """
+			{
+			  "defaultProvider": "first",
+			  "adminUids": [999, "1000"],
+			  "providers": {
+			    "first": {
+			      "chatCompletionsUrl": "https://first.example/chat", "responsesUrl": "unavaliable", "anthropicUrl": "unavaliable",
+			      "token": "first-token",
+			      "models": { "fast": { "model": "first-fast", "protocol": "chat-completions" }, "thinking": { "model": "first-thinking", "protocol": "chat-completions" } }
+			    }
+			  }
+			}
+		""".trimIndent())
+
+		assertEquals(setOf(999L, 1000L), LLMProvider.fromConfig(file).adminUids)
+	}
+
+	@Test
+	fun `admin uids default to empty and reject invalid entries`() {
+		val file = tempDir.resolve("providers.json")
+		Files.writeString(file, config("first"))
+
+		assertEquals(emptySet(), LLMProvider.fromConfig(file).adminUids)
+
+		Files.writeString(file, """
+			{
+			  "defaultProvider": "first",
+			  "adminUids": "999",
+			  "providers": {
+			    "first": {
+			      "chatCompletionsUrl": "https://first.example/chat", "responsesUrl": "unavaliable", "anthropicUrl": "unavaliable",
+			      "token": "first-token",
+			      "models": { "fast": { "model": "first-fast", "protocol": "chat-completions" }, "thinking": { "model": "first-thinking", "protocol": "chat-completions" } }
+			    }
+			  }
+			}
+		""".trimIndent())
+
+		assertFailsWith<IllegalArgumentException> { LLMProvider.fromConfig(file) }
 	}
 
 	@Test

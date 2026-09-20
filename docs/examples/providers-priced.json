@@ -1,0 +1,171 @@
+{
+  "defaultProvider": "deepseek",
+  "adminUids": [],
+  "providers": {
+    "deepseek": {
+      "chatCompletionsUrl": "https://api.deepseek.com/v1/chat/completions",
+      "responsesUrl": "https://api.deepseek.com/v1/responses",
+      "anthropicUrl": "https://api.deepseek.com/anthropic/v1/messages",
+      "balanceUrl": "https://api.deepseek.com/user/balance",
+      "tokenFile": "data/llm/deepseek.token",
+      "contextWindow": 524288,
+      "models": {
+        "fast": {
+          "model": "deepseek-flash",
+          "protocol": "anthropic",
+          "pricing": {
+            "inputCnyPerMillion": 1,
+            "outputCnyPerMillion": 4,
+            "cachedInputCnyPerMillion": 0.02,
+            "callCostCny": 0,
+            "schedule": {
+              "zone": "Asia/Shanghai",
+              "weekdays": [
+                1,
+                2,
+                3,
+                4,
+                5
+              ],
+              "windows": [
+                [
+                  "09:00",
+                  "12:00"
+                ],
+                [
+                  "14:00",
+                  "18:00"
+                ]
+              ],
+              "multiplier": 2
+            }
+          }
+        },
+        "thinking": {
+          "model": "deepseek-v4-pro",
+          "protocol": "responses",
+          "pricing": {
+            "inputCnyPerMillion": 4.5,
+            "outputCnyPerMillion": 13.5,
+            "cachedInputCnyPerMillion": 0.15,
+            "callCostCny": 0,
+            "schedule": {
+              "zone": "Asia/Shanghai",
+              "weekdays": [
+                1,
+                2,
+                3,
+                4,
+                5
+              ],
+              "windows": [
+                [
+                  "09:00",
+                  "12:00"
+                ],
+                [
+                  "14:00",
+                  "18:00"
+                ]
+              ],
+              "multiplier": 2
+            }
+          }
+        },
+        "deepseek": {
+          "model": "deepseek-flash",
+          "protocol": "responses",
+          "pricing": {
+            "inputCnyPerMillion": 1,
+            "outputCnyPerMillion": 4,
+            "cachedInputCnyPerMillion": 0.02,
+            "callCostCny": 0,
+            "schedule": {
+              "zone": "Asia/Shanghai",
+              "weekdays": [
+                1,
+                2,
+                3,
+                4,
+                5
+              ],
+              "windows": [
+                [
+                  "09:00",
+                  "12:00"
+                ],
+                [
+                  "14:00",
+                  "18:00"
+                ]
+              ],
+              "multiplier": 2
+            }
+          }
+        }
+      },
+      "summary": {
+        "provider": "teamorouter",
+        "model": "deepseek-free",
+        "contextWindow": 524288
+      },
+      "compact": {
+        "enabled": true,
+        "triggerTurns": 30,
+        "triggerPercent": 70,
+        "keepTurns": 4,
+        "maxSummaryChars": 8000
+      }
+    },
+    "teamorouter": {
+      "chatCompletionsUrl": "https://api.teamorouter.cn/v1/chat/completions",
+      "responsesUrl": "https://api.teamorouter.cn/v1/responses",
+      "anthropicUrl": "https://api.teamorouter.cn/v1/messages",
+      "balanceUrl": "https://api.teamorouter.cn/v1/billing/balance",
+      "tokenFile": "data/llm/teamorouter.token",
+      "contextWindow": 524288,
+      "models": {
+        "fast": {
+          "model": "gpt-5.6-luna",
+          "protocol": "responses"
+        },
+        "glm": {
+          "model": "glm-5.3-flash-free",
+          "protocol": "responses"
+        },
+        "gemini": {
+          "model": "gemini-3.5-flash-lite",
+          "protocol": "chat-completions"
+        },
+        "deepseek": {
+          "model": "deepseek-v4-flash-vision-exp",
+          "protocol": "responses"
+        },
+        "luna": {
+          "model": "gpt-5.6-luna",
+          "protocol": "responses"
+        },
+        "deepseek-free": {
+          "model": "deepseek-flash-free",
+          "protocol": "responses"
+        },
+        "thinking": {
+          "model": "gpt-6-astra",
+          "protocol": "chat-completions"
+        }
+      },
+      "summary": {
+        "provider": "teamorouter",
+        "model": "deepseek-free",
+        "contextWindow": 524288
+      },
+      "compact": {
+        "enabled": true,
+        "triggerTurns": 30,
+        "triggerPercent": 70,
+        "keepTurns": 4,
+        "maxSummaryChars": 8000
+      }
+    }
+  }
+}
