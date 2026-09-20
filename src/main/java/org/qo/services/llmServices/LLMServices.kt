@@ -178,6 +178,13 @@ class LLMServices(
 		)
 	}
 
+	suspend fun qqPrincipal(qqUid: Long, qqName: String?): LLMPrincipal? {
+		if (qqUid in blockedQqUids) return null
+		val user = userORM.readAsync(qqUid)
+		val username = qqName?.takeIf { it.isNotBlank() }?.let { decodeHeader(it) } ?: (user?.username ?: "qq:$qqUid")
+		return LLMPrincipal(qqUid, username, LLMSource.QQ, qqUid.toString(), hasAccount = user != null)
+	}
+
 	suspend fun quotaStatus(token: String): LLMNonStreamResult {
 		val principal = authenticateWeb(token)
 			?: return LLMNonStreamResult(401, errorJson("invalid_token", "权限验证失败"))
@@ -339,16 +346,11 @@ class LLMServices(
 		if (!authenticateServerToken(token)) {
 			return LLMNonStreamResult(401, errorJson("invalid_token", "Bot token 验证失败"))
 		}
-		if (qqUid in blockedQqUids) {
-			return LLMNonStreamResult(403, errorJson("blocked_user", "该用户暂时不能使用此功能"))
-		}
-		val user = userORM.readAsync(qqUid)
-		val hasAccount = user != null
-		val username = qqName?.takeIf { it.isNotBlank() }?.let { decodeHeader(it) } ?: (user?.username ?: "qq:$qqUid")
+		val principal = qqPrincipal(qqUid, qqName)
+			?: return LLMNonStreamResult(403, errorJson("blocked_user", "该用户暂时不能使用此功能"))
 		val decodedGroupName = qqGroupName?.takeIf { it.isNotBlank() }?.let { decodeHeader(it) }
 			?: extractGroupNameFromBody(body)
 			?: qqGroupId?.let { "group:$it" }
-		val principal = LLMPrincipal(qqUid, username, LLMSource.QQ, qqUid.toString(), hasAccount = hasAccount)
 		val requester = principal.toRequester(groupId = qqGroupId, groupName = decodedGroupName, messageId = qqMessageId)
 		val provider = providers.current().forMode(model)
 		val model = modelPresetFromRequest(model)

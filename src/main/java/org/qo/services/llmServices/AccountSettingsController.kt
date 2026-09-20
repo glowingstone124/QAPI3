@@ -39,6 +39,25 @@ class AccountSettingsController(private val llm: LLMServices, private val settin
         val obj = parse(body)
         settings.use(it,string(obj,"request_id"))
     }
+    @PostMapping("/reset-cards/bot")
+    suspend fun useForBot(
+        @RequestHeader("token", required=false) token: String?,
+        @RequestHeader("Authorization", required=false) authorization: String?,
+        @RequestHeader("X-QQ-UID") qqUid: Long,
+        @RequestHeader("X-QQ-Name", required=false) qqName: String?,
+        @RequestBody body: String,
+    ): ResponseEntity<String> {
+        val requestToken = AuthTokens.resolve(token, authorization)
+            ?: return response(401,mapOf("error" to mapOf("message" to "缺少或无效的令牌")))
+        if (!llm.authenticateServerToken(requestToken))
+            return response(401,mapOf("error" to mapOf("message" to "Bot token 验证失败")))
+        val principal = llm.qqPrincipal(qqUid, qqName)
+            ?: return response(403,mapOf("error" to mapOf("message" to "该用户暂时不能使用此功能")))
+        return try { response(200, settings.use(principal, string(parse(body), "request_id"))) }
+        catch (e: SettingsConflict) { response(409,mapOf("error" to mapOf("message" to e.message))) }
+        catch (e: IllegalArgumentException) { response(400,mapOf("error" to mapOf("message" to e.message))) }
+    }
+
     @PostMapping("/reset-cards/grant")
     suspend fun grant(@RequestHeader("Authorization",required=false) auth: String?, @RequestBody body: String): ResponseEntity<String> {
         val token = AuthTokens.resolve(null,auth) ?: return response(401,mapOf("error" to mapOf("message" to "请先登录")))

@@ -20,6 +20,17 @@ For all existing accounts:
 
 Provide exactly one target (`user_id` or `all: true`). Each recipient receives 1–100 cards. The all-account audience is the union of registered `users.uid` and existing AI quota identities (including QQ guests), captured when the grant runs; future accounts do not receive that grant. The operation is transactional, and returns `request_id`, `recipients`, `count`.
 
+## QQ 群命令
+
+qbot 在受支持的群（`INTERACTIVE_GROUP_IDS`，见 qbot 配置）中收到 `.reset` 时调用本端点，为发送者消耗一张 reset 卡。
+
+`POST /qo/asking/v1/reset-cards/bot`
+
+- Header：`Authorization: Bearer <bot token>`（与 `/v1/chat/completions/bot` 相同的服务端令牌）、`X-QQ-UID`（发送者 QQ 号）、可选 `X-QQ-Name`。
+- Body：`{"request_id":"..."}`。qbot 用 `reset-<group_id>-<user_id>-<message_id>` 生成请求标识，同一消息重复投递时幂等；标识不符合 `[A-Za-z0-9_-]{8,80}` 返回 400。
+- 身份以 `X-QQ-UID` 为准，与 Web/QQ/Minecraft 入口共用同一份周额度；被封禁用户返回 403。
+- 成功返回 `request_id` 与 `restored_units`；无卡、本周零用量、有进行中或待结算请求返回 409 且不扣卡，qbot 把 `error.message` 原文回复到群内。
+
 ## Redemption
 
 `POST /qo/asking/v1/reset-cards/use`
