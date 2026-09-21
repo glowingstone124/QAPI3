@@ -22,11 +22,13 @@ class AccountSettingsIntegrationTest {
     @Autowired lateinit var db: ReactiveDatabase
     @TempDir lateinit var tempDir: Path
     lateinit var store: SqlLLMQuotaStore
+    lateinit var repository: AccountSettingsRepository
     lateinit var quota: LLMDailyQuotaService
     lateinit var settings: AccountSettingsService
     private val user = LLMPrincipal(123456,"Tester",LLMSource.WEB,"test")
     @BeforeEach fun setup() { runBlocking {
         store=SqlLLMQuotaStore(db)
+        repository=SqlAccountSettingsRepository(db)
         quota=LLMDailyQuotaService(store,90,30,"Asia/Shanghai")
         val providersFile=tempDir.resolve("providers.json")
         Files.writeString(providersFile,"""
@@ -42,7 +44,7 @@ class AccountSettingsIntegrationTest {
               }
             }
         """.trimIndent())
-        settings=AccountSettingsService(db,store,quota,ReloadableLLMProvider(providersFile))
+        settings=AccountSettingsService(repository,store,quota,ReloadableLLMProvider(providersFile))
         settings.schema()
         db.execute("CREATE TABLE IF NOT EXISTS users (uid BIGINT PRIMARY KEY)")
         for (table in listOf("ai_reset_ledger","ai_reset_grant","ai_reset_balance","ai_usage","ai_quota_reservation","ai_weekly_usage","ai_quota_account","ai_free_budget","users")) db.execute("DELETE FROM $table")
@@ -90,18 +92,65 @@ class AccountSettingsIntegrationTest {
         for (uid in listOf(user.qqUid,222L,333L)) assertEquals(1,settings.balance(uid))
         assertEquals(0,settings.balance(444))
     }
-    @Test fun `empty usage and active or pending requests cannot consume a card`() = runBlocking {
+
+    @Test fun `account settings repository owns aggregate and reset transactions`() = runBlocking {
+        assertTrue(repository.accountTargetExists(user.qqUid))
+        assertFalse(repository.accountTargetExists(888L))
+        assertEquals(
+            ResetGrantResult("repository-grant", 1, 2),
+            repository.grant(999, ResetGrantRequest("repository-grant", 2, user.qqUid)),
+        )
+        assertEquals(2, repository.balance(user.qqUid))
+
+        spend("repository-call", 5)
+        val redemption = repository.redeem(
+            user.qqUid,
+            "repository-reset",
+            quota.period(Instant.now()).toString(),
+        )
+        assertEquals(ResetCardRedemptionStatus.REDEEMED, redemption.status)
+        assertEquals(5, redemption.restoredUnits)
+        assertEquals(1, repository.history(user.qqUid, 0).items.size)
+        assertEquals(2, repository.loadSettings(user.qqUid).resetHistory.size)
+    }
+
+    @Test fun `empty usage and active requests cannot consume a card while known pending usage is reconciled`() = runBlocking {
         assertFailsWith<SettingsConflict> { settings.use(user,"reset-no-card") }
         settings.grant(999,ResetGrantRequest("grant-check",1,user.qqUid))
         assertFailsWith<SettingsConflict> { settings.use(user,"reset-empty") }
         val r=assertNotNull(quota.reserve(user,"active-request").reservation)
         assertFailsWith<SettingsConflict> { settings.use(user,"reset-active") }
         quota.retain(r,AiQuotaUsage(10,20,0,0,BigDecimal("0.1"),20))
-        assertFailsWith<SettingsConflict> { settings.use(user,"reset-pending") }
+        val pendingState = settings.settings(user)
+        assertEquals(0,pendingState.activeRequests)
         assertEquals(1,settings.balance(user.qqUid))
-        store.reconcileKnownUsage(user.qqUid)
-        settings.use(user,"reset-completed")
+        settings.use(user,"reset-pending")
         assertEquals(0,settings.balance(user.qqUid))
+    }
+
+    @Test fun `pending request without usage remains blocked until it becomes a zombie`() = runBlocking {
+        settings.grant(999,ResetGrantRequest("grant-zombie",1,user.qqUid))
+        spend("completed-before-zombie")
+        val r=assertNotNull(quota.reserve(user,"missing-usage").reservation)
+        store.retain(r,null)
+
+        assertEquals(1,settings.settings(user).activeRequests)
+        assertFailsWith<SettingsConflict> { settings.use(user,"reset-before-zombie") }
+
+        db.execute(
+            "UPDATE ai_quota_reservation SET created_at=? WHERE request_key=?",
+            listOf(
+                Instant.now().epochSecond - SqlLLMQuotaStore.ZOMBIE_PENDING_TIMEOUT_SECONDS - 1,
+                r.requestKey
+            )
+        )
+        assertEquals(0,settings.settings(user).activeRequests)
+        settings.use(user,"reset-after-zombie")
+        assertEquals(0,settings.balance(user.qqUid))
+        assertEquals("refunded",db.one(
+            "SELECT status FROM ai_quota_reservation WHERE request_key=?",
+            listOf(r.requestKey)
+        ) { it.get("status",String::class.java) })
     }
     @Test fun `concurrent redemption consumes exactly one card`() = runBlocking {
         settings.grant(999,ResetGrantRequest("grant-race",3,user.qqUid))

@@ -160,6 +160,15 @@ class SqlLLMQuotaStore(private val db: ReactiveDatabase) : LLMQuotaStore {
 		val status: String, val reset: Long, val month: String, val freeReserved: BigDecimal
 	)
 
+	private data class ZombieReservation(
+		val requestKey: String,
+		val period: String,
+		val weekly: Int,
+		val paid: Int,
+		val month: String,
+		val freeReserved: BigDecimal,
+	)
+
 	private suspend fun locked(reservation: LLMQuotaReservation): Reservation? {
 		db.one("SELECT user_id FROM ai_quota_account WHERE user_id=? FOR UPDATE", listOf(reservation.qqUid)) { true }
 		return db.one(
@@ -320,6 +329,75 @@ class SqlLLMQuotaStore(private val db: ReactiveDatabase) : LLMQuotaStore {
 		}
 	}
 
+	/**
+	 * Cancels pending reservations that have no usage record and have outlived the
+	 * upstream request timeout. A missing usage record is never cancelled before
+	 * this grace period because the provider may still have accepted the request.
+	 */
+	suspend fun cancelZombiePending(userId: Long, now: Long = Instant.now().epochSecond): Int {
+		schema()
+		val cutoff = now - ZOMBIE_PENDING_TIMEOUT_SECONDS
+		return db.inTransaction {
+			account(userId)
+			db.one("SELECT user_id FROM ai_quota_account WHERE user_id=? FOR UPDATE", listOf(userId)) { true }
+			val candidates = db.all(
+				"""
+				SELECT request_key,period,weekly_units,paid_units,budget_period,free_reserved
+				FROM ai_quota_reservation
+				WHERE user_id=? AND status='pending' AND created_at<=?
+				  AND NOT EXISTS (
+					SELECT 1 FROM ai_usage WHERE ai_usage.request_key=ai_quota_reservation.request_key
+				  )
+				ORDER BY created_at
+				""".trimIndent(),
+				listOf(userId, cutoff)
+			) {
+				ZombieReservation(
+					it.get("request_key", String::class.java)!!,
+					it.get("period", String::class.java)!!,
+					number(it, "weekly_units").toInt(),
+					number(it, "paid_units").toInt(),
+					it.get("budget_period", String::class.java)!!,
+					it.get("free_reserved") as BigDecimal,
+				)
+			}
+			var cancelled = 0
+			for (candidate in candidates) {
+				val stillPending = db.one(
+					"SELECT status FROM ai_quota_reservation WHERE request_key=? FOR UPDATE",
+					listOf(candidate.requestKey)
+				) { it.get("status", String::class.java) == "pending" } == true
+				if (!stillPending || db.one(
+						"SELECT request_key FROM ai_usage WHERE request_key=?",
+						listOf(candidate.requestKey)
+					) { true } == true
+				) continue
+				db.execute(
+					"UPDATE ai_weekly_usage SET used=used-? WHERE user_id=? AND period=?",
+					listOf(candidate.weekly, userId, candidate.period)
+				)
+				db.execute(
+					"UPDATE ai_quota_account SET paid_credits=paid_credits+? WHERE user_id=?",
+					listOf(candidate.paid, userId)
+				)
+				db.execute(
+					"UPDATE ai_free_budget SET reserved_cost=reserved_cost-? WHERE period=?",
+					listOf(candidate.freeReserved, candidate.month)
+				)
+				db.execute(
+					"UPDATE ai_quota_reservation SET status='refunded' WHERE request_key=?",
+					listOf(candidate.requestKey)
+				)
+				db.execute(
+					"INSERT INTO ai_credit_ledger (user_id,reference_id,delta,kind,created_at) VALUES (?,?,?,'refund',?)",
+					listOf(userId, candidate.requestKey, candidate.paid, now)
+				)
+				cancelled++
+			}
+			cancelled
+		}
+	}
+
 	override suspend fun reserveSubsidy(source: String, summary: LLMSummaryConfig, estimate: BigDecimal): String? {
 		schema()
 		return db.inTransaction {
@@ -397,6 +475,8 @@ class SqlLLMQuotaStore(private val db: ReactiveDatabase) : LLMQuotaStore {
 	}
 
 	companion object {
+		const val ZOMBIE_PENDING_TIMEOUT_SECONDS = 30 * 60L
+
 		val SCHEMA = listOf(
 			"CREATE TABLE IF NOT EXISTS ai_quota_account (user_id BIGINT PRIMARY KEY,paid_credits INT NOT NULL DEFAULT 0)",
 			"CREATE TABLE IF NOT EXISTS ai_weekly_usage (user_id BIGINT NOT NULL,period VARCHAR(10) NOT NULL,used INT NOT NULL,PRIMARY KEY(user_id,period))",

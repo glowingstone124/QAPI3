@@ -41,7 +41,7 @@ qbot 在受支持的群（`INTERACTIVE_GROUP_IDS`，见 qbot 配置）中收到 
 
 Consumes one card and sets the current weekly free `used` counter to zero, including any overdraw. Paid Credits, historical calls, aggregate billing costs, and the scheduled weekly reset time are preserved. Cards do not expire automatically.
 
-An active or pending reservation blocks redemption until it settles, preventing late billing/refunds from corrupting the reset. No card or already-zero weekly usage returns 409 without consuming a card. Returns `request_id` and `restored_units`.
+An active reservation, or a pending reservation without complete Usage, blocks redemption until it settles, preventing late billing/refunds from corrupting the reset. Account settings and redemption automatically retry pending reservations that already have complete Usage. A pending reservation without Usage that is older than 30 minutes is treated as a zombie, refunded, and marked `refunded`; newer records still return 409. No card or already-zero weekly usage returns 409 without consuming a card. Returns `request_id` and `restored_units`.
 
 Use a stable request ID when retrying a failed/timed-out operation. IDs must match `[A-Za-z0-9_-]{8,80}`. Repeating a successful ID returns the original result without another grant/reset; changing the grant payload with the same ID is rejected. Redemption IDs are scoped to the authenticated account. New intentional operations need new IDs.
 
