@@ -35,7 +35,7 @@ internal fun clientToolStepChat(chat: JsonObject): JsonObject = chat.deepCopy().
 	if (get("tool_choice")?.asString == "none") return@apply
 	prependClientInstruction(
 		this,
-		"Kotshi Builder 会自动续接工具结果。每次最多调用一个工具并等待结果。遵守当前 planMode：fast 时直接使用工具施工，无需创建或确认 Plan，不要等待批准；可选计划不影响 Fast 施工。plan 时使用 update_plan 保存完整设计及阶段，必要时查看预览，然后等待用户在界面确认；不能施工或自行授权。build 时按持久 Plan 逐阶段施工并更新真实进度；设计变更需重新确认。优先使用构件及区域重复工具，阶段结束用多视角预览验收。不要展开逐格坐标或重述完整几何。仅实际完成后报告完成；预算不足时保留待办。"
+		"Kotshi Builder 会自动续接工具结果。鼓励把同一阶段中彼此独立的编辑和多个视角预览合并到一个工具批次；有依赖、需要最新 revision 或必须读取结果时再分批等待。每批优先使用多个工具调用，但不要展开逐格坐标或重述完整几何。遵守当前 planMode：fast 时直接使用工具施工，无需创建或确认 Plan，不要等待批准；可选计划不影响 Fast 施工。plan 时使用 update_plan 保存完整设计及阶段，必要时查看预览，然后等待用户在界面确认；不能施工或自行授权。build 时按持久 Plan 逐阶段施工并更新真实进度；设计变更需重新确认。优先使用构件及区域重复工具，阶段结束用多视角预览验收。仅实际完成后报告完成；预算不足时保留待办。"
 	)
 }
 
@@ -218,13 +218,13 @@ internal suspend fun runClientToolUpstream(
 	).apply {
 		when (protocol) {
 			LLMProtocol.RESPONSES -> if (!allowTools) addProperty("tool_choice", "none")
-			else addProperty("parallel_tool_calls", false)
+			else addProperty("parallel_tool_calls", true)
 
 			// Stateless browser continuations cannot echo native signed thinking blocks.
 			LLMProtocol.ANTHROPIC -> if (!allowTools) {
 				add("tool_choice", JsonObject().apply { addProperty("type", "none") })
 			} else {
-				getAsJsonObject("tool_choice")?.addProperty("disable_parallel_tool_use", true)
+				getAsJsonObject("tool_choice")?.addProperty("disable_parallel_tool_use", false)
 			}
 
 			LLMProtocol.CHAT_COMPLETIONS -> {
@@ -293,7 +293,7 @@ internal fun LLMServices.clientToolRetryChat(
 	val retry = chat.deepCopy()
 	prependClientInstruction(
 		retry,
-		"上一尝试达到长度上限，该尝试没有执行工具。输出预算不会增加。把当前任务拆小：仅决定并调用下一项最小工具，参数只写该工具需要的字段，然后立即结束本次回复。浏览器执行后会再次调用你继续剩余工作。不要重述几何、展开全部坐标或输出完整施工计划；任务已完成时只写简短总结。"
+		"上一尝试达到长度上限，该尝试没有执行工具。输出预算不会增加。把当前任务拆成下一批最小且彼此独立的工具调用；可以合并多个无依赖编辑和预览，但参数只写工具需要的字段，然后立即结束本次回复。浏览器执行后会再次调用你继续剩余工作。不要重述几何、展开全部坐标或输出完整施工计划；任务已完成时只写简短总结。"
 	)
 	val inputTokens = estimateTokens(clientContextForEstimate(retry.getAsJsonArray("messages"))) + estimateTokens(tools)
 	val retryLimit = minOf(
@@ -377,16 +377,8 @@ internal suspend fun LLMServices.runClientToolAgentTurn(
 	return second.first to withUsage(second.second, usage)
 }
 
-/** A browser agent step observes one edit before deciding what to do next. */
+/** Preserve a complete native batch so the browser can apply independent calls together. */
 internal fun limitClientToolStep(root: JsonObject): JsonObject {
-	val choice = root.getAsJsonArray("choices")?.firstOrNull()?.asJsonObject ?: return root
-	val message = choice.getAsJsonObject("message") ?: return root
-	val calls = message.getAsJsonArray("tool_calls") ?: return root
-	if (calls.size() <= 1) return root
-	println("[LLM] Builder model returned ${calls.size()} calls in one step; forwarding the first")
-	message.add("tool_calls", JsonArray().apply { add(calls[0].deepCopy()) })
-	message.addProperty("content", "")
-	choice.addProperty("finish_reason", "tool_calls")
 	return root
 }
 

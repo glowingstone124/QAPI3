@@ -49,13 +49,14 @@ class LLMClientToolsTest {
         assertTrue(clientToolFinishError("length").contains("长度上限"))
     }
 
-    @Test fun `parallel model calls are reduced to one browser edit step`() {
+    @Test fun `parallel model calls are preserved as one browser batch`() {
         val completion = obj("""{"choices":[{"message":{"role":"assistant","content":"all work completed","tool_calls":[$nativeCall,{"id":"call_2","type":"function","function":{"name":"fill","arguments":"{\"revision\":0}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":3,"completion_tokens":200}}""")
         val limited = limitClientToolStep(completion)
         val message = limited.getAsJsonArray("choices")[0].asJsonObject.getAsJsonObject("message")
-        assertEquals(1, message.getAsJsonArray("tool_calls").size())
+        assertEquals(2, message.getAsJsonArray("tool_calls").size())
         assertEquals("call_1", message.getAsJsonArray("tool_calls")[0].asJsonObject.get("id").asString)
-        assertEquals("", message.get("content").asString)
+        assertEquals("call_2", message.getAsJsonArray("tool_calls")[1].asJsonObject.get("id").asString)
+        assertEquals("all work completed", message.get("content").asString)
         assertEquals(200, limited.getAsJsonObject("usage").get("completion_tokens").asInt)
     }
 
@@ -209,8 +210,8 @@ class LLMClientToolsTest {
                 val definitions=if(protocol==LLMProtocol.COMMANDCODE) outgoing.getAsJsonObject("params").getAsJsonArray("tools") else outgoing.getAsJsonArray("tools")
                 assertEquals(1,definitions.size())
                 assertFalse(outgoing.toString().contains("web_search"))
-                if (protocol == LLMProtocol.RESPONSES) assertEquals(false,outgoing.get("parallel_tool_calls").asBoolean)
-                if (protocol == LLMProtocol.ANTHROPIC) assertEquals(true,outgoing.getAsJsonObject("tool_choice").get("disable_parallel_tool_use").asBoolean)
+                if (protocol == LLMProtocol.RESPONSES) assertEquals(true,outgoing.get("parallel_tool_calls").asBoolean)
+                if (protocol == LLMProtocol.ANTHROPIC) assertEquals(false,outgoing.getAsJsonObject("tool_choice").get("disable_parallel_tool_use").asBoolean)
                 val response=when(protocol) {
                     LLMProtocol.CHAT_COMPLETIONS -> """{"choices":[{"message":{"role":"assistant","content":null,"tool_calls":[$nativeCall]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":2,"completion_tokens":3}}"""
                     LLMProtocol.RESPONSES -> """{"status":"completed","output":[{"type":"function_call","call_id":"call_1","name":"fill","arguments":"{\"revision\":0}"}],"usage":{"input_tokens":2,"output_tokens":3}}"""
