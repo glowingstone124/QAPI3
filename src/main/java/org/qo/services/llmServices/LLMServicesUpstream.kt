@@ -69,7 +69,14 @@ internal suspend fun LLMServices.completeWithOptionalTools(
 		return completeWithResponsesApi(request, requester, source, provider)
 	}
 	val functionTools = toolService.definitions()
-	val obj = LLMWebSearchAdapter.enableChatCompletions(request.body, functionTools, !toolService.usesSearXNG())
+	val obj = LLMAdapterRegistry.forProtocol(LLMProtocol.CHAT_COMPLETIONS).adapt(
+		LLMAdapterRequest(
+			chat = JsonParser.parseString(request.body).asJsonObject,
+			functionTools = functionTools,
+			reasoningEffort = request.reasoningEffort,
+			webSearch = !toolService.usesSearXNG(),
+		)
+	)
 
 	var latestStatus = 502
 	var latestBody = ""
@@ -110,11 +117,13 @@ internal suspend fun LLMServices.completeWithResponsesApi(
 	provider: LLMProvider,
 ): Pair<Int, String> {
 	val functionTools = toolService.definitions()
-	val body = LLMResponsesAdapter.fromChatRequest(
-		request.body,
-		functionTools,
-		reasoningEffort = request.reasoningEffort,
-		webSearch = !toolService.usesSearXNG(),
+	val body = LLMAdapterRegistry.forProtocol(LLMProtocol.RESPONSES).adapt(
+		LLMAdapterRequest(
+			chat = JsonParser.parseString(request.body).asJsonObject,
+			functionTools = functionTools,
+			reasoningEffort = request.reasoningEffort,
+			webSearch = !toolService.usesSearXNG(),
+		)
 	)
 	var totalUsage: LLMServices.Usage? = null
 	repeat(maxToolRounds) { round ->
@@ -186,24 +195,37 @@ internal suspend fun runSummaryUpstream(
 	summary: LLMSummaryConfig,
 	onRequest: (String) -> Unit = {},
 ): Pair<Int, String> {
+	val chat = JsonParser.parseString(body).asJsonObject
 	if (summary.protocol == LLMProtocol.COMMANDCODE) {
 		return runCommandCodeUpstream(
 			client, summary.endpointUrl, summary.apiToken,
-			LLMCommandCodeAdapter.fromChatRequest(JsonParser.parseString(body).asJsonObject, JsonArray(), LLMReasoningEffort.NONE),
+			LLMAdapterRegistry.forProtocol(LLMProtocol.COMMANDCODE).adapt(
+				LLMAdapterRequest(chat, JsonArray(), LLMReasoningEffort.NONE, webSearch = false)
+			),
 			onRequest = onRequest,
 		)
 	}
 	if (summary.protocol == LLMProtocol.ANTHROPIC) {
 		return runAnthropicUpstream(
 			client, summary.endpointUrl, summary.apiToken,
-			LLMAnthropicAdapter.fromChatRequest(body, JsonArray(), LLMReasoningEffort.NONE, webSearch = false, thinkingMode = summary.thinkingMode),
+			LLMAdapterRegistry.forProtocol(LLMProtocol.ANTHROPIC).adapt(
+				LLMAdapterRequest(
+					chat,
+					JsonArray(),
+					LLMReasoningEffort.NONE,
+					webSearch = false,
+					thinkingMode = summary.thinkingMode,
+				)
+			),
 			maxToolRounds = 0,
 			executeTool = { error("Summary requests cannot execute local tools") },
 			onRequest = onRequest,
 		)
 	}
 	val outgoing = if (summary.protocol == LLMProtocol.RESPONSES) {
-		LLMResponsesAdapter.fromChatRequest(body, JsonArray(), LLMReasoningEffort.NONE, webSearch = false).toString()
+		LLMAdapterRegistry.forProtocol(LLMProtocol.RESPONSES).adapt(
+			LLMAdapterRequest(chat, JsonArray(), LLMReasoningEffort.NONE, webSearch = false)
+		).toString()
 	} else body
 	onRequest(outgoing)
 	val response = client.post(summary.endpointUrl) {
@@ -231,7 +253,14 @@ internal fun LLMServices.streamFromUpstream(
 	quotaReservation: LLMQuotaReservation,
 ): Flow<String> = flow {
 	val functionTools = toolService.definitions()
-	val upstreamBody = LLMWebSearchAdapter.enableChatCompletions(request.body, functionTools, !toolService.usesSearXNG()).toString()
+	val upstreamBody = LLMAdapterRegistry.forProtocol(LLMProtocol.CHAT_COMPLETIONS).adapt(
+		LLMAdapterRequest(
+			chat = JsonParser.parseString(request.body).asJsonObject,
+			functionTools = functionTools,
+			reasoningEffort = request.reasoningEffort,
+			webSearch = !toolService.usesSearXNG(),
+		)
+	).toString()
 	var upstreamAccepted = false
 	var latestUsage: LLMServices.Usage? = null
 	var lastProgressKey: String? = null
@@ -367,12 +396,14 @@ internal fun LLMServices.streamFromResponses(
 	quotaReservation: LLMQuotaReservation,
 ): Flow<String> = flow {
 	val functionTools = toolService.definitions()
-	val upstreamBody = LLMResponsesAdapter.fromChatRequest(
-		request.body,
-		functionTools,
-		reasoningEffort = request.reasoningEffort,
-		stream = true,
-		webSearch = !toolService.usesSearXNG(),
+	val upstreamBody = LLMAdapterRegistry.forProtocol(LLMProtocol.RESPONSES).adapt(
+		LLMAdapterRequest(
+			chat = JsonParser.parseString(request.body).asJsonObject,
+			functionTools = functionTools,
+			reasoningEffort = request.reasoningEffort,
+			stream = true,
+			webSearch = !toolService.usesSearXNG(),
+		)
 	)
 	val assistantContent = StringBuilder()
 	var totalUsage: LLMServices.Usage? = null

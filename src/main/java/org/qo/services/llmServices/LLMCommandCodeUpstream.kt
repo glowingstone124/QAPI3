@@ -240,7 +240,9 @@ internal suspend fun LLMServices.completeWithCommandCodeApi(
 	val tools = toolService.definitions(COMMANDCODE_EXCLUDED_TOOLS)
 	var usage: LLMServices.Usage? = null
 	repeat(maxToolRounds) { round ->
-		val body = LLMCommandCodeAdapter.fromChatRequest(chat, tools, request.reasoningEffort)
+		val body = LLMAdapterRegistry.forProtocol(LLMProtocol.COMMANDCODE).adapt(
+			LLMAdapterRequest(chat, tools, request.reasoningEffort)
+		)
 		val (status, response) = try {
 			runCommandCodeUpstream(
 				client, provider.commandCodeUrl, provider.apiToken, body,
@@ -311,7 +313,9 @@ internal fun LLMServices.streamFromCommandCode(
 	emit(progressChunk("analyzing", "正在分析问题…"))
 	try {
 		repeat(maxToolRounds) { round ->
-			val body = LLMCommandCodeAdapter.fromChatRequest(chat, tools, request.reasoningEffort)
+			val body = LLMAdapterRegistry.forProtocol(LLMProtocol.COMMANDCODE).adapt(
+				LLMAdapterRequest(chat, tools, request.reasoningEffort, stream = true)
+			)
 			val (status, response) = try {
 				runCommandCodeUpstream(
 					client, provider.commandCodeUrl, provider.apiToken, body,

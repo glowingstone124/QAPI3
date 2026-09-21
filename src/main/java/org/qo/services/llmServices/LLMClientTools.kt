@@ -16,7 +16,7 @@ import io.ktor.http.contentType
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.flow
 
-internal val builderToolNames = setOf("set", "fill", "replace", "blend_fill", "generate_preview_image")
+internal val builderToolNames = setOf("set", "fill", "replace", "blend_fill", "generate_preview_image", "update_plan", "build_component", "repeat_region", "generate_overview")
 internal const val CLIENT_TOOL_OUTPUT_TOKENS = 4_096
 private const val COMMANDCODE_CLIENT_TOOL_TIMEOUT_MILLIS = 300_000L
 
@@ -35,7 +35,7 @@ internal fun clientToolStepChat(chat: JsonObject): JsonObject = chat.deepCopy().
 	if (get("tool_choice")?.asString == "none") return@apply
 	prependClientInstruction(
 		this,
-		"Kotshi Builder 会在一次用户请求中自动多次调用你。当前回复只负责下一小步：最多调用一个建筑工具，发出调用后立即结束，浏览器执行后会把最新结构和结果交给下一次调用。无需在当前回复完成整个建筑。优先用 fill、replace、blend_fill 处理一个连续区域；不要展开逐格坐标、重述完整几何或输出完整施工计划。只有实际完成用户任务后才简短总结。"
+		"Kotshi Builder 会自动续接工具结果。每次最多调用一个工具并等待结果。遵守当前 planMode：plan 时使用 update_plan 保存完整设计及阶段，必要时查看预览，然后等待用户在界面确认；不能施工或自行授权。build 时按持久 Plan 逐阶段施工并更新真实进度；设计变更需重新确认。优先使用构件及区域重复工具，阶段结束用多视角预览验收。不要展开逐格坐标或重述完整几何。仅实际完成后报告完成；预算不足时保留待办。"
 	)
 }
 
@@ -51,7 +51,7 @@ internal fun extractClientTools(request: JsonObject, source: String?): JsonArray
 	if (execution == null) return null
 	require(execution == "client" && source == "web") { "客户端工具仅用于 Web Builder" }
 	val tools = request.getAsJsonArray("tools") ?: error("客户端工具缺少 tools 定义")
-	require(tools.size() in 1..5 && tools.toString().length <= 32768) { "客户端工具定义过多或过大" }
+	require(tools.size() in 1..builderToolNames.size && tools.toString().length <= 32768) { "客户端工具定义过多或过大" }
 	val names = mutableSetOf<String>()
 	tools.forEach { item ->
 		val tool = item.asJsonObject
@@ -207,27 +207,33 @@ internal suspend fun runClientToolUpstream(
 ): Pair<Int, String> {
 	val allowTools = chat.get("tool_choice")?.asString != "none"
 	val definitions = if (allowTools) tools else JsonArray()
-	val outgoing = when (protocol) {
-		LLMProtocol.RESPONSES -> LLMResponsesAdapter.fromChatRequest(chat.toString(), tools, effort, webSearch = false)
-			.apply {
-				if (!allowTools) addProperty("tool_choice", "none")
-				else addProperty("parallel_tool_calls", false)
-			}
-		// Stateless browser continuations cannot echo native signed thinking blocks.
-		LLMProtocol.ANTHROPIC -> LLMAnthropicAdapter.fromChatRequest(
-			chat.toString(),
-			tools,
-			LLMReasoningEffort.NONE,
-			webSearch = false
-		).apply {
-			if (!allowTools) add("tool_choice", JsonObject().apply { addProperty("type", "none") })
-			else getAsJsonObject("tool_choice")?.addProperty("disable_parallel_tool_use", true)
-		}
+	val outgoing = LLMAdapterRegistry.forProtocol(protocol).adapt(
+		LLMAdapterRequest(
+			chat = chat,
+			functionTools = if (protocol == LLMProtocol.COMMANDCODE) definitions else tools,
+			reasoningEffort = if (protocol == LLMProtocol.ANTHROPIC) LLMReasoningEffort.NONE else effort,
+			webSearch = false,
+		)
+	).apply {
+		when (protocol) {
+			LLMProtocol.RESPONSES -> if (!allowTools) addProperty("tool_choice", "none")
+			else addProperty("parallel_tool_calls", false)
 
-		LLMProtocol.COMMANDCODE -> LLMCommandCodeAdapter.fromChatRequest(chat, definitions, effort)
-		LLMProtocol.CHAT_COMPLETIONS -> chat.deepCopy().apply {
-			addProperty("stream", false); remove("stream_options")
-			add("tools", tools); addProperty("tool_choice", if (allowTools) "auto" else "none")
+			// Stateless browser continuations cannot echo native signed thinking blocks.
+			LLMProtocol.ANTHROPIC -> if (!allowTools) {
+				add("tool_choice", JsonObject().apply { addProperty("type", "none") })
+			} else {
+				getAsJsonObject("tool_choice")?.addProperty("disable_parallel_tool_use", true)
+			}
+
+			LLMProtocol.CHAT_COMPLETIONS -> {
+				addProperty("stream", false)
+				remove("stream_options")
+				add("tools", tools)
+				addProperty("tool_choice", if (allowTools) "auto" else "none")
+			}
+
+			LLMProtocol.COMMANDCODE -> Unit
 		}
 	}
 	if (protocol == LLMProtocol.COMMANDCODE) return runCommandCodeUpstream(

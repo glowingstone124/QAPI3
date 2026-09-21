@@ -5,7 +5,17 @@ import com.google.gson.JsonElement
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 
-internal object LLMResponsesAdapter {
+internal object LLMResponsesAdapter : LLMAdapter {
+	override val protocol: LLMProtocol = LLMProtocol.RESPONSES
+
+	override fun adapt(request: LLMAdapterRequest): JsonObject = fromChatRequest(
+		request.chat.toString(),
+		request.functionTools,
+		request.reasoningEffort,
+		request.stream,
+		request.webSearch,
+	)
+
     fun outputSummary(responseBody: String): String {
         return runCatching {
             val response = JsonParser.parseString(responseBody).asJsonObject

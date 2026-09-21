@@ -149,12 +149,14 @@ internal suspend fun LLMServices.completeWithAnthropicApi(
 	source: String,
 	provider: LLMProvider,
 ): Pair<Int, String> {
-	val body = LLMAnthropicAdapter.fromChatRequest(
-		request.body,
-		toolService.definitions(),
-		request.reasoningEffort,
-		webSearch = !toolService.usesSearXNG(),
-		thinkingMode = provider.modelConfig(request.preset).thinkingMode,
+	val body = LLMAdapterRegistry.forProtocol(LLMProtocol.ANTHROPIC).adapt(
+		LLMAdapterRequest(
+			chat = JsonParser.parseString(request.body).asJsonObject,
+			functionTools = toolService.definitions(),
+			reasoningEffort = request.reasoningEffort,
+			webSearch = !toolService.usesSearXNG(),
+			thinkingMode = provider.modelConfig(request.preset).thinkingMode,
+		)
 	)
 	val (status, text) = runAnthropicUpstream(
 		client, provider.endpoint(LLMProtocol.ANTHROPIC), provider.apiToken, body, maxToolRounds,
@@ -209,13 +211,15 @@ internal fun LLMServices.streamFromAnthropic(
 	}
 	progress("analyzing", "正在分析问题…")
 	try {
-		val body = LLMAnthropicAdapter.fromChatRequest(
-			request.body,
-			toolService.definitions(),
-			request.reasoningEffort,
-			stream = true,
-			webSearch = !toolService.usesSearXNG(),
-			thinkingMode = provider.modelConfig(request.preset).thinkingMode,
+		val body = LLMAdapterRegistry.forProtocol(LLMProtocol.ANTHROPIC).adapt(
+			LLMAdapterRequest(
+				chat = JsonParser.parseString(request.body).asJsonObject,
+				functionTools = toolService.definitions(),
+				reasoningEffort = request.reasoningEffort,
+				stream = true,
+				webSearch = !toolService.usesSearXNG(),
+				thinkingMode = provider.modelConfig(request.preset).thinkingMode,
+			)
 		)
 		val (status, text) = runAnthropicUpstream(
 			client, provider.endpoint(LLMProtocol.ANTHROPIC), provider.apiToken, body, maxToolRounds,

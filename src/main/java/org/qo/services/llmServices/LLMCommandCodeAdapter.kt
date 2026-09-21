@@ -9,7 +9,12 @@ import java.time.ZoneOffset
 import java.util.UUID
 
 /** OpenAI chat messages to Command Code's /alpha/generate wire. */
-internal object LLMCommandCodeAdapter {
+internal object LLMCommandCodeAdapter : LLMAdapter {
+	override val protocol: LLMProtocol = LLMProtocol.COMMANDCODE
+
+	override fun adapt(request: LLMAdapterRequest): JsonObject =
+		fromChatRequest(request.chat, request.functionTools, request.reasoningEffort)
+
 	fun fromChatRequest(chat: JsonObject, tools: JsonArray, reasoningEffort: LLMReasoningEffort): JsonObject {
 		val messages = JsonArray()
 		val system = mutableListOf<String>()

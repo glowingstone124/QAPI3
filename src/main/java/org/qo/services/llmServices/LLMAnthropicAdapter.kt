@@ -7,7 +7,18 @@ import com.google.gson.JsonParser
 import java.security.MessageDigest
 
 /** Keeps Anthropic's native content intact between tool/search rounds. */
-internal object LLMAnthropicAdapter {
+internal object LLMAnthropicAdapter : LLMAdapter {
+	override val protocol: LLMProtocol = LLMProtocol.ANTHROPIC
+
+	override fun adapt(request: LLMAdapterRequest): JsonObject = fromChatRequest(
+		request.chat.toString(),
+		request.functionTools,
+		request.reasoningEffort,
+		request.stream,
+		request.webSearch,
+		request.thinkingMode,
+	)
+
 	fun fromChatRequest(
 		chatBody: String,
 		functionTools: JsonArray,
