@@ -16,6 +16,27 @@ import kotlinx.coroutines.delay
 import kotlin.test.*
 
 class LLMClientToolsTest {
+    @Test fun `arbitrary client tool definitions are relayed without a server allowlist`() {
+        val request = obj("""{"tool_execution":"client","messages":[{"role":"user","content":"plan"}]}""")
+        request.add("tools", JsonArray().apply {
+            add(obj("""{"type":"function","function":{"name":"custom_browser_tool","parameters":{"type":"object"}}}"""))
+        })
+        assertEquals("custom_browser_tool", extractClientTools(request.deepCopy(), "web")!![0]
+            .asJsonObject.getAsJsonObject("function").get("name").asString)
+        assertFailsWith<IllegalArgumentException> { extractClientTools(request.deepCopy(), "qq") }
+        val unknown = request.deepCopy()
+        unknown.getAsJsonArray("tools")[0].asJsonObject.getAsJsonObject("function").addProperty("name", "")
+        assertFailsWith<IllegalArgumentException> { extractClientTools(unknown, "web") }
+    }
+
+    @Test
+    fun `client tool history accepts names unknown to the server`() {
+        validateClientToolHistory(JsonArray().apply {
+            add(obj("""{"role":"assistant","content":"","tool_calls":[{"id":"call_1","type":"function","function":{"name":"custom_browser_tool","arguments":"{}"}}]}"""))
+            add(obj("""{"role":"tool","tool_call_id":"call_1","content":"{}"}"""))
+        })
+    }
+
     private fun obj(text: String) = JsonParser.parseString(text).asJsonObject
     private val tools = JsonParser.parseString("""[{"type":"function","function":{"name":"fill","parameters":{"type":"object","properties":{"revision":{"type":"integer"}},"required":["revision"]}}}]""").asJsonArray
     private fun chat() = obj("""{"model":"test","messages":[{"role":"user","content":"build"}],"max_tokens":2048,"tool_choice":"auto"}""")
@@ -146,11 +167,16 @@ class LLMClientToolsTest {
         validateClientToolHistory(compacted)
     }
 
-    @Test fun `client tools are explicitly web only and restricted to builder names`() {
+    @Test fun `client tools are explicitly web only and preserve arbitrary names`() {
         fun request() = chat().apply { addProperty("tool_execution","client");add("tools",tools.deepCopy()) }
         assertEquals(1, extractClientTools(request(),"web")!!.size())
         assertFails { extractClientTools(request(),"qq") }
-        assertFails { extractClientTools(request().apply { getAsJsonArray("tools")[0].asJsonObject.getAsJsonObject("function").addProperty("name","run_shell") },"web") }
+        assertEquals(
+            "run_shell",
+            extractClientTools(request().apply {
+                getAsJsonArray("tools")[0].asJsonObject.getAsJsonObject("function").addProperty("name","run_shell")
+            },"web")!![0].asJsonObject.getAsJsonObject("function").get("name").asString,
+        )
         assertEquals(null,extractClientTools(chat(),"web"))
     }
 

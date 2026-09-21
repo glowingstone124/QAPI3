@@ -341,7 +341,7 @@ Web 流式请求会校验 `Origin`，允许来源由 `qapi.llm.web-allowed-origi
 
 ### Builder 客户端原生工具
 
-Web Chat 可设置 `tool_execution:"client"`，同时提交 `tools`（OpenAI function JSON Schema）与 `tool_choice:"auto"|"none"`。工具名仅允许 `set`、`fill`、`replace`、`blend_fill`、`generate_preview_image`，最多五个定义、32 KiB。此模式通过独立的单轮上游转发路径运行，**不调用服务端工具执行器**，不注入搜索工具；所有编辑、填充、截图及 IndexedDB 保存均由 Web 客户端执行。
+Web Chat 可设置 `tool_execution:"client"`，同时提交 `tools`（OpenAI function JSON Schema）与 `tool_choice:"auto"|"none"`。客户端工具名称不由 QAPI 的服务端工具白名单判定；QAPI 只校验 function 定义格式、重复名称、最多 64 个定义和 32 KiB 请求大小，然后原样转发。此模式通过独立的单轮上游转发路径运行，**不调用服务端工具执行器**，不注入搜索工具；所有编辑、填充、截图及 IndexedDB 保存均由 Web 客户端决定是否执行。
 
 响应保留标准 `message.tool_calls` 的调用 ID、函数名和参数。SSE 先发送状态，待上游完整完成后发送 completion JSON，再发送额度及 `[DONE]`。浏览器仅在完整成功后执行，并在下一请求中提交配对的 `assistant.tool_calls` 与 `role:"tool",tool_call_id,content`。工具结果 `content` 为 JSON 字符串；图片用随后带调用 ID 的 `user` 多模态消息携带，兼容四种上游协议。服务端校验调用/结果配对，超大上下文直接拒绝，不拆散工具链。
 

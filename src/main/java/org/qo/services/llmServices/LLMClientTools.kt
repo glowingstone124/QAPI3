@@ -16,8 +16,8 @@ import io.ktor.http.contentType
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.flow
 
-internal val builderToolNames = setOf("set", "fill", "replace", "blend_fill", "generate_preview_image", "update_plan", "build_component", "repeat_region", "generate_overview")
 internal const val CLIENT_TOOL_OUTPUT_TOKENS = 4_096
+private const val CLIENT_TOOL_DEFINITION_MAX_COUNT = 64
 private const val COMMANDCODE_CLIENT_TOOL_TIMEOUT_MILLIS = 300_000L
 
 private fun prependClientInstruction(chat: JsonObject, instruction: String) {
@@ -35,7 +35,7 @@ internal fun clientToolStepChat(chat: JsonObject): JsonObject = chat.deepCopy().
 	if (get("tool_choice")?.asString == "none") return@apply
 	prependClientInstruction(
 		this,
-		"Kotshi Builder 会自动续接工具结果。每次最多调用一个工具并等待结果。遵守当前 planMode：plan 时使用 update_plan 保存完整设计及阶段，必要时查看预览，然后等待用户在界面确认；不能施工或自行授权。build 时按持久 Plan 逐阶段施工并更新真实进度；设计变更需重新确认。优先使用构件及区域重复工具，阶段结束用多视角预览验收。不要展开逐格坐标或重述完整几何。仅实际完成后报告完成；预算不足时保留待办。"
+		"Kotshi Builder 会自动续接工具结果。每次最多调用一个工具并等待结果。遵守当前 planMode：fast 时直接使用工具施工，无需创建或确认 Plan，不要等待批准；可选计划不影响 Fast 施工。plan 时使用 update_plan 保存完整设计及阶段，必要时查看预览，然后等待用户在界面确认；不能施工或自行授权。build 时按持久 Plan 逐阶段施工并更新真实进度；设计变更需重新确认。优先使用构件及区域重复工具，阶段结束用多视角预览验收。不要展开逐格坐标或重述完整几何。仅实际完成后报告完成；预算不足时保留待办。"
 	)
 }
 
@@ -51,14 +51,14 @@ internal fun extractClientTools(request: JsonObject, source: String?): JsonArray
 	if (execution == null) return null
 	require(execution == "client" && source == "web") { "客户端工具仅用于 Web Builder" }
 	val tools = request.getAsJsonArray("tools") ?: error("客户端工具缺少 tools 定义")
-	require(tools.size() in 1..builderToolNames.size && tools.toString().length <= 32768) { "客户端工具定义过多或过大" }
+	require(tools.size() in 1..CLIENT_TOOL_DEFINITION_MAX_COUNT && tools.toString().length <= 32768) { "客户端工具定义过多或过大" }
 	val names = mutableSetOf<String>()
 	tools.forEach { item ->
 		val tool = item.asJsonObject
 		require(tool.get("type")?.asString == "function") { "仅支持客户端 function 工具" }
 		val function = tool.getAsJsonObject("function") ?: error("缺少 function 定义")
-		val name = function.get("name")?.asString
-		require(name in builderToolNames && names.add(requireNotNull(name))) { "未知或重复的 Builder 工具" }
+		val name = function.get("name")?.asString?.trim()
+		require(!name.isNullOrBlank() && name.length <= 128 && names.add(name)) { "客户端工具名称无效或重复" }
 		require(
 			function.getAsJsonObject("parameters")?.get("type")?.asString == "object"
 		) { "工具参数必须为 object schema" }
@@ -91,10 +91,11 @@ internal fun validateClientToolHistory(messages: JsonArray) {
 					val call = callItem.asJsonObject
 					val id = call.get("id")?.asString.orEmpty()
 					require(id.isNotBlank() && id.length <= 256 && seen.add(id)) { "工具调用 ID 无效或重复" }
+					val name = call.getAsJsonObject("function")?.get("name")?.asString?.trim()
 					require(
-						call.get("type")?.asString == "function" && call.getAsJsonObject("function")
-							?.get("name")?.asString in builderToolNames
-					) { "未知客户端工具调用" }
+						call.get("type")?.asString == "function" &&
+							!name.isNullOrBlank() && name.length <= 128
+					) { "客户端工具调用格式无效" }
 					pending.add(id)
 				}
 			}
@@ -439,10 +440,11 @@ internal suspend fun LLMServices.completeClientTools(
 		val ids = mutableSetOf<String>()
 		calls.forEach { item ->
 			val call = item.asJsonObject
+			val name = call.getAsJsonObject("function")?.get("name")?.asString?.trim()
 			require(
-				call.get("type")?.asString == "function" && call.getAsJsonObject("function")
-					?.get("name")?.asString in builderToolNames
-			) { "模型返回未知客户端工具" }
+				call.get("type")?.asString == "function" &&
+					!name.isNullOrBlank() && name.length <= 128
+			) { "模型返回无效客户端工具调用" }
 			val id = call.get("id")?.asString.orEmpty()
 			require(id.isNotBlank() && id.length <= 256 && ids.add(id)) { "模型返回无效工具 ID" }
 		}
