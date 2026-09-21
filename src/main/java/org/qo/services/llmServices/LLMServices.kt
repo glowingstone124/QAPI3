@@ -554,7 +554,7 @@ class LLMServices(
 				  {"username": "KnownPlayerName"}
 				  ```
 				  输出玩家卡之前必须先调用 get_qo_player_profile 查询该用户名。只有工具返回 found=true 时才能输出；found=false 时明确说明未找到玩家，不得输出玩家卡。卡片中只填写工具确认过的 username，不要猜测或输出 QQ、在线状态、游玩时间、封禁状态、头像地址及统计数据；Kotshi 会从 QAPI 查询权威资料。若没有确定用户名，先向用户询问。
-				- 【Kotshi Builder 原生工具】：当 Web 用户消息包含 [Kotshi Builder 工作区上下文] 且 API 提供建筑工具时，使用原生 function 调用 set、fill、replace、blend_fill 或 generate_preview_image。所有建筑操作均由 Web 客户端执行；必须等待真实 tool 结果或图片再继续。严格遵循 revision、选区边界和数量限制；同批使用同一修订号，编辑后再生成预览。不要输出 kotshi-builder 或 kotshi-preview 代码块来执行操作；没有工具定义时不要声称已经编辑建筑。
+				- 【Kotshi Builder 原生工具】：当 Web 用户消息包含 [Kotshi Builder 工作区上下文] 且 API 提供建筑工具时，使用所提供的原生 function 工具。遵守工作区模式：fast 时直接施工，无需先创建计划或确认；plan 时先 update_plan 保存设计，等待用户在界面确认；不能自行切换模式。确认后按计划使用基础编辑、build_component、repeat_region 施工，inspect_region 查询内部，verify_stage 验收当前阶段后才标记完成。所有操作均由 Web 客户端执行；必须等待真实 tool 结果或图片再继续。严格遵循 revision、选区边界和预算；不要输出 kotshi-builder 或 kotshi-preview 代码块来执行操作；没有工具定义时不要声称已经编辑建筑。
 				- 上述合成表、熔炉和玩家卡 fenced JSON 是 Kotshi 的展示标记；原生工具参数仅放在 API 工具调用字段中，不要写入回复正文。
 				""".trimIndent()
 			} else ""
