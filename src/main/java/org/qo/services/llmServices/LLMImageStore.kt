@@ -8,6 +8,7 @@ import org.springframework.stereotype.Service
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardOpenOption
+import java.nio.charset.StandardCharsets
 import java.util.Base64
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
@@ -27,7 +28,6 @@ class LLMImageStore private constructor(
 
     init {
         Files.createDirectories(root)
-        cleanupOldOrphans()
     }
 
     fun compactContent(content: JsonElement): JsonElement {
@@ -112,22 +112,6 @@ class LLMImageStore private constructor(
         }
     }
 
-    private fun cleanupOldOrphans() {
-        val maxAgeMs = readLongEnv("LLM_IMAGE_ORPHAN_MAX_AGE_MS", 24L * 60L * 60L * 1000L)
-            .coerceAtLeast(60_000L)
-        val cutoff = System.currentTimeMillis() - maxAgeMs
-
-        Files.list(root).use { files ->
-            files.filter { Files.isRegularFile(it) }.forEach { path ->
-                val modifiedAt = runCatching { Files.getLastModifiedTime(path).toMillis() }.getOrNull()
-                    ?: return@forEach
-                if (modifiedAt < cutoff) {
-                    runCatching { Files.deleteIfExists(path) }
-                }
-            }
-        }
-    }
-
     private fun storeDataUrl(dataUrl: String): StoredImage {
         val comma = dataUrl.indexOf(',')
         require(dataUrl.startsWith("data:", ignoreCase = true) && comma > 5) {
@@ -158,7 +142,9 @@ class LLMImageStore private constructor(
             "Image is too large; maximum is $maxImageBytes bytes"
         }
 
-        val id = UUID.randomUUID().toString()
+        val encodedMime = Base64.getUrlEncoder().withoutPadding()
+            .encodeToString(mimeType.toByteArray(StandardCharsets.UTF_8))
+        val id = "${UUID.randomUUID()}_$encodedMime"
         val path = root.resolve("$id.bin")
         Files.write(path, bytes, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE)
 
@@ -168,13 +154,24 @@ class LLMImageStore private constructor(
     }
 
     private fun dataUrl(imageId: String): String? {
-        val image = images[imageId] ?: return null
+        val image = images[imageId] ?: loadStoredImage(imageId) ?: return null
         val bytes = runCatching { Files.readAllBytes(image.path) }.getOrNull() ?: return null
         return "data:${image.mimeType};base64,${Base64.getEncoder().encodeToString(bytes)}"
     }
 
+    private fun loadStoredImage(imageId: String): StoredImage? {
+        if (!STORED_IMAGE_ID.matches(imageId)) return null
+        val mimeType = runCatching {
+            String(Base64.getUrlDecoder().decode(imageId.substringAfter('_')), StandardCharsets.UTF_8)
+        }.getOrNull()?.takeIf { it.startsWith("image/") } ?: return null
+        val path = root.resolve("$imageId.bin")
+        if (!Files.isRegularFile(path)) return null
+        return StoredImage(imageId, mimeType, path).also { images.putIfAbsent(imageId, it) }
+    }
+
     private fun delete(imageId: String) {
-        val image = images.remove(imageId) ?: return
+        val image = images.remove(imageId) ?: loadStoredImage(imageId) ?: return
+        images.remove(imageId)
         runCatching { Files.deleteIfExists(image.path) }
     }
 
@@ -209,6 +206,7 @@ class LLMImageStore private constructor(
 
     companion object {
         private const val INTERNAL_IMAGE_REF = "qapi_image_ref"
+        private val STORED_IMAGE_ID = Regex("[0-9a-f-]{36}_[A-Za-z0-9_-]{1,80}")
 
         private fun defaultRoot(): Path {
             val configured = System.getenv("LLM_IMAGE_STORE_DIR")
@@ -217,7 +215,7 @@ class LLMImageStore private constructor(
             return if (configured != null) {
                 Path.of(configured).toAbsolutePath().normalize()
             } else {
-                Path.of(System.getProperty("java.io.tmpdir"), "qapi3-llm-images")
+                Path.of("data", "llm", "images")
                     .toAbsolutePath()
                     .normalize()
             }

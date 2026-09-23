@@ -3,11 +3,13 @@ package org.qo.services.llmServices
 import com.google.gson.JsonArray
 import com.google.gson.JsonObject
 import org.qo.datas.ReactiveDatabase
+import org.qo.db.repository.LlmAccessRecordDbRepository
 import org.qo.orm.UserORM
 import org.qo.services.loginService.KotshiPrivacyService
 import org.qo.services.loginService.KotshiPrivacySettings
 import org.qo.services.loginService.Login
 import org.qo.services.loginService.QqLoginService
+import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.stereotype.Service
 import java.time.Instant
 import java.time.ZoneId
@@ -69,13 +71,20 @@ data class KotshiAccountSnapshot(
 
 /** Aggregates the authenticated user's requests across all channels and shared quota. */
 @Service
-class KotshiAccountService(
+class KotshiAccountService @Autowired constructor(
 	private val login: Login,
 	private val privacyService: KotshiPrivacyService,
 	private val dailyQuotaService: LLMDailyQuotaService,
-	private val database: ReactiveDatabase,
-	private val accessRecordSchema: LLMAccessRecordSchema,
+	private val repository: LlmAccessRecordDbRepository,
 ) {
+	constructor(
+		login: Login,
+		privacyService: KotshiPrivacyService,
+		dailyQuotaService: LLMDailyQuotaService,
+		database: ReactiveDatabase,
+		accessRecordSchema: LLMAccessRecordSchema,
+	) : this(login, privacyService, dailyQuotaService, LlmAccessRecordDbRepository(database))
+
 	private val userORM = UserORM()
 	private val quotaZone = ZoneId.of("Asia/Shanghai")
 
@@ -111,62 +120,17 @@ class KotshiAccountService(
 
 	internal suspend fun loadUsage(uid: Long, now: Instant = Instant.now()): Pair<KotshiUsageSummary, List<KotshiUsageRecord>> {
 		return runCatching {
-			accessRecordSchema.ensure()
 			val dayStart = now.atZone(quotaZone).toLocalDate()
 				.atStartOfDay(quotaZone)
 				.toInstant()
 				.toEpochMilli()
-			val summary = database.one(
-				"""
-				SELECT COUNT(*) AS requests,
-				       SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS completed,
-				       SUM(CASE WHEN status IN ('failed', 'rejected') THEN 1 ELSE 0 END) AS failed,
-				       COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
-				       COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
-				       COALESCE(SUM(total_tokens), 0) AS total_tokens
-				FROM llm_access_records
-				WHERE uid = ? AND created_at >= ?
-				""".trimIndent(),
-				listOf(uid, dayStart),
-			) { row ->
-				KotshiUsageSummary(
-					requests = number(row.get("requests")),
-					completed = number(row.get("completed")),
-					failed = number(row.get("failed")),
-					promptTokens = number(row.get("prompt_tokens")),
-					completionTokens = number(row.get("completion_tokens")),
-					totalTokens = number(row.get("total_tokens")),
-				)
-			} ?: KotshiUsageSummary()
-			val recent = database.all(
-				"""
-				SELECT source, status, total_tokens, created_at, completed_at
-				FROM llm_access_records
-				WHERE uid = ?
-				ORDER BY created_at DESC
-				LIMIT 20
-				""".trimIndent(),
-				listOf(uid),
-			) { row ->
-				KotshiUsageRecord(
-					source = row.get("source", String::class.java) ?: "unknown",
-					status = row.get("status", String::class.java) ?: "unknown",
-					totalTokens = number(row.get("total_tokens")),
-					createdAt = number(row.get("created_at")),
-					completedAt = row.get("completed_at")?.let(::number),
-				)
-			}
+			val summary = repository.loadUsageSummary(uid, dayStart)
+			val recent = repository.loadRecentUsage(uid, 20)
 			summary to recent
 		}.getOrElse { error ->
 			if (error is kotlinx.coroutines.CancellationException) throw error
 			println("[Kotshi] usage lookup failed: ${error.message}")
 			KotshiUsageSummary() to emptyList()
 		}
-	}
-
-	private fun number(value: Any?): Long = when (value) {
-		is Number -> value.toLong()
-		is String -> value.toLongOrNull() ?: 0L
-		else -> 0L
 	}
 }

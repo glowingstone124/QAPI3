@@ -1,17 +1,23 @@
 package org.qo.services.advancementServices
 
-import io.r2dbc.spi.Row
 import org.qo.datas.Enumerations
 import org.qo.datas.ReactiveDatabase
+import org.qo.db.repository.AdvancementDbRepository
 import org.qo.orm.CardProfileOrm
 import org.qo.orm.UserORM
+import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.stereotype.Component
 
 @Component
-class AdvancementServiceImpl(
+class AdvancementServiceImpl @Autowired constructor(
 	private val cardProfileOrm: CardProfileOrm,
-	private val database: ReactiveDatabase,
+	private val advancementDbRepository: AdvancementDbRepository,
 ) {
+	constructor(cardProfileOrm: CardProfileOrm, database: ReactiveDatabase) : this(
+		cardProfileOrm,
+		AdvancementDbRepository(database),
+	)
+
 	private val userORM = UserORM()
 
 	data class Advancement(
@@ -45,45 +51,24 @@ class AdvancementServiceImpl(
 		},
 	)
 
-	suspend fun getCompleteAdvancements(username: String): List<Advancement> = database.all(
-		"""
-		SELECT a.id, a.name, a.description
-		FROM advancement_completed ac
-		JOIN advancements a ON ac.advancement_id = a.id
-		WHERE ac.player_username = ?
-		""".trimIndent(),
-		listOf(username),
-		::toAdvancement,
-	)
+	suspend fun getCompleteAdvancements(username: String): List<Advancement> =
+		advancementDbRepository.getCompleteAdvancements(username).map {
+			Advancement(it.id, it.name, it.description)
+		}
 
 	suspend fun getAchievementCompletePlayerCount(adv: Enumerations.AdvancementsEnum): Long =
-		database.one(
-			"SELECT COUNT(*) AS cnt FROM advancement_completed WHERE advancement_id = ?",
-			listOf(adv.id),
-		) { row -> row.get("cnt", java.lang.Long::class.java)?.toLong() ?: 0L } ?: 0L
+		advancementDbRepository.getAchievementCompletePlayerCount(adv.id.toLong())
 
 	suspend fun addAdvancementCompletionSQL(
 		adv: Enumerations.AdvancementsEnum,
 		player: String,
 	): AddAdvancementResult {
-		val checkSql = """
-			SELECT 1
-			FROM advancement_completed
-			WHERE player_username = ? AND advancement_id = ?
-			LIMIT 1
-		""".trimIndent()
-		val insertSql = """
-			INSERT INTO advancement_completed(player_username, advancement_id)
-			VALUES (?, ?)
-		""".trimIndent()
-		val checkPlayerSql = "SELECT 1 FROM users WHERE username = ? LIMIT 1"
-
 		return try {
-			if (database.one(checkPlayerSql, listOf(player)) { true } == null) {
+			if (!advancementDbRepository.userExists(player)) {
 				AddAdvancementResult.INVALID_PLAYER
-			} else if (database.one(checkSql, listOf(player, adv.id)) { true } != null) {
+			} else if (advancementDbRepository.hasCompleted(player, adv.id.toLong())) {
 				AddAdvancementResult.ALREADY_EXISTS
-			} else if (database.execute(insertSql, listOf(player, adv.id)) > 0) {
+			} else if (advancementDbRepository.insertCompletion(player, adv.id.toLong())) {
 				AddAdvancementResult.SUCCESS
 			} else {
 				AddAdvancementResult.FAILED
@@ -99,7 +84,7 @@ class AdvancementServiceImpl(
 		player: String,
 	): AddAdvancementResult {
 		return try {
-			database.inTransaction {
+			advancementDbRepository.inTransaction {
 				val result = addAdvancementCompletionSQL(adv, player)
 				if (result != AddAdvancementResult.SUCCESS) {
 					return@inTransaction result
@@ -121,14 +106,8 @@ class AdvancementServiceImpl(
 		}
 	}
 
-	suspend fun getAllAdvancements(): List<Advancement> = database.all(
-		"SELECT id, name, description FROM advancements",
-		mapper = ::toAdvancement,
-	)
-
-	private fun toAdvancement(row: Row): Advancement = Advancement(
-		id = row.get("id", java.lang.Long::class.java)!!.toLong(),
-		name = row.get("name", String::class.java)!!,
-		description = row.get("description", String::class.java)!!,
-	)
+	suspend fun getAllAdvancements(): List<Advancement> =
+		advancementDbRepository.getAllAdvancements().map {
+			Advancement(it.id, it.name, it.description)
+		}
 }

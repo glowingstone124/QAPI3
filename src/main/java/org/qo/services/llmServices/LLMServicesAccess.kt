@@ -80,34 +80,17 @@ internal suspend fun LLMServices.insertAccessRecord(
 	val requestId = "chatcmpl-qo-${UUID.randomUUID()}"
 	return try {
 		awaitAccessRecordSchema()
-		database.inTransaction {
-			database.execute(
-				"""
-				INSERT INTO llm_access_records(
-					uid, username, source, source_identity, group_name, request_id, model, stream, status, created_at
-				)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """.trimIndent(),
-				listOf(
-					principal.qqUid,
-					principal.displayName.take(128),
-					principal.source.value,
-					principal.sourceIdentity.take(128),
-					groupName?.take(128),
-					requestId,
-					model.take(128),
-					stream,
-					"started",
-					System.currentTimeMillis()
-				),
-			)
-			database.one(
-				"SELECT id FROM llm_access_records WHERE request_id = ? ORDER BY id DESC LIMIT 1",
-				listOf(requestId),
-			) { row ->
-				row.get("id", java.lang.Long::class.java)!!.toLong()
-			} ?: -1L
-		}
+		accessRecordRepository.insertStartRecord(
+			uid = principal.qqUid,
+			username = principal.displayName,
+			source = principal.source.value,
+			sourceIdentity = principal.sourceIdentity,
+			groupName = groupName,
+			requestId = requestId,
+			model = model,
+			stream = stream,
+			createdAt = System.currentTimeMillis(),
+		)
 	} catch (_: Exception) {
 		-1L
 	}
@@ -133,23 +116,16 @@ internal suspend fun LLMServices.updateAccessRecord(
 	if (id <= 0) return
 	try {
 		awaitAccessRecordSchema()
-		database.execute(
-			"""
-             UPDATE llm_access_records
-             SET status = ?, prompt_tokens = ?, completion_tokens = ?, total_tokens = ?, cached_tokens = ?, uncached_tokens = ?, error_message = ?, completed_at = ?
-             WHERE id = ?
-             """.trimIndent(),
-			listOf(
-				status,
-				usage?.promptTokens,
-				usage?.completionTokens,
-				usage?.totalTokens,
-				cached,
-				uncached,
-				errorMessage?.take(512),
-				System.currentTimeMillis(),
-				id,
-			),
+		accessRecordRepository.updateRecord(
+			id = id,
+			status = status,
+			promptTokens = usage?.promptTokens,
+			completionTokens = usage?.completionTokens,
+			totalTokens = usage?.totalTokens,
+			cachedTokens = cached,
+			uncachedTokens = uncached,
+			errorMessage = errorMessage,
+			completedAt = System.currentTimeMillis(),
 		)
 	} catch (_: Exception) {
 		// Access-record persistence must not replace the upstream response with a database error.

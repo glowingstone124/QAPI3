@@ -5,9 +5,11 @@ import com.google.gson.JsonObject
 import org.qo.datas.Mapping
 import org.qo.datas.Nodes
 import org.qo.datas.ReactiveDatabase
+import org.qo.db.repository.LoginSecurityDbRepository
 import org.qo.orm.UserORM
 import org.qo.services.messageServices.Msg
 import org.qo.services.playerStatistics.PlayerStatisticsService
+import org.springframework.beans.factory.annotation.Autowired
 import org.qo.utils.ReturnInterface
 import org.qo.utils.SerializeUtils.convertToJsonArray
 import org.springframework.stereotype.Service
@@ -15,14 +17,23 @@ import java.security.MessageDigest
 import java.time.LocalDate
 
 @Service
-class AuthorityNeededServicesImpl(
+class AuthorityNeededServicesImpl @Autowired constructor(
 	private val login: Login,
 	private val ri: ReturnInterface,
 	private val ft: FortuneTools,
 	private val nodes: Nodes,
-	private val database: ReactiveDatabase,
+	private val loginSecurityDbRepository: LoginSecurityDbRepository,
 	private val playerStatisticsService: PlayerStatisticsService,
 ) {
+	constructor(
+		login: Login,
+		ri: ReturnInterface,
+		ft: FortuneTools,
+		nodes: Nodes,
+		database: ReactiveDatabase,
+		playerStatisticsService: PlayerStatisticsService,
+	) : this(login, ri, ft, nodes, LoginSecurityDbRepository(database), playerStatisticsService)
+
 	val gson = Gson()
 	private val userORM = UserORM()
 
@@ -111,10 +122,7 @@ class AuthorityNeededServicesImpl(
 		if (precheckResult != null) {
 			return precheckResult
 		}
-		return database.all(
-			"SELECT ip FROM loginip WHERE username = ?",
-			listOf(accountName),
-		) { row -> row.get("ip", String::class.java) ?: "Unknown IP" }
+		return loginSecurityDbRepository.getUserIps(accountName!!)
 			.convertToJsonArray()
 			.toString()
 	}

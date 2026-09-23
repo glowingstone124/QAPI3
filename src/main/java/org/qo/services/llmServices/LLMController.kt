@@ -27,7 +27,7 @@ import org.springframework.web.bind.annotation.RestController
 @RequestMapping("/qo/asking")
 class LLMController(
 	private val llmServices: LLMServices,
-	private val kotshiConversationService: KotshiConversationService,
+	private val kotshiConversationService: KotshiConversationService? = null,
 	private val tokenStatisticsService: LLMTokenStatisticsService? = null,
 	@Value("\${qapi.llm.web-allowed-origin-patterns:https://*.qoriginal.vip,http://localhost:*,http://127.0.0.1:*}")
 	allowedWebOriginPatterns: String,
@@ -151,113 +151,6 @@ class LLMController(
 			)
 		val result = llmServices.quotaStatus(requestToken)
 		return jsonResponse(result.body, HttpStatus.valueOf(result.status), result.quota)
-	}
-
-	@GetMapping("/v1/conversations", produces = [MediaType.APPLICATION_JSON_VALUE])
-	suspend fun listConversations(
-		@RequestHeader("token", required = false) token: String?,
-		@RequestHeader(HttpHeaders.AUTHORIZATION, required = false) authorization: String?,
-	): ResponseEntity<String> {
-		val requestToken = AuthTokens.resolve(token, authorization)
-			?: return jsonResponse(
-				"""{"error":{"message":"缺少或无效的令牌","type":"invalid_token","code":"invalid_token"}}""",
-				HttpStatus.UNAUTHORIZED
-			)
-		val user = llmServices.authenticateWeb(requestToken)
-			?: return jsonResponse(
-				"""{"error":{"message":"权限验证失败","type":"invalid_token","code":"invalid_token"}}""",
-				HttpStatus.UNAUTHORIZED
-			)
-		val list = kotshiConversationService.listConversations(user.qqUid)
-		return ResponseEntity.ok(gson.toJson(list))
-	}
-
-	@PostMapping("/v1/conversations", produces = [MediaType.APPLICATION_JSON_VALUE])
-	suspend fun createConversation(
-		@RequestHeader("token", required = false) token: String?,
-		@RequestHeader(HttpHeaders.AUTHORIZATION, required = false) authorization: String?,
-		@RequestBody(required = false) body: String?,
-	): ResponseEntity<String> {
-		val requestToken = AuthTokens.resolve(token, authorization)
-			?: return jsonResponse(
-				"""{"error":{"message":"缺少或无效的令牌","type":"invalid_token","code":"invalid_token"}}""",
-				HttpStatus.UNAUTHORIZED
-			)
-		val user = llmServices.authenticateWeb(requestToken)
-			?: return jsonResponse(
-				"""{"error":{"message":"权限验证失败","type":"invalid_token","code":"invalid_token"}}""",
-				HttpStatus.UNAUTHORIZED
-			)
-		val json = runCatching { com.google.gson.JsonParser.parseString(body.orEmpty()).asJsonObject }.getOrNull()
-		val title = json?.get("title")?.takeIf { !it.isJsonNull }?.asString
-		val model = json?.get("model")?.takeIf { !it.isJsonNull }?.asString ?: "fast"
-		val customId = json?.get("id")?.takeIf { !it.isJsonNull }?.asString
-		val conv = kotshiConversationService.createConversation(user.qqUid, title, model, customId)
-		return ResponseEntity.ok(gson.toJson(conv))
-	}
-
-	@GetMapping("/v1/conversations/{id}/messages", produces = [MediaType.APPLICATION_JSON_VALUE])
-	suspend fun getConversationMessages(
-		@RequestHeader("token", required = false) token: String?,
-		@RequestHeader(HttpHeaders.AUTHORIZATION, required = false) authorization: String?,
-		@PathVariable("id") id: String,
-	): ResponseEntity<String> {
-		val requestToken = AuthTokens.resolve(token, authorization)
-			?: return jsonResponse(
-				"""{"error":{"message":"缺少或无效的令牌","type":"invalid_token","code":"invalid_token"}}""",
-				HttpStatus.UNAUTHORIZED
-			)
-		val user = llmServices.authenticateWeb(requestToken)
-			?: return jsonResponse(
-				"""{"error":{"message":"权限验证失败","type":"invalid_token","code":"invalid_token"}}""",
-				HttpStatus.UNAUTHORIZED
-			)
-		val messages = kotshiConversationService.getMessages(user.qqUid, id)
-		return ResponseEntity.ok(gson.toJson(messages))
-	}
-
-	@DeleteMapping("/v1/conversations/{id}", produces = [MediaType.APPLICATION_JSON_VALUE])
-	suspend fun deleteConversation(
-		@RequestHeader("token", required = false) token: String?,
-		@RequestHeader(HttpHeaders.AUTHORIZATION, required = false) authorization: String?,
-		@PathVariable("id") id: String,
-	): ResponseEntity<String> {
-		val requestToken = AuthTokens.resolve(token, authorization)
-			?: return jsonResponse(
-				"""{"error":{"message":"缺少或无效的令牌","type":"invalid_token","code":"invalid_token"}}""",
-				HttpStatus.UNAUTHORIZED
-			)
-		val user = llmServices.authenticateWeb(requestToken)
-			?: return jsonResponse(
-				"""{"error":{"message":"权限验证失败","type":"invalid_token","code":"invalid_token"}}""",
-				HttpStatus.UNAUTHORIZED
-			)
-		val deleted = kotshiConversationService.deleteConversation(user.qqUid, id)
-		return ResponseEntity.ok("""{"success":$deleted}""")
-	}
-
-	@PatchMapping("/v1/conversations/{id}", produces = [MediaType.APPLICATION_JSON_VALUE])
-	suspend fun updateConversation(
-		@RequestHeader("token", required = false) token: String?,
-		@RequestHeader(HttpHeaders.AUTHORIZATION, required = false) authorization: String?,
-		@PathVariable("id") id: String,
-		@RequestBody body: String,
-	): ResponseEntity<String> {
-		val requestToken = AuthTokens.resolve(token, authorization)
-			?: return jsonResponse(
-				"""{"error":{"message":"缺少或无效的令牌","type":"invalid_token","code":"invalid_token"}}""",
-				HttpStatus.UNAUTHORIZED
-			)
-		val user = llmServices.authenticateWeb(requestToken)
-			?: return jsonResponse(
-				"""{"error":{"message":"权限验证失败","type":"invalid_token","code":"invalid_token"}}""",
-				HttpStatus.UNAUTHORIZED
-			)
-		val json = runCatching { com.google.gson.JsonParser.parseString(body).asJsonObject }.getOrNull()
-		val title = json?.get("title")?.takeIf { !it.isJsonNull }?.asString
-		val model = json?.get("model")?.takeIf { !it.isJsonNull }?.asString
-		val updated = kotshiConversationService.updateConversation(user.qqUid, id, title, model)
-		return ResponseEntity.ok("""{"success":$updated}""")
 	}
 
 	@PostMapping("/v1/chat/completions/bot", produces = [MediaType.APPLICATION_JSON_VALUE])
@@ -517,48 +410,9 @@ class LLMController(
 		return false
 	}
 
-	private fun streamResponse(result: LLMStreamResult): ResponseEntity<Flow<ServerSentEvent<String>>> {
-		val builder = ResponseEntity.status(result.status).contentType(MediaType.TEXT_EVENT_STREAM)
-		builder.header(HttpHeaders.CACHE_CONTROL, "no-cache, no-transform")
-		builder.header("X-Accel-Buffering", "no")
-		applyQuotaHeaders(builder, result.quota, result.status)
-		return builder.body(streamEvents(result.chunks))
-	}
+	private fun streamResponse(result: LLMStreamResult): ResponseEntity<Flow<ServerSentEvent<String>>> =
+		LLMResponseHelper.streamResponse(result)
 
-	private fun streamEvents(chunks: Flow<String>): Flow<ServerSentEvent<String>> = flow {
-		try {
-			chunks.collect { chunk ->
-				emit(sse(chunk))
-			}
-			emit(sse("[DONE]"))
-		} catch (e: Exception) {
-			if (e is kotlinx.coroutines.CancellationException) throw e
-			emit(sse(e.message ?: "LLM stream failed", "error"))
-		}
-	}
-
-	private fun sse(data: String, event: String? = null): ServerSentEvent<String> {
-		val builder = ServerSentEvent.builder(data)
-		if (event != null) builder.event(event)
-		return builder.build()
-	}
-
-	private fun jsonResponse(body: String, status: HttpStatus, quota: LLMQuotaView? = null): ResponseEntity<String> {
-		val builder = ResponseEntity.status(status).contentType(MediaType.APPLICATION_JSON)
-		applyQuotaHeaders(builder, quota, if (body.contains("weekly_quota_exceeded")) status.value() else 200)
-		return builder.body(body)
-	}
-
-	private fun applyQuotaHeaders(builder: ResponseEntity.BodyBuilder, quota: LLMQuotaView?, status: Int) {
-		if (quota == null) return
-		builder.header("X-Quota-Period", "weekly")
-		builder.header("X-Paid-Credits", quota.paidCredits.toString())
-		builder.header("X-RateLimit-Limit", quota.limit.toString())
-		builder.header("X-RateLimit-Remaining", quota.remaining.toString())
-		builder.header("X-RateLimit-Reset", quota.resetAtEpochSeconds.toString())
-		if (status == HttpStatus.TOO_MANY_REQUESTS.value()) {
-			val retryAfter = (quota.resetAtEpochSeconds - System.currentTimeMillis() / 1000L).coerceAtLeast(1L)
-			builder.header(HttpHeaders.RETRY_AFTER, retryAfter.toString())
-		}
-	}
+	private fun jsonResponse(body: String, status: HttpStatus, quota: LLMQuotaView? = null): ResponseEntity<String> =
+		LLMResponseHelper.jsonResponse(body, status, quota)
 }

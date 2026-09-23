@@ -43,7 +43,7 @@ class LLMConversationServiceTest {
     }
 
     @Test
-    fun `stores data url outside conversation content and restores it for history`() {
+    fun `stores data url outside conversation content and restores it for history`() = runBlocking {
         val dir = createTempDirectory("qapi3-llm-image-test")
         try {
             val imageStore = LLMImageStore.forTest(dir)
@@ -96,7 +96,7 @@ class LLMConversationServiceTest {
     }
 
     @Test
-    fun `keeps remote image url as a normal history part`() {
+    fun `keeps remote image url as a normal history part`() = runBlocking {
         val dir = createTempDirectory("qapi3-llm-image-url-test")
         try {
             val imageStore = LLMImageStore.forTest(dir)

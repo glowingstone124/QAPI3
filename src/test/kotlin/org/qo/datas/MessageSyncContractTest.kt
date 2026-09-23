@@ -16,11 +16,13 @@ class MessageSyncContractTest {
     @BeforeTest
     fun clearQueue() {
         Msg.msgQueue.clear()
+        Msg.tempQueue.clear()
     }
 
     @AfterTest
     fun cleanupQueue() {
         Msg.msgQueue.clear()
+        Msg.tempQueue.clear()
     }
 
     @Test

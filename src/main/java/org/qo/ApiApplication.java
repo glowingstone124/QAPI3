@@ -169,21 +169,8 @@ public class ApiApplication {
 
     @GetMapping("/qo/download/logingreeting")
     public Mono<ResponseEntity<String>> loginGreeting(@RequestParam(name = "username") String username) {
-        return userProcess.getTime(username).map(timeJson -> {
-            JsonObject greetJson = new JsonObject();
-            JsonArray onlines = new JsonArray();
-            greetJson.add("time", timeJson);
-            status.getStatusMap().forEach((id, info) -> {
-                JsonArray singular_users = new JsonArray();
-                info.get("players").getAsJsonArray().forEach((elem) -> singular_users.add(elem.getAsJsonObject().get("name")));
-                JsonObject server_pair = new JsonObject();
-                server_pair.addProperty("id", id);
-                server_pair.add("players", singular_users);
-                onlines.add(server_pair);
-            });
-            greetJson.add("online", onlines);
-            return ri.GeneralHttpHeader(greetJson.toString());
-        });
+        return userProcess.getTime(username)
+                .map(timeJson -> ri.GeneralHttpHeader(ApiApplicationHelper.buildGreetingJson(timeJson, status).toString()));
     }
 
     @RequestMapping("/app/latest")
@@ -293,46 +280,12 @@ public class ApiApplication {
      */
     @PostMapping(value = "/qo/upload/registry", consumes = MediaType.APPLICATION_JSON_VALUE)
     public Mono<ResponseEntity<String>> InsertData(@RequestBody RegisterRequest registration, ServerHttpRequest request) {
-        HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(MediaType.APPLICATION_JSON);
-        if (ua.isCLIToolRequest(request)) return Mono.just(new ResponseEntity<>("failed", headers, HttpStatus.BAD_REQUEST));
-        RegistrationVerificationMethod verificationMethod =
-                RegistrationVerificationMethod.parse(registration.verificationMethod());
-        if (verificationMethod == null) {
-            return Mono.just(ri.failed("invalid verification method"));
+        if (ua.isCLIToolRequest(request)) {
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            return Mono.just(new ResponseEntity<>("failed", headers, HttpStatus.BAD_REQUEST));
         }
-        if (verificationMethod == RegistrationVerificationMethod.MINECRAFT) {
-            if (!chambersEnabled) {
-                JsonObject response = new JsonObject();
-                response.addProperty("code", "minecraft_verification_unavailable");
-                response.addProperty("message", "Chamber 世界测试暂未开放。");
-                return Mono.just(ri.GeneralHttpHeader(response.toString(), HttpStatus.SERVICE_UNAVAILABLE));
-            }
-            boolean verified = minecraftRegistrationSessionService.consumePassed(
-                    registration.verificationToken(),
-                    registration.name(),
-                    registration.uid()
-            );
-            if (!verified) {
-                JsonObject response = new JsonObject();
-                response.addProperty("code", "minecraft_verification_required");
-                response.addProperty("message", "Minecraft 世界测试未通过、已过期或已使用。");
-                return Mono.just(ri.GeneralHttpHeader(response.toString(), HttpStatus.FORBIDDEN));
-            }
-            return userProcess.regMinecraftUser(registration.name(), registration.uid(), request, registration.password(), 0);
-        }
-        RegistrationQuizProof proof = registrationQuizService.consumeProof(
-                registration.verificationToken(),
-                registration.name(),
-                registration.uid()
-        );
-        if (proof == null) {
-            JsonObject response = new JsonObject();
-            response.addProperty("code", "quiz_verification_required");
-            response.addProperty("message", "答题验证无效、已过期或已使用。");
-            return Mono.just(ri.GeneralHttpHeader(response.toString(), HttpStatus.FORBIDDEN));
-        }
-        return userProcess.regMinecraftUser(registration.name(), registration.uid(), request, registration.password(), proof.getScore());
+        return ApiApplicationHelper.handleRegistration(registration, request, chambersEnabled, minecraftRegistrationSessionService, registrationQuizService, userProcess, ri);
     }
 
     public record RegisterRequest(String name, Long uid, String password, String verificationMethod, String verificationToken) {}
@@ -389,19 +342,7 @@ public class ApiApplication {
     }
 
     static String avatarPublicBaseUrl(ServerHttpRequest request) {
-        String authority = request.getURI().getRawAuthority();
-        if (authority == null || authority.isBlank()) {
-            return null;
-        }
-        String scheme = request.getURI().getScheme();
-        String forwardedProto = request.getHeaders().getFirst("X-Forwarded-Proto");
-        if (forwardedProto != null) {
-            String candidate = forwardedProto.split(",", 2)[0].trim().toLowerCase(java.util.Locale.ROOT);
-            if (candidate.equals("http") || candidate.equals("https")) {
-                scheme = candidate;
-            }
-        }
-        return scheme + "://" + authority;
+        return ApiApplicationHelper.avatarPublicBaseUrl(request);
     }
 
     private Mono<ResponseEntity<String>> avatarResponse(String name, String publicBaseUrl) {

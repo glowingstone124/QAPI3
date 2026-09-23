@@ -5,36 +5,48 @@ import com.google.gson.JsonArray
 import com.google.gson.JsonObject
 import org.qo.datas.Mapping
 import org.qo.datas.ReactiveDatabase
+import org.qo.db.repository.AvatarDbRepository
 import org.qo.orm.CardOrm
 import org.qo.orm.CardProfileOrm
 import org.qo.orm.UserORM
 import org.qo.orm.reactiveDatabase
 import org.qo.orm.unsupportedSyncApi
+import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.stereotype.Service
 import kotlinx.coroutines.reactor.mono
 import reactor.core.publisher.Mono
 
 @Service
-class PlayerCardCustomizationImpl(
+class PlayerCardCustomizationImpl @Autowired constructor(
 	private val cardOrm: CardOrm,
 	private val cardProfileOrm: CardProfileOrm,
 	private val login: Login,
 	private val authorityNeededServicesImpl: AuthorityNeededServicesImpl,
+	private val avatarDbRepository: AvatarDbRepository,
 ) {
-	private var databaseOverride: ReactiveDatabase? = null
+	constructor(
+		cardOrm: CardOrm,
+		cardProfileOrm: CardProfileOrm,
+		login: Login,
+		authorityNeededServicesImpl: AuthorityNeededServicesImpl,
+	) : this(
+		cardOrm,
+		cardProfileOrm,
+		login,
+		authorityNeededServicesImpl,
+		org.qo.utils.SpringContextUtil.ctx.getBean(AvatarDbRepository::class.java),
+	)
+
 	private val statisticMapping = mapOf<Int, Pair<String, (Mapping.Users?) -> String>>(
 		0 to (">_<" to { "" }),
 		1 to ("Play time" to { it?.playtime?.toString() ?: "" }),
 	)
 	val userORM = UserORM()
 
-	private val database: ReactiveDatabase
-		get() = reactiveDatabase(databaseOverride)
-
 	fun doesAvatarExist(avatarid: String): Boolean = unsupportedSyncApi("PlayerCardCustomizationImpl.doesAvatarExist")
 
 	suspend fun doesAvatarExistAsync(avatarid: String): Boolean =
-		database.one("SELECT url FROM avatars WHERE id = ?", listOf(avatarid)) { true } != null
+		avatarDbRepository.doesAvatarExist(avatarid)
 
 	fun getPlayerCardList(username: String): List<Int> = unsupportedSyncApi("PlayerCardCustomizationImpl.getPlayerCardList")
 
@@ -56,12 +68,7 @@ class PlayerCardCustomizationImpl(
 		return jsonArr
 	}
 
-	suspend fun getAllAvatars(): List<Mapping.Avatar> = database.all("SELECT * FROM avatars") { row ->
-		Mapping.Avatar(
-			id = row.get("id", String::class.java).orEmpty(),
-			url = row.get("url", String::class.java).orEmpty(),
-		)
-	}
+	suspend fun getAllAvatars(): List<Mapping.Avatar> = avatarDbRepository.getAllAvatars()
 
 	suspend fun updatePlayerAccountCardInfo(token: String, cardInfo: Mapping.CardProfile): Pair<Boolean, String> {
 		val (accountName, errorCode) = login.validate(token)

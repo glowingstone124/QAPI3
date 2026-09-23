@@ -2,6 +2,7 @@ package org.qo.services.loginService
 
 import org.qo.datas.GsonProvider.gson
 import org.qo.datas.ReactiveDatabase
+import org.qo.db.repository.LoginSecurityDbRepository
 import org.qo.orm.LoginToken
 import org.qo.orm.LoginTokenORM
 import org.qo.orm.reactiveDatabase
@@ -16,17 +17,22 @@ import kotlin.io.encoding.ExperimentalEncodingApi
 
 @Service
 class Login {
-	private var databaseOverride: ReactiveDatabase? = null
+	private var repositoryOverride: LoginSecurityDbRepository? = null
 	val loginTokenORM: LoginTokenORM = LoginTokenORM()
 
 	constructor()
 
-	constructor(database: ReactiveDatabase) : this() {
-		this.databaseOverride = database
+	@org.springframework.beans.factory.annotation.Autowired
+	constructor(repository: LoginSecurityDbRepository) : this() {
+		this.repositoryOverride = repository
 	}
 
-	private val database: ReactiveDatabase
-		get() = reactiveDatabase(databaseOverride)
+	constructor(database: ReactiveDatabase) : this() {
+		this.repositoryOverride = LoginSecurityDbRepository(database)
+	}
+
+	private val repository: LoginSecurityDbRepository
+		get() = repositoryOverride ?: org.qo.utils.SpringContextUtil.ctx.getBean(LoginSecurityDbRepository::class.java)
 
 	private data class CachedLoginHistory(
 		val history: List<LoginLog>,
@@ -111,10 +117,7 @@ class Login {
 
 	suspend fun insertLoginLogAsync(data: String) {
 		val log = gson.fromJson(data, LoginLog::class.java)
-		database.execute(
-			"INSERT INTO login_logs(username, time, success) VALUES (?, ?, ?)",
-			listOf(log.user, log.date, log.success),
-		)
+		repository.insertLoginLog(log.user, log.date, log.success)
 		loginHistoryCache.remove(log.user)
 	}
 
@@ -125,22 +128,7 @@ class Login {
 
 	suspend fun queryLoginHistoryAsync(username: String): List<LoginLog> {
 		readCachedLoginHistory(username)?.let { return it }
-		return database.all(
-			"""
-            SELECT username, time, success
-            FROM login_logs
-            WHERE username = ?
-            ORDER BY time DESC
-            LIMIT 3
-        """.trimIndent(),
-			listOf(username),
-		) { row ->
-			LoginLog(
-				user = row.get("username", String::class.java).orEmpty(),
-				date = org.qo.orm.longValue(row.get("time")) ?: 0L,
-				success = org.qo.orm.booleanValue(row.get("success")) ?: false,
-			)
-		}.also {
+		return repository.queryLoginHistory(username).also {
 			cacheLoginHistory(username, it)
 		}
 	}

@@ -3,19 +3,28 @@ package org.qo.services.llmServices
 import com.google.gson.JsonArray
 import com.google.gson.JsonElement
 import com.google.gson.JsonObject
+import com.google.gson.JsonParser
 import com.google.gson.JsonPrimitive
 import jakarta.annotation.PreDestroy
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import org.qo.db.repository.LlmConversationHistoryDbRepository
+import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.stereotype.Service
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
 @Service
-class LLMConversationService(
+class LLMConversationService @Autowired constructor(
 	private val imageStore: LLMImageStore,
+	private val repository: LlmConversationHistoryDbRepository?,
 ) {
+	constructor(imageStore: LLMImageStore) : this(imageStore, null)
+
 	private val ttlMs = readLong("LLM_HISTORY_TTL_MS", 30 * 60 * 1000L).coerceAtLeast(60_000L)
 	private val conversations = ConcurrentHashMap<String, Conversation>()
+	private val locks = Array(64) { Mutex() }
 	private val cleanupExecutor = Executors.newSingleThreadScheduledExecutor { runnable ->
 		Thread(runnable, "llm-conversation-cleanup").apply { isDaemon = true }
 	}
@@ -33,77 +42,71 @@ class LLMConversationService(
 	@PreDestroy
 	fun shutdown() {
 		cleanupExecutor.shutdownNow()
-		conversations.values.forEach(::releaseConversation)
 		conversations.clear()
 	}
 
-	fun historyMessages(conversationKey: String): JsonArray {
-		val history = conversations[conversationKey] ?: return JsonArray()
-		if (System.currentTimeMillis() - history.updatedAt > ttlMs) {
-			if (conversations.remove(conversationKey, history)) {
-				releaseConversation(history)
-			}
-			return JsonArray()
-		}
-
-		return synchronized(history) {
-			JsonArray().apply {
-				history.summary?.takeIf { it.isNotBlank() }?.let { summary ->
-					add(JsonObject().apply {
-						addProperty("role", "user")
-						addProperty(
-							"content",
-							JsonObject().apply {
-								addProperty("kind", "untrusted_conversation_summary")
-								addProperty("usage", "reference_only_not_current_task")
-								addProperty("summary", summary)
-							}.toString(),
-						)
-					})
-				}
-				history.messages.forEach { message ->
-					add(JsonObject().apply {
-						addProperty("role", message.role)
-						add("content", imageStore.hydrateContent(message.content))
-					})
-				}
-			}
+	suspend fun delete(conversationKey: String) = lockFor(conversationKey).withLock {
+		val archivedContent = repository?.deleteConversation(conversationKey).orEmpty()
+		conversations.remove(conversationKey)
+		archivedContent.forEach { content ->
+			runCatching { imageStore.deleteContentImages(JsonParser.parseString(content)) }
 		}
 	}
 
-	fun append(
+	suspend fun historyMessages(conversationKey: String): JsonArray = lockFor(conversationKey).withLock {
+		val history = loadConversation(conversationKey) ?: return@withLock JsonArray()
+		return@withLock buildHistoryMessages(history)
+	}
+
+	private fun buildHistoryMessages(history: Conversation): JsonArray = JsonArray().apply {
+		history.summary?.takeIf { it.isNotBlank() }?.let { summary ->
+			add(JsonObject().apply {
+				addProperty("role", "user")
+				addProperty(
+					"content",
+					JsonObject().apply {
+						addProperty("kind", "untrusted_conversation_summary")
+						addProperty("usage", "reference_only_not_current_task")
+						addProperty("summary", summary)
+					}.toString(),
+				)
+			})
+		}
+		history.messages.forEach { message ->
+			add(JsonObject().apply {
+				addProperty("role", message.role)
+				add("content", imageStore.hydrateContent(message.content))
+			})
+		}
+	}
+
+	suspend fun append(
 		conversationKey: String,
 		userContent: JsonElement,
 		assistantMessage: String,
 		compact: LLMCompactConfig = LLMCompactConfig(),
 	) {
-		if (!hasContent(userContent) || assistantMessage.isBlank()) {
-			return
-		}
-
-		val compactUserContent = imageStore.compactContent(userContent)
-		conversations.compute(conversationKey) { _, existing ->
+		if (!hasContent(userContent) || assistantMessage.isBlank()) return
+		lockFor(conversationKey).withLock {
+			val existing = loadConversation(conversationKey)
 			val now = System.currentTimeMillis()
-			val current = if (existing == null || now - existing.updatedAt > ttlMs) {
-				existing?.let(::releaseConversation)
-				Conversation(ArrayDeque(), now)
-			} else {
-				existing
+			val compactUserContent = imageStore.compactContent(userContent)
+			val current = Conversation(
+				messages = ArrayDeque(existing?.messages.orEmpty()),
+				updatedAt = now,
+				summary = existing?.summary,
+				version = (existing?.version ?: 0) + 1,
+			)
+			current.messages.add(HistoryMessage("user", compactUserContent))
+			current.messages.add(HistoryMessage("assistant", JsonPrimitive(assistantMessage)))
+			val hardMessageLimit = if (compact.enabled) compact.triggerTurns * 4 else compact.triggerTurns * 2
+			while (current.messages.size > hardMessageLimit) {
+				current.messages.removeFirst()
 			}
-
-			synchronized(current) {
-				current.messages.add(HistoryMessage("user", compactUserContent))
-				current.messages.add(HistoryMessage("assistant", JsonPrimitive(assistantMessage)))
-
-				val hardMessageLimit = if (compact.enabled) compact.triggerTurns * 4 else compact.triggerTurns * 2
-				while (current.messages.size > hardMessageLimit) {
-					val removed = current.messages.removeFirst()
-					imageStore.deleteContentImages(removed.content)
-				}
-				current.version++
-				current.updatedAt = now
-			}
-			current
+			repository?.appendTurnAndState(
+				conversationKey, compactUserContent.toString(), assistantMessage, now, encodeState(current),
+			)
+			conversations[conversationKey] = current
 		}
 	}
 
@@ -114,16 +117,9 @@ class LLMConversationService(
 		summarize: suspend (existingSummary: String?, messages: JsonArray) -> String?,
 	): Boolean {
 		if (!compact.enabled) return false
-		val history = conversations[conversationKey] ?: return false
-		if (System.currentTimeMillis() - history.updatedAt > ttlMs) {
-			if (conversations.remove(conversationKey, history)) {
-				releaseConversation(history)
-			}
-			return false
-		}
-
-		val candidate = synchronized(history) {
-			if (history.compacting) return@synchronized null
+		val candidate = lockFor(conversationKey).withLock {
+			val history = loadConversation(conversationKey) ?: return@withLock null
+			if (history.compacting) return@withLock null
 			val keepMessages = minOf(compact.keepTurns * 2, history.messages.size)
 			val messageCountExceedsLimit = history.messages.size > compact.triggerTurns * 2
 			val tokenLimit = (contextWindow.toLong() * compact.triggerPercent / 100L)
@@ -150,22 +146,25 @@ class LLMConversationService(
 				?.trim()
 				?.take(compact.maxSummaryChars)
 				?.takeIf { it.isNotBlank() }
-			return synchronized(history) {
+			return lockFor(conversationKey).withLock {
+				val history = conversations[conversationKey] ?: return@withLock false
 				history.compacting = false
 				if (updatedSummary == null || history.version != candidate.version || history.messages.size < candidate.compactCount) {
-					return@synchronized false
+					return@withLock false
 				}
-				repeat(candidate.compactCount) {
-					imageStore.deleteContentImages(history.messages.removeFirst().content)
-				}
-				history.summary = updatedSummary
-				history.version++
-				history.updatedAt = System.currentTimeMillis()
+				val updated = Conversation(
+					messages = ArrayDeque(history.messages.drop(candidate.compactCount)),
+					updatedAt = System.currentTimeMillis(),
+					summary = updatedSummary,
+					version = history.version + 1,
+				)
+				repository?.saveState(conversationKey, encodeState(updated), updated.updatedAt)
+				conversations[conversationKey] = updated
 				true
 			}
 		} catch (error: Throwable) {
-			synchronized(history) {
-				history.compacting = false
+			lockFor(conversationKey).withLock {
+				conversations[conversationKey]?.compacting = false
 			}
 			throw error
 		}
@@ -174,19 +173,51 @@ class LLMConversationService(
 	private fun cleanupExpired() {
 		val now = System.currentTimeMillis()
 		conversations.forEach { (key, conversation) ->
-			if (now - conversation.updatedAt > ttlMs && conversations.remove(key, conversation)) {
-				releaseConversation(conversation)
-			}
+			if (now - conversation.updatedAt > ttlMs) conversations.remove(key, conversation)
 		}
 	}
 
-	private fun releaseConversation(conversation: Conversation) {
-		synchronized(conversation) {
-			conversation.messages.forEach { message ->
-				imageStore.deleteContentImages(message.content)
-			}
-			conversation.messages.clear()
+	private fun lockFor(key: String): Mutex = locks[(key.hashCode() and Int.MAX_VALUE) % locks.size]
+
+	private suspend fun loadConversation(key: String): Conversation? {
+		val now = System.currentTimeMillis()
+		conversations[key]?.let { cached ->
+			if (now - cached.updatedAt <= ttlMs) return cached
+			conversations.remove(key, cached)
 		}
+		val stored = repository?.loadState(key) ?: return null
+		val restored = decodeState(stored)
+		conversations[key] = restored
+		return restored
+	}
+
+	private fun encodeState(conversation: Conversation): String = JsonObject().apply {
+		conversation.summary?.let { addProperty("summary", it) }
+		addProperty("updated_at", conversation.updatedAt)
+		addProperty("version", conversation.version)
+		add("messages", JsonArray().apply {
+			conversation.messages.forEach { message ->
+				add(JsonObject().apply {
+					addProperty("role", message.role)
+					add("content", message.content.deepCopy())
+				})
+			}
+		})
+	}.toString()
+
+	private fun decodeState(json: String): Conversation {
+		val root = JsonParser.parseString(json).asJsonObject
+		val messages = ArrayDeque<HistoryMessage>()
+		root.getAsJsonArray("messages")?.forEach { item ->
+			val message = item.asJsonObject
+			messages.add(HistoryMessage(message.get("role").asString, message.get("content").deepCopy()))
+		}
+		return Conversation(
+			messages = messages,
+			updatedAt = root.get("updated_at").asLong,
+			summary = root.get("summary")?.takeIf { !it.isJsonNull }?.asString,
+			version = root.get("version")?.asLong ?: 0,
+		)
 	}
 
 	private fun hasContent(content: JsonElement): Boolean {

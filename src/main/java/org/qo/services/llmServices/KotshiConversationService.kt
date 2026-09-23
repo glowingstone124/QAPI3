@@ -7,10 +7,11 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import org.qo.datas.ReactiveDatabase
+import org.qo.db.repository.KotshiConversationDbRepository
+import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.context.event.ApplicationReadyEvent
 import org.springframework.context.event.EventListener
 import org.springframework.stereotype.Service
-import java.util.UUID
 
 data class KotshiConversation(
 	val id: String,
@@ -31,9 +32,11 @@ data class KotshiMessage(
 )
 
 @Service
-class KotshiConversationService(
-	private val database: ReactiveDatabase,
+class KotshiConversationService @Autowired constructor(
+	private val repository: KotshiConversationDbRepository,
 ) {
+	constructor(database: ReactiveDatabase) : this(KotshiConversationDbRepository(database))
+
 	private val initializationScope = CoroutineScope(SupervisorJob())
 	private val schemaReady = CompletableDeferred<Unit>()
 
@@ -41,32 +44,7 @@ class KotshiConversationService(
 	fun initializeSchema() {
 		initializationScope.launch {
 			try {
-				database.execute(
-					"""
-					CREATE TABLE IF NOT EXISTS kotshi_conversations (
-						id VARCHAR(64) PRIMARY KEY,
-						uid BIGINT NOT NULL,
-						title VARCHAR(255) NOT NULL,
-						model VARCHAR(64) NOT NULL DEFAULT 'fast',
-						created_at BIGINT NOT NULL,
-						updated_at BIGINT NOT NULL,
-						INDEX idx_kotshi_conv_uid_updated (uid, updated_at DESC)
-					)
-					""".trimIndent()
-				)
-				database.execute(
-					"""
-					CREATE TABLE IF NOT EXISTS kotshi_messages (
-						id BIGINT AUTO_INCREMENT PRIMARY KEY,
-						conversation_id VARCHAR(64) NOT NULL,
-						uid BIGINT NOT NULL,
-						role VARCHAR(32) NOT NULL,
-						content MEDIUMTEXT NOT NULL,
-						created_at BIGINT NOT NULL,
-						INDEX idx_kotshi_msg_conv_created (conversation_id, created_at ASC)
-					)
-					""".trimIndent()
-				)
+				repository.ensureSchema()
 				schemaReady.complete(Unit)
 			} catch (error: Exception) {
 				schemaReady.completeExceptionally(error)
@@ -82,45 +60,12 @@ class KotshiConversationService(
 
 	suspend fun listConversations(uid: Long): List<KotshiConversation> {
 		schemaReady.await()
-		return database.all(
-			"""
-			SELECT id, uid, title, model, created_at, updated_at
-			FROM kotshi_conversations
-			WHERE uid = ?
-			ORDER BY updated_at DESC
-			""".trimIndent(),
-			listOf(uid),
-		) { row ->
-			KotshiConversation(
-				id = row.get("id", String::class.java) ?: "",
-				uid = (row.get("uid", Number::class.java)?.toLong()) ?: uid,
-				title = row.get("title", String::class.java) ?: "新对话",
-				model = row.get("model", String::class.java) ?: "fast",
-				createdAt = (row.get("created_at", Number::class.java)?.toLong()) ?: 0L,
-				updatedAt = (row.get("updated_at", Number::class.java)?.toLong()) ?: 0L,
-			)
-		}
+		return repository.listConversations(uid)
 	}
 
 	suspend fun getConversation(uid: Long, conversationId: String): KotshiConversation? {
 		schemaReady.await()
-		return database.one(
-			"""
-			SELECT id, uid, title, model, created_at, updated_at
-			FROM kotshi_conversations
-			WHERE uid = ? AND id = ?
-			""".trimIndent(),
-			listOf(uid, conversationId),
-		) { row ->
-			KotshiConversation(
-				id = row.get("id", String::class.java) ?: "",
-				uid = (row.get("uid", Number::class.java)?.toLong()) ?: uid,
-				title = row.get("title", String::class.java) ?: "新对话",
-				model = row.get("model", String::class.java) ?: "fast",
-				createdAt = (row.get("created_at", Number::class.java)?.toLong()) ?: 0L,
-				updatedAt = (row.get("updated_at", Number::class.java)?.toLong()) ?: 0L,
-			)
-		}
+		return repository.getConversation(uid, conversationId)
 	}
 
 	suspend fun createConversation(
@@ -130,27 +75,7 @@ class KotshiConversationService(
 		customId: String? = null,
 	): KotshiConversation {
 		schemaReady.await()
-		val id = customId?.takeIf { it.isNotBlank() } ?: "conv-${UUID.randomUUID().toString().replace("-", "").take(16)}"
-		val now = System.currentTimeMillis()
-		val convTitle = title?.trim()?.takeIf { it.isNotBlank() } ?: "新对话"
-
-		database.execute(
-			"""
-			INSERT INTO kotshi_conversations (id, uid, title, model, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?)
-			ON DUPLICATE KEY UPDATE updated_at = ?
-			""".trimIndent(),
-			listOf(id, uid, convTitle, model, now, now, now),
-		)
-
-		return KotshiConversation(
-			id = id,
-			uid = uid,
-			title = convTitle,
-			model = model,
-			createdAt = now,
-			updatedAt = now,
-		)
+		return repository.createConversation(uid, title, model, customId)
 	}
 
 	suspend fun updateConversation(
@@ -160,69 +85,17 @@ class KotshiConversationService(
 		model: String? = null,
 	): Boolean {
 		schemaReady.await()
-		val updates = mutableListOf<String>()
-		val bindings = mutableListOf<Any?>()
-
-		if (title != null) {
-			updates += "title = ?"
-			bindings += title.trim().take(255)
-		}
-		if (model != null) {
-			updates += "model = ?"
-			bindings += model.trim().take(64)
-		}
-		if (updates.isEmpty()) return true
-
-		val now = System.currentTimeMillis()
-		updates += "updated_at = ?"
-		bindings += now
-		bindings += uid
-		bindings += conversationId
-
-		val rows = database.execute(
-			"""
-			UPDATE kotshi_conversations
-			SET ${updates.joinToString(", ")}
-			WHERE uid = ? AND id = ?
-			""".trimIndent(),
-			bindings,
-		)
-		return rows > 0
+		return repository.updateConversation(uid, conversationId, title, model)
 	}
 
 	suspend fun deleteConversation(uid: Long, conversationId: String): Boolean {
 		schemaReady.await()
-		database.execute(
-			"DELETE FROM kotshi_messages WHERE uid = ? AND conversation_id = ?",
-			listOf(uid, conversationId),
-		)
-		val rows = database.execute(
-			"DELETE FROM kotshi_conversations WHERE uid = ? AND id = ?",
-			listOf(uid, conversationId),
-		)
-		return rows > 0
+		return repository.deleteConversation(uid, conversationId)
 	}
 
 	suspend fun getMessages(uid: Long, conversationId: String): List<KotshiMessage> {
 		schemaReady.await()
-		return database.all(
-			"""
-			SELECT id, conversation_id, uid, role, content, created_at
-			FROM kotshi_messages
-			WHERE uid = ? AND conversation_id = ?
-			ORDER BY created_at ASC, id ASC
-			""".trimIndent(),
-			listOf(uid, conversationId),
-		) { row ->
-			KotshiMessage(
-				id = (row.get("id", Number::class.java)?.toLong()) ?: 0L,
-				conversationId = row.get("conversation_id", String::class.java) ?: conversationId,
-				uid = (row.get("uid", Number::class.java)?.toLong()) ?: uid,
-				role = row.get("role", String::class.java) ?: "user",
-				content = row.get("content", String::class.java) ?: "",
-				createdAt = (row.get("created_at", Number::class.java)?.toLong()) ?: 0L,
-			)
-		}
+		return repository.getMessages(uid, conversationId)
 	}
 
 	suspend fun appendTurn(
@@ -250,21 +123,9 @@ class KotshiConversationService(
 		} else if (autoTitle != null && autoTitle != existing.title) {
 			updateConversation(uid, conversationId, title = autoTitle)
 		} else {
-			database.execute(
-				"UPDATE kotshi_conversations SET updated_at = ? WHERE uid = ? AND id = ?",
-				listOf(now, uid, conversationId),
-			)
+			repository.touchConversation(uid, conversationId, now)
 		}
 
-		database.execute(
-			"""
-			INSERT INTO kotshi_messages (conversation_id, uid, role, content, created_at)
-			VALUES (?, ?, 'user', ?, ?), (?, ?, 'assistant', ?, ?)
-			""".trimIndent(),
-			listOf(
-				conversationId, uid, userContent, now,
-				conversationId, uid, assistantContent, now + 1,
-			),
-		)
+		repository.appendTurnMessages(conversationId, uid, userContent, assistantContent, now)
 	}
 }

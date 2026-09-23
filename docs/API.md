@@ -122,9 +122,9 @@ IP 添加/删除常见返回码：`0` 成功，`1` 令牌无效，`2` 超出数�
 
 | 方法 | 路径 | 认证 | 说明 |
 |---|---|---|---|
-| `POST` | `/qo/msglist/upload` | 节点/消息源 | 上传原始消息数据。 |
-| `GET` | `/qo/msglist/download` | 节点令牌 | 返回完整消息列表；`Authorization` 中可使用 `Bearer`。 |
-| `GET` | `/qo/msglist/public` | 公开 | 返回公开消息列表。 |
+| `POST` | `/qo/msglist/upload` | 节点/消息源 | 上传消息并加入待持久化队列；正常关停时会清空队列。 |
+| `GET` | `/qo/msglist/download` | 节点令牌 | 返回最近 300 条消息；重启后从数据库恢复，`Authorization` 中可使用 `Bearer`。 |
+| `GET` | `/qo/msglist/public` | 公开 | 返回最近的公开消息，不包含系统消息（`from=2`）。 |
 | `GET` | `/qo/webmsg/download` | 节点令牌 | 返回 Web 消息。 |
 | `POST` | `/qo/authorization/message/upload` | 用户令牌 | 上传 Web 消息原始 JSON。 |
 | `POST` | `/qo/leavemessage/upload?from=<from>&to=<to>&message=<message>` | 公开/业务校验 | 创建留言。 |

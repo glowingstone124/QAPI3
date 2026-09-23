@@ -2,32 +2,60 @@ package org.qo.services.loginService
 
 import com.google.gson.Gson
 import com.google.gson.JsonObject
+import kotlinx.coroutines.reactor.mono
 import org.qo.datas.ReactiveDatabase
-import org.qo.orm.reactiveDatabase
+import org.qo.db.repository.LoginSecurityDbRepository
 import org.qo.orm.unsupportedSyncApi
+import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.stereotype.Service
+import reactor.core.publisher.Mono
 import java.net.Inet6Address
 import java.net.InetAddress
-import kotlinx.coroutines.reactor.mono
-import reactor.core.publisher.Mono
 
 @Service
-class IPWhitelistServices(private val login: Login, private val authorityNeededServices: AuthorityNeededServicesImpl) {
-	private var databaseOverride: ReactiveDatabase? = null
-	val gson = Gson()
+class IPWhitelistServices {
+	private val login: Login
+	private val authorityNeededServices: AuthorityNeededServicesImpl
+	private val repository: LoginSecurityDbRepository
 
-	private val database: ReactiveDatabase
-		get() = reactiveDatabase(databaseOverride)
+	@Autowired
+	constructor(
+		login: Login,
+		authorityNeededServices: AuthorityNeededServicesImpl,
+		database: ReactiveDatabase,
+		@Autowired(required = false) repository: LoginSecurityDbRepository? = null,
+	) {
+		this.login = login
+		this.authorityNeededServices = authorityNeededServices
+		this.repository = repository ?: LoginSecurityDbRepository(database)
+	}
+
+	constructor(
+		login: Login,
+		authorityNeededServices: AuthorityNeededServicesImpl,
+		repository: LoginSecurityDbRepository,
+	) {
+		this.login = login
+		this.authorityNeededServices = authorityNeededServices
+		this.repository = repository
+	}
+
+	constructor(login: Login, authorityNeededServices: AuthorityNeededServicesImpl) : this(
+		login,
+		authorityNeededServices,
+		resolveRepository(),
+	)
+
+	val gson = Gson()
 
 	fun whitelisted(ip: String): Boolean = unsupportedSyncApi("IPWhitelistServices.whitelisted")
 
 	suspend fun whitelistedAsync(ip: String): Boolean {
 		val normalizedIp = normalizeIp(ip) ?: return false
-		if (database.one("SELECT 1 FROM loginip WHERE ip = ? LIMIT 1", listOf(normalizedIp)) { true } != null) {
+		if (repository.isIpInLoginIp(normalizedIp)) {
 			return true
 		}
-		return normalizedIp != ip &&
-			database.one("SELECT 1 FROM loginip WHERE ip = ? LIMIT 1", listOf(ip)) { true } != null
+		return normalizedIp != ip && repository.isIpInLoginIp(ip)
 	}
 
 	fun whitelisted(ip: String, username: String): Boolean = unsupportedSyncApi("IPWhitelistServices.whitelistedForUser")
@@ -40,28 +68,19 @@ class IPWhitelistServices(private val login: Login, private val authorityNeededS
 
 	fun whitelistedIpCount(username: String): Int = unsupportedSyncApi("IPWhitelistServices.whitelistedIpCount")
 
-	suspend fun whitelistedIpCountAsync(username: String): Int = database.one(
-		"SELECT COUNT(*) AS total FROM loginip WHERE username = ?",
-		listOf(username),
-	) { row -> org.qo.orm.intValue(row.get("total")) ?: 0 } ?: 0
+	suspend fun whitelistedIpCountAsync(username: String): Int = repository.whitelistedIpCount(username)
 
 	fun addIntoWhitelist(ip: String, username: String): Unit = unsupportedSyncApi("IPWhitelistServices.addIntoWhitelist")
 
 	suspend fun addIntoWhitelistAsync(ip: String, username: String) {
-		database.execute(
-			"INSERT INTO loginip (username, ip) VALUES (?, ?)",
-			listOf(username, ip),
-		)
+		repository.addIntoWhitelist(ip, username)
 	}
 
 	fun removeFromWhitelist(ip: String, username: String): Boolean =
 		unsupportedSyncApi("IPWhitelistServices.removeFromWhitelist")
 
 	suspend fun removeFromWhitelistAsync(ip: String, username: String): Boolean =
-		database.execute(
-			"DELETE FROM loginip WHERE username = ? AND ip = ?",
-			listOf(username, ip),
-		) > 0
+		repository.removeFromWhitelist(ip, username)
 
 	suspend fun joinWhitelist(ip: String, token: String): WhitelistReasons {
 		val normalizedIp = normalizeIp(ip) ?: return WhitelistReasons.INVALID_IP
@@ -86,33 +105,29 @@ class IPWhitelistServices(private val login: Login, private val authorityNeededS
 		return WhitelistReasons.SUCCESS
 	}
 
-	suspend fun getWhitelistedIpsAsync(username: String): List<String> = database.all(
-		"SELECT ip FROM loginip WHERE username = ?",
-		listOf(username),
-	) { row -> row.get("ip", String::class.java).orEmpty() }
+	suspend fun getWhitelistedIpsAsync(username: String): List<String> = repository.getUserIps(username)
 
 	private suspend fun addWithinLimit(ip: String, username: String): WhitelistReasons =
-		database.inTransaction {
-			val locked = database.one(
-				"SELECT username FROM users WHERE username = ? FOR UPDATE",
-				listOf(username),
-			) { true } != null
-			if (!locked) return@inTransaction WhitelistReasons.TOKEN_INVALID
-			when {
-				whitelistedForUser(ip, username) -> WhitelistReasons.SUCCESS
-				whitelistedIpCountAsync(username) >= MAX_IPS_PER_USER -> WhitelistReasons.IP_WHITELIST_FULL
-				else -> {
-					addIntoWhitelistAsync(ip, username)
-					WhitelistReasons.SUCCESS
-				}
-			}
-		}
+		repository.addWithinLimitInTransaction(ip, username, MAX_IPS_PER_USER)
 
 	private suspend fun whitelistedForUser(ip: String, username: String): Boolean =
-		database.one(
-			"SELECT 1 FROM loginip WHERE username = ? AND ip = ? LIMIT 1",
-			listOf(username, ip),
-		) { true } != null
+		repository.isIpInLoginIpForUser(ip, username)
+
+	fun getWhitelistedIps(username: String): List<String> = unsupportedSyncApi("IPWhitelistServices.getWhitelistedIps")
+
+	fun whitelistedIpCountReactive(username: String): Mono<Int> = mono { whitelistedIpCountAsync(username) }
+
+	fun joinWhitelistReactive(ip: String, token: String): Mono<WhitelistReasons> = mono { joinWhitelist(ip, token) }
+
+	fun leaveWhitelistReactive(ip: String, token: String): Mono<WhitelistReasons> = mono { leaveWhitelist(ip, token) }
+
+	fun getWhitelistedIpsReactive(username: String): Mono<String> = mono {
+		val ips = getWhitelistedIpsAsync(username)
+		val jsonObject = JsonObject().apply {
+			add("ips", gson.toJsonTree(ips))
+		}
+		jsonObject.toString()
+	}
 
 	fun normalizeIp(ip: String): String? {
 		if (ip.isEmpty() || ip.length > MAX_IP_LENGTH || ip != ip.trim() || '%' in ip) return null
@@ -153,5 +168,10 @@ class IPWhitelistServices(private val login: Login, private val authorityNeededS
 	companion object {
 		private const val MAX_IPS_PER_USER = 5
 		private const val MAX_IP_LENGTH = 45
+
+		private fun resolveRepository(): LoginSecurityDbRepository =
+			runCatching { org.qo.utils.SpringContextUtil.ctx.getBean(LoginSecurityDbRepository::class.java) }.getOrElse {
+				LoginSecurityDbRepository(org.qo.orm.reactiveDatabase(null))
+			}
 	}
 }

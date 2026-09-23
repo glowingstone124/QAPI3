@@ -3,16 +3,19 @@ package org.qo.services.metroServices
 import com.google.gson.Gson
 import com.google.gson.GsonBuilder
 import com.google.gson.JsonObject
-import com.google.gson.JsonParser
 import org.qo.datas.Nodes
 import org.qo.datas.ReactiveDatabase
+import org.qo.db.repository.MetroDbRepository
+import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.stereotype.Service
 
 @Service
-class MetroServiceImpl(
+class MetroServiceImpl @Autowired constructor(
 	private val nodes: Nodes,
-	private val database: ReactiveDatabase,
+	private val repository: MetroDbRepository,
 ) {
+	constructor(nodes: Nodes, database: ReactiveDatabase) : this(nodes, MetroDbRepository(database))
+
 	private val gson: Gson = GsonBuilder().setPrettyPrinting().create()
 
 	data class Signal(
@@ -39,23 +42,7 @@ class MetroServiceImpl(
 	)
 
 	suspend fun getMetroJson(): String {
-		val sectionMap = linkedMapOf<String, Section>()
-		database.all("SELECT * FROM sections") { row ->
-			val signal = buildList {
-				row.get("signal_up", String::class.java)?.takeIf { it.isNotBlank() }?.let {
-					add(JsonParser.parseString(it).asJsonObject)
-				}
-				row.get("signal_down", String::class.java)?.takeIf { it.isNotBlank() }?.let {
-					add(JsonParser.parseString(it).asJsonObject)
-				}
-			}
-			row.get("id", String::class.java)!! to Section(
-				lid = row.get("lid", java.lang.Integer::class.java)!!.toInt(),
-				station = row.get("station", java.lang.Boolean::class.java) == true,
-				dummy = row.get("dummy", String::class.java).orEmpty(),
-				signal = signal,
-			)
-		}.forEach { (id, section) -> sectionMap[id] = section }
+		val sectionMap = repository.getAllSections()
 		return gson.toJson(sectionMap)
 	}
 
@@ -91,14 +78,5 @@ class MetroServiceImpl(
 		signalUp: JsonObject?,
 		signalDown: JsonObject?,
 		author: Long,
-	): Boolean {
-		val sql = """
-			INSERT INTO sections (id, lid, station, dummy, signal_up, signal_down, author)
-			VALUES (?, ?, ?, ?, ?, ?, ?)
-		""".trimIndent()
-		return database.execute(
-			sql,
-			listOf(id, lid, station, dummy, signalUp?.toString(), signalDown?.toString(), author.toString()),
-		) > 0
-	}
+	): Boolean = repository.insertSection(id, lid, station, dummy, signalUp, signalDown, author)
 }

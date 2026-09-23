@@ -164,50 +164,6 @@ internal suspend fun LLMServices.normalizeRequest(
 	)
 }
 
-internal fun clientToolOutputTokens(inputTokens: Int, contextWindow: Int): Int {
-	val available = contextWindow - inputTokens
-	require(available >= 2048) { "建筑工具上下文过大，请开始新对话或缩小选区" }
-	return minOf(CLIENT_TOOL_OUTPUT_TOKENS, available)
-}
-
-internal fun withRecentGroupMessages(
-	groupContext: JsonObject?,
-	messages: List<LLMChatHistoryRecord>,
-	currentMessageId: Long?,
-	currentUid: Long?,
-): JsonObject? {
-	if (groupContext == null || messages.isEmpty()) return groupContext
-	val currentSourceId = currentMessageId?.let { "onebot:$it" }
-	val recent = messages
-		.filterNot { it.sourceId == currentSourceId }
-		.take(20)
-		.asReversed()
-	if (recent.isEmpty()) return groupContext
-	return groupContext.deepCopy().apply {
-		add("recent_participants", JsonArray().apply {
-			recent.asReversed().distinctBy { it.uid }.forEach { record ->
-				add(JsonObject().apply {
-					addProperty("qquid", record.uid)
-					addProperty("latest_nickname", record.name)
-					addProperty("is_current_sender", record.uid == currentUid)
-				})
-			}
-		})
-		add("recent_messages", JsonArray().apply {
-			recent.forEach { record ->
-				add(JsonObject().apply {
-					addProperty("source_id", record.sourceId)
-					addProperty("qquid", record.uid)
-					addProperty("nickname", record.name)
-					addProperty("is_current_sender", record.uid == currentUid)
-					addProperty("time", record.time)
-					addProperty("text", record.content.take(500))
-				})
-			}
-		})
-	}
-}
-
 internal suspend fun LLMServices.enrichMessages(
 	messages: JsonArray,
 	requester: LLMServices.LLMRequester?,
@@ -298,113 +254,6 @@ internal fun LLMServices.modelConversationAdapter(model: String): String? = when
 	else -> null
 }
 
-internal fun LLMServices.limitMessagesToContextWindow(messages: JsonArray, contextWindow: Int, request: JsonObject): JsonArray {
-	val outputTokens = requestedOutputTokens(request, contextWindow)
-	val inputBudget = (contextWindow - outputTokens).coerceAtLeast(1)
-	val entries = messages.toList()
-	if (estimateTokens(messages) <= inputBudget || entries.isEmpty()) return messages
-
-	val selected = BooleanArray(entries.size)
-	var usedTokens = 0
-	fun select(index: Int) {
-		if (index !in entries.indices || selected[index]) return
-		selected[index] = true
-		usedTokens += estimateTokens(entries[index])
-	}
-
-	select(entries.indexOfFirst { it.isJsonObject && it.asJsonObject.get("role")?.asString == "system" })
-	val latestUser = entries.indexOfLast { it.isJsonObject && it.asJsonObject.get("role")?.asString == "user" }
-	select(if (latestUser >= 0) latestUser else entries.lastIndex)
-	for (index in entries.lastIndex downTo 0) {
-		if (selected[index]) continue
-		val cost = estimateTokens(entries[index])
-		if (usedTokens + cost <= inputBudget) select(index)
-	}
-
-	return JsonArray().apply {
-		entries.forEachIndexed { index, entry ->
-			if (selected[index]) add(entry)
-		}
-	}
-}
-
-internal fun LLMServices.requestedOutputTokens(request: JsonObject, contextWindow: Int): Int {
-	val explicit = listOf("max_tokens", "max_completion_tokens", "max_output_tokens").firstNotNullOfOrNull { key ->
-		request.get(key)?.let { runCatching { it.asInt }.getOrNull() }
-	}
-	return (explicit ?: minOf(4096, contextWindow / 4)).coerceAtLeast(0)
-}
-
-internal fun LLMServices.estimateTokens(element: JsonElement): Int = when {
-	element.isJsonNull -> 0
-	element.isJsonPrimitive -> estimateTextTokens(element.asString)
-	element.isJsonArray -> element.asJsonArray.sumOf(::estimateTokens)
-	element.isJsonObject -> element.asJsonObject.entrySet().sumOf { (key, value) ->
-		estimateTextTokens(key) + estimateTokens(value) + 1
-	}
-	else -> 0
-}
-
-internal fun LLMServices.estimateTextTokens(text: String): Int {
-	if (text.isBlank()) return 1
-	var tokens = 0
-	var asciiCharacters = 0
-	for (character in text) {
-		if (character.code in 0x20..0x7E) {
-			asciiCharacters++
-		} else {
-			tokens += (asciiCharacters + 3) / 4
-			asciiCharacters = 0
-			tokens++
-		}
-	}
-	tokens += (asciiCharacters + 3) / 4
-	return tokens.coerceAtLeast(1)
-}
-
-internal fun LLMServices.fitSummaryInput(
-	existingSummary: String?,
-	messages: List<GroupChatEntry>,
-	instruction: String,
-	contextWindow: Int,
-	outputTokens: Int,
-): String {
-	val inputBudget = (
-		contextWindow - outputTokens - estimateTextTokens(instruction) - 16
-	).coerceAtLeast(1)
-	var selectedMessages = messages
-	while (selectedMessages.size > 1 && estimateTextTokens(summaryInputText(existingSummary, selectedMessages)) > inputBudget) {
-		selectedMessages = selectedMessages.drop(1)
-	}
-	return clipTextToTokens(summaryInputText(existingSummary, selectedMessages), inputBudget)
-}
-
-internal fun LLMServices.summaryInputText(existingSummary: String?, messages: List<GroupChatEntry>): String = buildString {
-	if (!existingSummary.isNullOrBlank()) {
-		append("已有摘要：\n").append(existingSummary).append("\n\n")
-	}
-	append("需要合并的新消息：\n")
-	append(messages.joinToString("\n") { entry ->
-		val prefix = if (entry.time > 0) "[${entry.time}] " else ""
-		"$prefix${entry.name}(${entry.uid}): ${entry.content}"
-	})
-}
-
-internal fun LLMServices.clipTextToTokens(text: String, maxTokens: Int): String {
-	if (estimateTextTokens(text) <= maxTokens) return text
-	var low = 0
-	var high = text.length
-	while (low < high) {
-		val middle = (low + high) / 2
-		if (estimateTextTokens(text.substring(middle)) <= maxTokens) {
-			high = middle
-		} else {
-			low = middle + 1
-		}
-	}
-	return text.substring(low)
-}
-
 internal fun LLMServices.buildMinecraftRelatedContext(minecraftRelated: LLMServices.MinecraftRelated?): String? {
 	if (minecraftRelated == null) {
 		return null
@@ -415,148 +264,6 @@ internal fun LLMServices.buildMinecraftRelatedContext(minecraftRelated: LLMServi
           - 生命值：${minecraftRelated.hp.ifBlank { "未提供" }}
        """.trimIndent()
 }
-
-internal suspend fun LLMServices.summarizeGroupContext(existingSummary: String?, messages: List<GroupChatEntry>): String? {
-	val provider = providers.current()
-	if (provider.apiToken.isBlank() || messages.isEmpty()) return null
-	val summaryInstruction = "将群聊历史压缩为可供后续对话使用的事实摘要。保留人物、决定、偏好、未解决问题、路线起终点和重要时间；删除寒暄、重复内容和工具语法。不得添加原文没有的信息。直接输出摘要正文。\n\n${LLMGroupChatPolicy.groupSummaryRules}"
-	val maxSummaryOutputTokens = minOf(1200, (provider.summaryContextWindow / 4).coerceAtLeast(1))
-	val summaryInput = fitSummaryInput(
-		existingSummary = existingSummary,
-		messages = messages,
-		instruction = summaryInstruction,
-		contextWindow = provider.summaryContextWindow,
-		outputTokens = maxSummaryOutputTokens,
-	)
-	val request = JsonObject().apply {
-		addProperty("model", provider.summaryModel)
-		addProperty("stream", false)
-		addProperty("max_tokens", maxSummaryOutputTokens)
-		add("thinking", JsonObject().apply { addProperty("type", "disabled") })
-		add("messages", JsonArray().apply {
-			add(JsonObject().apply {
-				addProperty("role", "system")
-				addProperty("content", summaryInstruction)
-			})
-			add(JsonObject().apply {
-				addProperty("role", "user")
-				addProperty("content", summaryInput)
-			})
-		})
-	}
-	return withTimeoutOrNull(groupSummaryTimeoutMs) {
-		runCatching {
-			val (status, body) = postSummaryUpstream("group-summary", request.toString(), provider.summary)
-			if (status !in 200..299) return@runCatching null
-			parseUsage(body)?.let { logPromptCacheUsage("group-summary", it) }
-			extractAssistantContent(body)
-		}.getOrNull()
-	}
-}
-
-internal suspend fun LLMServices.summarizeGroupAndMemberProfiles(
-	groupId: Long,
-	existingGroupSummary: String?,
-	existingMemberSummaries: Map<Long, String>,
-	messages: List<GroupChatEntry>,
-): LLMGroupAndMemberSummary? {
-	val provider = providers.current()
-	if (provider.apiToken.isBlank() || messages.isEmpty()) return null
-	val allowedQqUids = messages.mapNotNull { it.uid.toLongOrNull()?.takeIf { uid -> uid > 0 } }.toSet()
-	val summaryInstruction = """
-		增量更新一个 QQ 群的群聊摘要和人物画像。qquid 是跨群聊、Kotshi Web 与 Minecraft 的唯一身份，绝不能按昵称合并人物。
-		只输出一个 JSON 对象，不要 Markdown 或解释：
-		{"group_summary":"...","member_profiles":[{"qquid":123,"summary":"..."}]}
-		group_summary 必须是合并已有摘要后的完整滚动摘要；member_profiles 只列本批消息中出现的正数 qquid，并输出合并旧画像后的完整画像。没有可靠人物事实时可省略该成员。
-
-		${LLMGroupChatPolicy.groupSummaryRules}
-
-		${LLMGroupChatPolicy.memberSummaryRules}
-	""".trimIndent()
-	val maxSummaryOutputTokens = minOf(2400, (provider.summaryContextWindow / 3).coerceAtLeast(1))
-	val rawInput = buildString {
-		append("group_id=").append(groupId).append('\n')
-		append("existing_group_summary:\n")
-		append(existingGroupSummary.orEmpty()).append("\n\n")
-		append("existing_member_profiles:\n")
-		existingMemberSummaries.toSortedMap().forEach { (qquid, summary) ->
-			append("qquid=").append(qquid).append(": ").append(summary).append('\n')
-		}
-		append("\nnew_group_messages:\n")
-		messages.forEach { entry ->
-			append("[").append(entry.time).append("] qquid=").append(entry.uid)
-				.append(" name=").append(entry.name).append(": ").append(entry.content).append('\n')
-		}
-	}
-	val inputBudget = (
-		provider.summaryContextWindow - maxSummaryOutputTokens - estimateTextTokens(summaryInstruction) - 32
-	).coerceAtLeast(1)
-	val summaryInput = clipTextToTokens(rawInput, inputBudget)
-	val request = JsonObject().apply {
-		addProperty("model", provider.summaryModel)
-		addProperty("stream", false)
-		addProperty("max_tokens", maxSummaryOutputTokens)
-		add("thinking", JsonObject().apply { addProperty("type", "disabled") })
-		add("messages", JsonArray().apply {
-			add(JsonObject().apply {
-				addProperty("role", "system")
-				addProperty("content", summaryInstruction)
-			})
-			add(JsonObject().apply {
-				addProperty("role", "user")
-				addProperty("content", summaryInput)
-			})
-		})
-	}
-	return withTimeoutOrNull(groupSummaryTimeoutMs) {
-		runCatching {
-			val (status, body) = postSummaryUpstream("periodic-group-profile-summary", request.toString(), provider.summary)
-			if (status !in 200..299) return@runCatching null
-			parseUsage(body)?.let { logPromptCacheUsage("periodic-group-profile-summary", it) }
-			val content = extractAssistantContent(body) ?: return@runCatching null
-			parseGroupAndMemberSummary(content, allowedQqUids)
-		}.getOrNull()
-	}
-}
-
-internal fun parseGroupAndMemberSummary(content: String, allowedQqUids: Set<Long>): LLMGroupAndMemberSummary? {
-	val normalized = content.trim()
-		.removePrefix("```json")
-		.removePrefix("```")
-		.removeSuffix("```")
-		.trim()
-	val root = runCatching { JsonParser.parseString(normalized).asJsonObject }.getOrNull() ?: return null
-	val groupSummary = root.get("group_summary")
-		?.takeIf { it.isJsonPrimitive }
-		?.asString
-		?.trim()
-		?.takeIf { it.isNotBlank() }
-		?: return null
-	val profileItems = root.get("member_profiles")?.takeIf { it.isJsonArray }?.asJsonArray ?: JsonArray()
-	val profiles = profileItems.mapNotNull { item ->
-		val obj = item.takeIf { it.isJsonObject }?.asJsonObject ?: return@mapNotNull null
-		val qquid = runCatching { obj.get("qquid")?.asLong }.getOrNull()
-			?.takeIf { it in allowedQqUids } ?: return@mapNotNull null
-		val summary = obj.get("summary")
-			?.takeIf { it.isJsonPrimitive }
-			?.asString
-			?.trim()
-			?.take(2000)
-			?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
-		LLMObservedMemberSummary(qquid, summary)
-	}.distinctBy { it.qqUid }
-	return LLMGroupAndMemberSummary(groupSummary, profiles)
-}
-
-internal data class LLMGroupAndMemberSummary(
-	val groupSummary: String,
-	val memberProfiles: List<LLMObservedMemberSummary>,
-)
-
-internal data class LLMObservedMemberSummary(
-	val qqUid: Long,
-	val summary: String,
-)
 
 internal fun LLMServices.buildSyncedChatContext(): JsonArray {
 	val context = JsonArray()
@@ -656,77 +363,7 @@ internal fun LLMServices.extractTextContent(content: JsonElement): String {
 		.joinToString("\n")
 }
 
-internal fun LLMServices.reserveRequest(qqUid: Long): Boolean {
-	return redis.setIfAbsentWithExpire("llm:req:$qqUid", "1", DatabaseType.QO_ASSISTANT_DATABASE.value, 2)
-		.ignoreException() ?: true
-}
-
-internal suspend fun LLMServices.reserveQuota(principal: LLMPrincipal, clientRequestId: String?, request: LLMServices.NormalizedRequest, provider: LLMProvider): LLMQuotaDecision {
-    val logger = org.slf4j.LoggerFactory.getLogger(LLMServices::class.java)
-    return try {
-        val pricing = request.pricing ?: provider.modelConfig(request.preset).pricing?.at(java.time.Instant.now())
-        if (pricing == null) {
-            logger.error("AI model pricing missing: provider={}, mode={}, model={}; configure models.{}.pricing in providers.json",
-                provider.name,request.preset,request.model,request.preset)
-            return LLMQuotaDecision(LLMQuotaStatus.PRICING_UNAVAILABLE, dailyQuotaService.snapshot(principal.qqUid, principal.hasAccount).view)
-        }
-        // A chat turn only needs a positive shared balance for admission. The
-        // maximum possible output and serialized request size are not a bill:
-        // reserve one unit atomically, then settle the actual provider usage.
-        val admissionCost = LLMDailyQuotaService.COST_PER_UNIT
-        dailyQuotaService.reserve(principal, clientRequestId?.takeIf { it.isNotBlank() } ?: java.util.UUID.randomUUID().toString(),
-            estimatedUnits = 1, mode = request.preset,
-            provider = provider.name, model = request.model, estimatedCost = admissionCost)
-    } catch (error: Exception) {
-        if (error is kotlinx.coroutines.CancellationException) throw error
-        val sqlError = generateSequence<Throwable>(error) { it.cause }.filterIsInstance<io.r2dbc.spi.R2dbcException>().firstOrNull()
-        logger.warn("AI quota reservation failed: source={}, uid={}, provider={}, mode={}, error={}, sqlState={}, sqlCode={}",
-            principal.source.value,principal.qqUid,provider.name,request.preset,error.javaClass.simpleName,sqlError?.sqlState,sqlError?.errorCode)
-        LLMQuotaDecision(LLMQuotaStatus.UNAVAILABLE, dailyQuotaService.snapshot(principal.qqUid, principal.hasAccount).view)
-    }
-}
-
-internal fun LLMServices.quotaFailure(decision: LLMQuotaDecision, principal: LLMPrincipal): LLMNonStreamResult? {
-	val (status, code) = when (decision.status) {
-		LLMQuotaStatus.ACCEPTED -> return null
-		LLMQuotaStatus.EXCEEDED -> 429 to "weekly_quota_exceeded"
-		LLMQuotaStatus.RATE_LIMITED -> 429 to "rate_limited"
-		LLMQuotaStatus.DUPLICATE -> 409 to "duplicate_request"
-		LLMQuotaStatus.UNAVAILABLE -> 503 to "quota_unavailable"
-		LLMQuotaStatus.PRICING_UNAVAILABLE -> 503 to "pricing_unavailable"
-	}
-	return LLMNonStreamResult(status, errorJson(code, quotaErrorMessage(decision.status, principal)), decision.view)
-}
-
-internal fun LLMServices.quotaStreamFailure(decision: LLMQuotaDecision, principal: LLMPrincipal): LLMStreamResult? {
-	val failure = quotaFailure(decision, principal) ?: return null
-	return LLMStreamResult(failure.status, flowOfText(failure.body), failure.quota)
-}
-
-internal fun LLMServices.quotaErrorMessage(status: LLMQuotaStatus, principal: LLMPrincipal): String = when (status) {
-	LLMQuotaStatus.ACCEPTED -> ""
-	LLMQuotaStatus.EXCEEDED -> if (principal.hasAccount) {
-		"本周额度和 Paid Credits 不足，可购买 Credits 继续使用"
-	} else {
-		"本周 QQ 额度为 ${dailyQuotaService.guestWeeklyLimit} Units，注册后同一身份提升至 ${dailyQuotaService.weeklyLimit} Units；可购买 Credits 继续使用"
-	}
-	LLMQuotaStatus.RATE_LIMITED -> "已达到并发限制，请稍后重试"
-	LLMQuotaStatus.DUPLICATE -> "该请求已经提交，请勿重复发送"
-	LLMQuotaStatus.UNAVAILABLE -> "额度服务暂时不可用，请稍后重试"
-	LLMQuotaStatus.PRICING_UNAVAILABLE -> "模型计价未配置，请联系管理员"
-}
-
-internal fun LLMServices.quotaJson(view: LLMQuotaView): String = JsonObject().apply {
-	addProperty("limit", view.limit)
-	addProperty("used", view.used)
-	addProperty("remaining", view.remaining)
-	addProperty("reset_at", view.resetAtEpochSeconds)
-	addProperty("paid_credits", view.paidCredits)
-	addProperty("period", "weekly")
-	view.chargedUnits?.let { addProperty("charged_units", it) }
-}.toString()
-
-internal fun LLMServices.recordConversation(
+internal suspend fun LLMServices.recordConversation(
 	requester: LLMServices.LLMRequester,
 	userContent: JsonElement,
 	responseBody: String,
@@ -736,7 +373,7 @@ internal fun LLMServices.recordConversation(
 	recordConversationAnswer(requester, userContent, answer, provider)
 }
 
-internal fun LLMServices.recordConversationAnswer(
+internal suspend fun LLMServices.recordConversationAnswer(
 	requester: LLMServices.LLMRequester,
 	userContent: JsonElement,
 	answer: String,
@@ -746,24 +383,21 @@ internal fun LLMServices.recordConversationAnswer(
 		conversationService.append(requester.conversationKey(), userContent, answer, provider.compact)
 	} catch (error: Exception) {
 		println("LLM conversation history persistence failed: ${error.message}")
-		return
 	}
 	if (requester.source == "web" && !requester.conversationId.isNullOrBlank()) {
 		val userText = extractTextContent(userContent)
 		val cleanAnswer = sanitizeAssistantText(answer, enableMarkdown = true)
 		if (userText.isNotBlank() && cleanAnswer.isNotBlank()) {
-			initializationScope.launch {
-				try {
-					kotshiConversationService.appendTurn(
-						uid = requester.uid,
-						conversationId = requester.conversationId,
-						userContent = userText,
-						assistantContent = cleanAnswer,
-						model = requester.model,
-					)
-				} catch (e: Exception) {
-					println("[Kotshi] conversation persistence failed: ${e.message}")
-				}
+			try {
+				kotshiConversationService.appendTurn(
+					uid = requester.uid,
+					conversationId = requester.conversationId,
+					userContent = userText,
+					assistantContent = cleanAnswer,
+					model = requester.model,
+				)
+			} catch (e: Exception) {
+				println("[Kotshi] conversation persistence failed: ${e.message}")
 			}
 		}
 	}

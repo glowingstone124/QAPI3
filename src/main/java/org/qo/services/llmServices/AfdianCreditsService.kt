@@ -12,6 +12,8 @@ import io.ktor.http.ContentType
 import io.ktor.http.contentType
 import jakarta.annotation.PreDestroy
 import org.qo.datas.ReactiveDatabase
+import org.qo.db.repository.AfdianDbRepository
+import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.stereotype.Service
 import org.springframework.web.bind.annotation.*
 import org.springframework.http.HttpStatus
@@ -103,13 +105,22 @@ class HttpAfdianOrderQuery(
 }
 
 @Service
-class AfdianCreditsService(
-	private val db: ReactiveDatabase, private val quota: SqlLLMQuotaStore,
+class AfdianCreditsService @Autowired constructor(
+	private val repository: AfdianDbRepository,
+	private val quota: SqlLLMQuotaStore,
 	private val query: AfdianOrderQuery,
 	config: AfdianConfig,
 ) {
+	constructor(
+		db: ReactiveDatabase,
+		quota: SqlLLMQuotaStore,
+		query: AfdianOrderQuery,
+		config: AfdianConfig,
+	) : this(AfdianDbRepository(db), quota, query, config)
+
 	val packs = config.packs
 	private val logger = LoggerFactory.getLogger(AfdianCreditsService::class.java)
+
 	suspend fun intent(uid: Long, amount: Int): JsonObject {
 		val pack = packs.singleOrNull { it.amount == amount } ?: throw IllegalArgumentException("Invalid credit pack")
 		check(pack.skuId.isNotBlank() && pack.checkoutUrl.isNotBlank()) { "Credit pack is not configured" }
@@ -123,10 +134,7 @@ class AfdianCreditsService(
 		require(!pack.checkoutUrl.contains("custom_order_id") && URI(pack.checkoutUrl).fragment == null)
 		quota.schema()
 		val id = UUID.randomUUID().toString()
-		db.execute(
-			"INSERT INTO ai_purchase_intent (id,user_id,sku_id,amount,credits,status,created_at) VALUES (?,?,?,?,?,'pending',?)",
-			listOf(id, uid, pack.skuId, BigDecimal(amount), pack.credits, Instant.now().epochSecond)
-		)
+		repository.insertPurchaseIntent(id, uid, pack.skuId, BigDecimal(amount), pack.credits)
 		val separator = if (pack.checkoutUrl.contains('?')) "&" else "?"
 		return JsonObject().apply {
 			addProperty("purchase_intent", id)
@@ -139,6 +147,7 @@ class AfdianCreditsService(
 	}
 
 	suspend fun reconcile(uid: Long): Int = quota.reconcileKnownUsage(uid)
+
 	suspend fun webhook(body: JsonObject) {
 		val dataElement = body.get("data")
 		// Connectivity notifications carry no order and must never alter balances.
@@ -165,36 +174,25 @@ class AfdianCreditsService(
 		} catch (_: AfdianOrderNotFoundException) {
 			quota.schema()
 			val now = Instant.now().epochSecond
-			db.execute(
-				"INSERT INTO ai_afdian_pending_order (out_trade_no,status,attempts,next_attempt_at,last_error,created_at) VALUES (?,'pending',0,?,'order_not_found',?) ON DUPLICATE KEY UPDATE out_trade_no=out_trade_no",
-				listOf(orderNo, now + 30, now)
-			)
+			repository.insertPendingOrder(orderNo, now + 30, now)
 			logger.warn("Verified Afdian notification deferred: official order not found; durable retry queued")
 		}
 	}
 
 	internal suspend fun retryPendingOrders(now: Long = Instant.now().epochSecond): Int {
 		quota.schema()
-		val pending = db.all(
-			"SELECT out_trade_no,attempts FROM ai_afdian_pending_order WHERE status='pending' AND next_attempt_at<=? ORDER BY next_attempt_at LIMIT 10",
-			listOf(now)
-		) {
-			it.get("out_trade_no", String::class.java)!! to (it.get("attempts") as Number).toInt()
-		}
+		val pending = repository.getPendingOrders(now)
 		var completed = 0
 		for ((orderNo, attempts) in pending) {
 			try {
 				applyVerified(query.query(orderNo))
-				db.execute("DELETE FROM ai_afdian_pending_order WHERE out_trade_no=?", listOf(orderNo))
+				repository.deletePendingOrder(orderNo)
 				completed++
 			} catch (error: Exception) {
 				if (error is kotlinx.coroutines.CancellationException) throw error
 				val delay = minOf(3600L, 30L shl attempts.coerceIn(0, 7))
 				val status = if (error is IllegalArgumentException) "review" else "pending"
-				db.execute(
-					"UPDATE ai_afdian_pending_order SET attempts=attempts+1,next_attempt_at=?,last_error=?,status=? WHERE out_trade_no=? AND status='pending'",
-					listOf(now + delay, error.javaClass.simpleName.take(64), status, orderNo)
-				)
+				repository.updatePendingOrder(now + delay, error.javaClass.simpleName.take(64), status, orderNo)
 				if (status == "review") logger.warn("Pending Afdian order requires review: verified order failed purchase validation")
 			}
 		}
@@ -212,53 +210,7 @@ class AfdianCreditsService(
 		val skus = order.getAsJsonArray("sku_detail")
 		require(skus.size() == 1 && skus[0].asJsonObject.get("count")?.asInt == 1)
 		val sku = skus[0].asJsonObject.get("sku_id").asString
-		val uid = db.one(
-			"SELECT user_id FROM ai_purchase_intent WHERE id=?",
-			listOf(id)
-		) { (it.get("user_id") as Number).toLong() }
-			?: return
-		db.inTransaction {
-			db.execute(
-				"INSERT INTO ai_quota_account (user_id,paid_credits) VALUES (?,0) ON DUPLICATE KEY UPDATE user_id=user_id",
-				listOf(uid)
-			)
-			db.one("SELECT user_id FROM ai_quota_account WHERE user_id=? FOR UPDATE", listOf(uid)) { true }
-			val intent = db.one("SELECT * FROM ai_purchase_intent WHERE id=? FOR UPDATE", listOf(id)) {
-				Triple(
-					it.get("sku_id", String::class.java)!!,
-					it.get("amount") as BigDecimal,
-					(it.get("credits") as Number).toInt()
-				)
-			}!!
-			require(intent.first == sku && intent.second.compareTo(amount) == 0)
-			val existing = db.one(
-				"SELECT intent_id FROM ai_payment_order WHERE provider='afdian' AND out_trade_no=?",
-				listOf(no)
-			) { it.get("intent_id", String::class.java)!! }
-			if (existing != null) {
-				require(existing == id); return@inTransaction
-			}
-			require(db.one("SELECT status FROM ai_purchase_intent WHERE id=?", listOf(id)) {
-				it.get(
-					"status",
-					String::class.java
-				)
-			} == "pending")
-			val now = Instant.now().epochSecond
-			db.execute(
-				"INSERT INTO ai_payment_order (provider,out_trade_no,intent_id,user_id,amount,credits,created_at) VALUES ('afdian',?,?,?,?,?,?)",
-				listOf(no, id, uid, amount, intent.third, now)
-			)
-			db.execute(
-				"UPDATE ai_quota_account SET paid_credits=paid_credits+? WHERE user_id=?",
-				listOf(intent.third, uid)
-			)
-			db.execute(
-				"INSERT INTO ai_credit_ledger (user_id,reference_id,delta,kind,created_at) VALUES (?,?,?,'purchase',?)",
-				listOf(uid, no, intent.third, now)
-			)
-			db.execute("UPDATE ai_purchase_intent SET status='paid' WHERE id=?", listOf(id))
-		}
+		repository.applyVerifiedPurchase(no, id, amount, sku)
 	}
 }
 
