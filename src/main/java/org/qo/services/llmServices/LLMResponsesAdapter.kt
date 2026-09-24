@@ -55,7 +55,8 @@ internal object LLMResponsesAdapter : LLMAdapter {
             })
             chat.get("temperature")?.let { add("temperature", it) }
             chat.get("top_p")?.let { add("top_p", it) }
-            chat.get("max_tokens")?.let { add("max_output_tokens", it) }
+            (chat.get("max_output_tokens") ?: chat.get("max_completion_tokens") ?: chat.get("max_tokens"))
+                ?.let { add("max_output_tokens", it) }
             (chat.get("user") ?: chat.get("user_id"))
                 ?.asString
                 ?.replace(Regex("[^a-zA-Z0-9_-]"), "_")

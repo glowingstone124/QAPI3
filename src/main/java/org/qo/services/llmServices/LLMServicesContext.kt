@@ -82,8 +82,7 @@ internal suspend fun LLMServices.normalizeRequest(
 			else -> 4096
 		})
 	}
-	for (key in listOf("max_tokens", "max_completion_tokens", "max_output_tokens")) obj.remove(key)
-	obj.addProperty("max_tokens", if(model=="fast") 2048 else 4096)
+	// Preserve caller limits; otherwise let the upstream choose its output budget.
 	if(stream) obj.add("stream_options",JsonObject().apply { addProperty("include_usage",true) })
 	requester?.let {
 		obj.addProperty("user_id", it.identityKey())

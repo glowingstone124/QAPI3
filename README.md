@@ -213,6 +213,8 @@ Completed AI turns from Web, QQ, and Minecraft are written to `llm_conversation_
 
 Set `enableCommandCode: true` to try the endpoint-free `providers.commandcode` block before `defaultProvider`, with a fallback when the Command Code connection fails. See [Command Code provider setup](docs/LLM_COMMANDCODE.md), including pricing, image input, and fallback behavior.
 
+Ordinary chat requests apply the mode/source reasoning-effort policy without forcing a Fast/Thinking output-token cap. Explicit caller token limits are preserved. Chat Completions and Responses requests omit the output limit when none is supplied; Anthropic and Command Code retain their protocol adapter defaults. Builder client-tool steps and internal summaries use separate output budgets.
+
 Provider configuration example (`data/llm/providers.json`; replace example URLs and model IDs with those supported by your upstream):
 
 ```json
