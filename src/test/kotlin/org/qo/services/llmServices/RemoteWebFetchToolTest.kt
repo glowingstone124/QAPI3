@@ -10,7 +10,7 @@ import io.ktor.http.content.TextContent
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Test
 import org.qo.services.llmServices.tools.RemoteWebFetchTool
-import org.qo.services.llmServices.tools.SearXNGWebSearchTool
+import org.qo.services.llmServices.tools.DuckDuckGoWebSearchTool
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
@@ -47,7 +47,7 @@ class RemoteWebFetchToolTest {
 
 	@Test
 	fun `rejects a URL that did not come from search`() = runBlocking {
-		val search = SearXNGWebSearchTool()
+		val search = DuckDuckGoWebSearchTool()
 		val fetch = RemoteWebFetchTool(search)
 		try {
 			val args = JsonObject().apply { addProperty("result_id", "result_missing") }

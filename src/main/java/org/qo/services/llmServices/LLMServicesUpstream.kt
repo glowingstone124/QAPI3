@@ -74,7 +74,7 @@ internal suspend fun LLMServices.completeWithOptionalTools(
 			chat = JsonParser.parseString(request.body).asJsonObject,
 			functionTools = functionTools,
 			reasoningEffort = request.reasoningEffort,
-			webSearch = !toolService.usesSearXNG(),
+			webSearch = !toolService.usesRemoteSearch(),
 		)
 	)
 
@@ -122,7 +122,7 @@ internal suspend fun LLMServices.completeWithResponsesApi(
 			chat = JsonParser.parseString(request.body).asJsonObject,
 			functionTools = functionTools,
 			reasoningEffort = request.reasoningEffort,
-			webSearch = !toolService.usesSearXNG(),
+			webSearch = !toolService.usesRemoteSearch(),
 		)
 	)
 	var totalUsage: LLMServices.Usage? = null

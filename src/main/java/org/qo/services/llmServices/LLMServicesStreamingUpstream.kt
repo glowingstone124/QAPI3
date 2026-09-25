@@ -31,7 +31,7 @@ internal fun LLMServices.streamFromUpstream(
 			chat = JsonParser.parseString(request.body).asJsonObject,
 			functionTools = functionTools,
 			reasoningEffort = request.reasoningEffort,
-			webSearch = !toolService.usesSearXNG(),
+			webSearch = !toolService.usesRemoteSearch(),
 		)
 	).toString()
 	var upstreamAccepted = false
@@ -45,7 +45,7 @@ internal fun LLMServices.streamFromUpstream(
 	}
 
 	emitProgress("analyzing", "正在分析问题…")
-	if (toolService.usesSearXNG()) {
+	if (toolService.usesRemoteSearch()) {
 		try {
 			val nonStreamingBody = JsonParser.parseString(request.body).asJsonObject.apply {
 				addProperty("stream", false)
@@ -175,7 +175,7 @@ internal fun LLMServices.streamFromResponses(
 			functionTools = functionTools,
 			reasoningEffort = request.reasoningEffort,
 			stream = true,
-			webSearch = !toolService.usesSearXNG(),
+			webSearch = !toolService.usesRemoteSearch(),
 		)
 	)
 	val assistantContent = StringBuilder()

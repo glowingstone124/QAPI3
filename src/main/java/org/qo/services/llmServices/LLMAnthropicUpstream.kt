@@ -154,7 +154,7 @@ internal suspend fun LLMServices.completeWithAnthropicApi(
 			chat = JsonParser.parseString(request.body).asJsonObject,
 			functionTools = toolService.definitions(),
 			reasoningEffort = request.reasoningEffort,
-			webSearch = !toolService.usesSearXNG(),
+			webSearch = !toolService.usesRemoteSearch(),
 			thinkingMode = provider.modelConfig(request.preset).thinkingMode,
 		)
 	)
@@ -217,7 +217,7 @@ internal fun LLMServices.streamFromAnthropic(
 				functionTools = toolService.definitions(),
 				reasoningEffort = request.reasoningEffort,
 				stream = true,
-				webSearch = !toolService.usesSearXNG(),
+				webSearch = !toolService.usesRemoteSearch(),
 				thinkingMode = provider.modelConfig(request.preset).thinkingMode,
 			)
 		)

@@ -6,7 +6,7 @@ import com.google.gson.JsonArray
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import org.qo.services.llmServices.tools.Tools
-import org.qo.services.llmServices.tools.SearXNGWebSearchTool
+import org.qo.services.llmServices.tools.DuckDuckGoWebSearchTool
 import org.qo.services.llmServices.tools.RemoteWebFetchTool
 import org.springframework.stereotype.Service
 import java.nio.charset.StandardCharsets
@@ -17,7 +17,7 @@ import java.nio.file.StandardOpenOption
 @Service
 class LLMToolService(
 	private val registeredTools: List<Tools>,
-	private val searxng: SearXNGWebSearchTool,
+	private val search: DuckDuckGoWebSearchTool,
 	private val webFetch: RemoteWebFetchTool,
 ) {
 	private val qoGroupId = System.getenv("LLM_QO_GROUP_ID")?.trim()?.toLongOrNull()
@@ -53,11 +53,11 @@ class LLMToolService(
 	}
 
 	fun enabled(): Boolean = readBoolean("LLM_TOOLS_ENABLED", true)
-	fun usesSearXNG(): Boolean = searxng.configured
+	fun usesRemoteSearch(): Boolean = true
 
 	fun definitions(excludedIds: Set<String> = emptySet()): JsonArray = JsonArray().apply {
 		if (enabled()) tools.filterNot { it.id in excludedIds }.forEach { add(it.definition.deepCopy()) }
-		if (searxng.configured && searxng.id !in excludedIds) add(searxng.definition.deepCopy())
+		if (search.id !in excludedIds) add(search.definition.deepCopy())
 		if (webFetch.id !in excludedIds) add(webFetch.definition.deepCopy())
 	}
 
@@ -67,8 +67,8 @@ class LLMToolService(
 			logFailure(name, rawArguments, context, result)
 			return result
 		}
-		if (name == searxng.id) {
-			val result = searxng.execute(parseArguments(rawArguments), context)
+		if (name == search.id) {
+			val result = search.execute(parseArguments(rawArguments), context)
 			if (isFailure(result)) logFailure(name, rawArguments, context, result)
 			return result
 		}

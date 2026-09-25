@@ -7,14 +7,27 @@ import io.ktor.client.engine.mock.respond
 import io.ktor.http.HttpStatusCode
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Test
-import org.qo.services.llmServices.tools.SearXNGWebSearchTool
+import org.qo.services.llmServices.tools.DuckDuckGoWebSearchTool
+import org.springframework.context.annotation.AnnotationConfigApplicationContext
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
-class SearXNGWebSearchToolTest {
+class DuckDuckGoWebSearchToolTest {
+	@Test
+	fun `spring creates the remote search tool with the fixed URL`() {
+		AnnotationConfigApplicationContext().use { context ->
+			context.register(DuckDuckGoWebSearchTool::class.java)
+			context.refresh()
+			val bean = context.getBean(DuckDuckGoWebSearchTool::class.java)
+			assertEquals("web_search", bean.id)
+			val endpoint = bean.javaClass.getDeclaredField("endpoint").apply { isAccessible = true }.get(bean)
+			assertEquals("http://10.10.0.3:9123/search", endpoint)
+		}
+	}
+
 	@Test
 	fun `fetch authorization stays within the conversation`() {
-		val tool = SearXNGWebSearchTool()
+		val tool = DuckDuckGoWebSearchTool()
 		try {
 			val first = LLMToolContext(null, "1", "user", source = "qq", conversationKey = "qq:1:a")
 			val second = LLMToolContext(null, "1", "user", source = "qq", conversationKey = "qq:1:b")
@@ -33,7 +46,7 @@ class SearXNGWebSearchToolTest {
 
 	@Test
 	fun `web search keeps source URLs`() {
-		val tool = SearXNGWebSearchTool()
+		val tool = DuckDuckGoWebSearchTool()
 		try {
 			val context = LLMToolContext(null, "1", "user", source = "web", conversationKey = "web:1:a")
 			val result = JsonParser.parseString(tool.prepareResults(context, """{"results":[{"url":"https://example.org/article"}]}""")).asJsonObject
@@ -47,13 +60,13 @@ class SearXNGWebSearchToolTest {
 	@Test
 	fun `queries JSON endpoint and returns bounded source links`() = runBlocking {
 		val client = HttpClient(MockEngine { request ->
-			assertEquals("/searx/search", request.url.encodedPath)
+			assertEquals("/search", request.url.encodedPath)
 			assertEquals("test query", request.url.parameters["q"])
-			assertEquals("json", request.url.parameters["format"])
-			respond("""{"results":[{"title":"Example","url":"https://example.org/a","content":"Useful excerpt","publishedDate":"2026-09-18"},{"title":"Bad","url":"javascript:alert(1)","content":"ignore"}]}""")
+			assertEquals(null, request.url.parameters["format"])
+			respond("""{"results":[{"title":"Example","url":"https://example.org/a","snippet":"Useful excerpt"},{"title":"Bad","url":"javascript:alert(1)","snippet":"ignore"}]}""")
 		})
 		try {
-			val result = JsonParser.parseString(SearXNGWebSearchTool.search(client, "http://localhost:8080/searx/search", "test query")).asJsonObject
+			val result = JsonParser.parseString(DuckDuckGoWebSearchTool.search(client, "http://localhost:8080/search", "test query")).asJsonObject
 			assertEquals("web_search", result.get("tool").asString)
 			val results = result.getAsJsonArray("results")
 			assertEquals(1, results.size())
@@ -65,22 +78,22 @@ class SearXNGWebSearchToolTest {
 	}
 
 	@Test
-	fun `explains when JSON output is disabled`() = runBlocking {
-		val client = HttpClient(MockEngine { respond("Forbidden", HttpStatusCode.Forbidden) })
+	fun `reports DuckDuckGo rate limits`() = runBlocking {
+		val client = HttpClient(MockEngine { respond("""{"error":"captcha"}""", HttpStatusCode.TooManyRequests) })
 		try {
-			val result = JsonParser.parseString(SearXNGWebSearchTool.search(client, "http://localhost:8080/search", "query")).asJsonObject
+			val result = JsonParser.parseString(DuckDuckGoWebSearchTool.search(client, "http://localhost:8080/search", "query")).asJsonObject
 			assertEquals("search_unavailable", result.get("error").asString)
-			assertTrue(result.get("message").asString.contains("search.formats"))
+			assertTrue(result.get("message").asString.contains("频率限制"))
 		} finally {
 			client.close()
 		}
 	}
 
 	@Test
-	fun `HTTP success with no results and blocked engines reports search failure`() = runBlocking {
-		val client = HttpClient(MockEngine { respond("""{"results":[],"unresponsive_engines":[["brave","Suspended: too many requests"],["duckduckgo","CAPTCHA"],["google cse","Suspended: too many requests"],["startpage","Suspended: CAPTCHA"],["test","failure at https://engine.example/private"]]}""") })
+	fun `missing results is a service failure`() = runBlocking {
+		val client = HttpClient(MockEngine { respond("""{"error":"invalid_response","message":"https://engine.example/private"}""") })
 		try {
-			val result = JsonParser.parseString(SearXNGWebSearchTool.search(client, "http://localhost:8080/search", "NiKo major 冠军")).asJsonObject
+			val result = JsonParser.parseString(DuckDuckGoWebSearchTool.search(client, "http://localhost:8080/search", "NiKo major 冠军")).asJsonObject
 			assertEquals("search_unavailable", result.get("error").asString)
 			assertEquals(false, result.has("results"))
 			assertEquals(false, result.toString().contains("engine.example"))
@@ -91,23 +104,23 @@ class SearXNGWebSearchToolTest {
 	}
 
 	@Test
-	fun `partial engine failure preserves useful search results`() = runBlocking {
-		val client = HttpClient(MockEngine { respond("""{"results":[{"title":"Example","url":"https://example.org/a","content":"Useful excerpt"}],"unresponsive_engines":[["duckduckgo","CAPTCHA"]]}""") })
+	fun `search caps result count at eight`() = runBlocking {
+		val items = (1..10).joinToString(",") { """{"title":"Result $it","url":"https://example.org/$it","snippet":"Text"}""" }
+		val client = HttpClient(MockEngine { respond("""{"results":[$items]}""") })
 		try {
-			val result = JsonParser.parseString(SearXNGWebSearchTool.search(client, "http://localhost:8080/search", "query")).asJsonObject
+			val result = JsonParser.parseString(DuckDuckGoWebSearchTool.search(client, "http://localhost:8080/search", "query")).asJsonObject
 			assertEquals(false, result.has("error"))
-			assertEquals(1, result.getAsJsonArray("results").size())
-			assertEquals(false, result.has("unresponsive_engines"))
+			assertEquals(8, result.getAsJsonArray("results").size())
 		} finally {
 			client.close()
 		}
 	}
 
 	@Test
-	fun `a genuine empty search without engine failures remains a successful result`() = runBlocking {
-		val client = HttpClient(MockEngine { respond("""{"results":[],"unresponsive_engines":[]}""") })
+	fun `a genuine empty search remains a successful result`() = runBlocking {
+		val client = HttpClient(MockEngine { respond("""{"results":[]}""") })
 		try {
-			val result = JsonParser.parseString(SearXNGWebSearchTool.search(client, "http://localhost:8080/search", "no matches")).asJsonObject
+			val result = JsonParser.parseString(DuckDuckGoWebSearchTool.search(client, "http://localhost:8080/search", "no matches")).asJsonObject
 			assertEquals(false, result.has("error"))
 			assertEquals(0, result.getAsJsonArray("results").size())
 		} finally {

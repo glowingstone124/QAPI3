@@ -18,7 +18,7 @@ import org.qo.services.llmServices.LLMSource
 import org.springframework.stereotype.Component
 
 @Component
-class RemoteWebFetchTool(private val search: SearXNGWebSearchTool) : Tools {
+class RemoteWebFetchTool(private val search: DuckDuckGoWebSearchTool) : Tools {
 	private val endpoint = "http://10.10.0.3:9124/fetch"
 	private val client = HttpClient(CIO) {
 		install(HttpTimeout) {

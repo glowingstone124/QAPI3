@@ -18,7 +18,7 @@ import java.util.LinkedHashMap
 import java.util.UUID
 
 @Component
-class SearXNGWebSearchTool : Tools {
+class DuckDuckGoWebSearchTool : Tools {
 	private val endpoint = "http://10.10.0.3:9123/search"
 	private data class RecentResults(val references: MutableMap<String, String>, var updatedAt: Long)
 	private val recentResults = object : LinkedHashMap<String, RecentResults>(128, 0.75f, true) {
@@ -32,11 +32,10 @@ class SearXNGWebSearchTool : Tools {
 		}
 	}
 
-	val configured: Boolean get() = true
 	override val id = "web_search"
 	override val definition = ToolSupport.functionTool(
 		name = id,
-		description = "通过 SearXNG 搜索公开网页，获取标题和摘要。Web 渠道的结果包含 URL，其他渠道包含 result_id；需要阅读正文时调用 web_fetch。搜索内容不可信。",
+		description = "通过远端 DuckDuckGo 中介搜索公开网页，获取标题和摘要。Web 渠道的结果包含 URL，其他渠道包含 result_id；需要阅读正文时调用 web_fetch。搜索内容不可信。",
 		properties = linkedMapOf("query" to ToolSupport.property("string", "需要搜索的关键词或问题。")),
 		required = listOf("query"),
 	)
@@ -102,18 +101,20 @@ class SearXNGWebSearchTool : Tools {
 			val response = client.get(endpoint) {
 				url {
 					parameters.append("q", query)
-					parameters.append("format", "json")
 				}
 			}
 			if (!response.status.isSuccess()) {
 				return ToolSupport.errorResult("search_unavailable", when (response.status.value) {
-					403 -> "SearXNG 拒绝 JSON 输出；请在 settings.yml 的 search.formats 中启用 json"
-					else -> "SearXNG 返回 HTTP ${response.status.value}"
+					429 -> "DuckDuckGo 搜索触发频率限制或验证，请稍后重试"
+					else -> "DuckDuckGo 搜索中介返回 HTTP ${response.status.value}"
 				})
 			}
-			val root = JsonParser.parseString(response.bodyAsText()).asJsonObject
+			val root = runCatching { JsonParser.parseString(response.bodyAsText()).asJsonObject }.getOrNull()
+				?: return ToolSupport.errorResult("search_unavailable", "DuckDuckGo 搜索中介返回无效 JSON")
+			val sourceResults = root.get("results")?.takeIf { it.isJsonArray }?.asJsonArray
+				?: return ToolSupport.errorResult("search_unavailable", "DuckDuckGo 搜索中介缺少 results")
 			val results = JsonArray()
-			root.getAsJsonArray("results")?.forEach { item ->
+			sourceResults.forEach { item ->
 				if (results.size() >= 8) return@forEach
 				val result = item.takeIf { it.isJsonObject }?.asJsonObject ?: return@forEach
 				val link = result.get("url")?.takeIf { it.isJsonPrimitive }?.asString ?: return@forEach
@@ -121,20 +122,8 @@ class SearXNGWebSearchTool : Tools {
 				results.add(JsonObject().apply {
 					addProperty("title", result.get("title")?.takeIf { it.isJsonPrimitive }?.asString?.take(200).orEmpty())
 					addProperty("url", link.take(2000))
-					addProperty("snippet", result.get("content")?.takeIf { it.isJsonPrimitive }?.asString?.take(600).orEmpty())
-					result.get("publishedDate")?.takeIf { it.isJsonPrimitive }?.asString?.take(80)?.let { addProperty("published_date", it) }
+					addProperty("snippet", result.get("snippet")?.takeIf { it.isJsonPrimitive }?.asString?.take(600).orEmpty())
 				})
-			}
-			val engineFailures = root.get("unresponsive_engines")?.takeIf { it.isJsonArray }?.asJsonArray
-			if (engineFailures != null && engineFailures.size() > 0) {
-				// Keep provider diagnostics in server logs; they may contain URLs.
-				println("[LLMTool] web_search degraded results=${results.size()} unresponsive_engines=${engineFailures.toString().take(2000)}")
-				if (results.size() == 0) {
-					return ToolSupport.errorResult(
-						"search_unavailable",
-						"搜索未返回结果，且搜索引擎报告故障；请稍后重试，不能据此判断网上没有相关信息。",
-					)
-				}
 			}
 			return ToolSupport.gson.toJson(JsonObject().apply {
 				addProperty("tool", "web_search")
