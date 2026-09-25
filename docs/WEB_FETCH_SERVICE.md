@@ -1,6 +1,6 @@
 # Web Fetch 微服务部署约定
 
-目标：在运行 SearXNG 的 `10.10.0.3` 服务器上，另起一个 Python 服务，用 Trafilatura 下载网页并提取正文。QAPI3 仍通过 `http://10.10.0.3:9123/search` 搜索，现已提供 `web_fetch` 工具并按下述接口调用微服务。**微服务尚未部署；部署前调用会返回服务不可用。**
+在运行 SearXNG 的 `10.10.0.3` 服务器上，以独立 Python 服务用 Trafilatura 下载网页并提取正文。QAPI3 通过 `http://10.10.0.3:9123/search` 搜索，并使用 `web_fetch` 工具按下述接口读取网页。
 
 ## 服务接口
 
@@ -42,3 +42,13 @@ curl -X POST http://10.10.0.3:9124/fetch \
 ```
 
 验收标准：第二个请求返回非空正文；内网 URL 被拒绝；超时和不可提取页面返回约定错误。部署完成后，从 QAPI3 发起一次需要先搜索再读取正文的对话，确认 `web_fetch` 返回内容。
+
+## 2026-09-25 在线排查记录
+
+- `/health` 返回 200；Trafilatura Quickstart、Example Domain、Python.org HTTPS 页面均能提取正文。
+- 同一测试站点的静态文章返回 200，而仅含 JavaScript 渲染逻辑、没有静态正文的页面返回 `422 no_content`。
+- 指向可正常抓取页面的 302 跳转入口返回 `502 download_failed`；Python.org HTTP 入口也失败，而 HTTPS 页面成功。该行为与上述禁止跳转的部署约定一致，修改跳转策略前仍需检查实际服务实现，并逐跳验证目标地址。
+- SearXNG 对两次普通查询返回 HTTP 200、`results: []`，同时在 `unresponsive_engines` 报告 Brave/Google CSE 限流、DuckDuckGo/Startpage 验证码。HTTP 200 本身不能证明搜索成功。
+- QAPI3 对“无可用结果且引擎报错”返回 `search_unavailable`，在服务器日志保留引擎诊断；部分引擎失败但仍有结果时继续返回可用结果。非 Web 模型不会收到原始引擎错误中的 URL。
+
+排查单次抓取失败仍需对应的原始 URL 和服务日志。`result_id` 是会话内临时引用，不能从历史 UUID 反推 URL。以上探测复现了错误类型，不能证明历史的每一条失败都由同一原因引起。

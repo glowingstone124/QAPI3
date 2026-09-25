@@ -76,4 +76,43 @@ class SearXNGWebSearchToolTest {
 		}
 	}
 
+	@Test
+	fun `HTTP success with no results and blocked engines reports search failure`() = runBlocking {
+		val client = HttpClient(MockEngine { respond("""{"results":[],"unresponsive_engines":[["brave","Suspended: too many requests"],["duckduckgo","CAPTCHA"],["google cse","Suspended: too many requests"],["startpage","Suspended: CAPTCHA"],["test","failure at https://engine.example/private"]]}""") })
+		try {
+			val result = JsonParser.parseString(SearXNGWebSearchTool.search(client, "http://localhost:8080/search", "NiKo major 冠军")).asJsonObject
+			assertEquals("search_unavailable", result.get("error").asString)
+			assertEquals(false, result.has("results"))
+			assertEquals(false, result.toString().contains("engine.example"))
+			assertEquals(false, result.has("query"))
+		} finally {
+			client.close()
+		}
+	}
+
+	@Test
+	fun `partial engine failure preserves useful search results`() = runBlocking {
+		val client = HttpClient(MockEngine { respond("""{"results":[{"title":"Example","url":"https://example.org/a","content":"Useful excerpt"}],"unresponsive_engines":[["duckduckgo","CAPTCHA"]]}""") })
+		try {
+			val result = JsonParser.parseString(SearXNGWebSearchTool.search(client, "http://localhost:8080/search", "query")).asJsonObject
+			assertEquals(false, result.has("error"))
+			assertEquals(1, result.getAsJsonArray("results").size())
+			assertEquals(false, result.has("unresponsive_engines"))
+		} finally {
+			client.close()
+		}
+	}
+
+	@Test
+	fun `a genuine empty search without engine failures remains a successful result`() = runBlocking {
+		val client = HttpClient(MockEngine { respond("""{"results":[],"unresponsive_engines":[]}""") })
+		try {
+			val result = JsonParser.parseString(SearXNGWebSearchTool.search(client, "http://localhost:8080/search", "no matches")).asJsonObject
+			assertEquals(false, result.has("error"))
+			assertEquals(0, result.getAsJsonArray("results").size())
+		} finally {
+			client.close()
+		}
+	}
+
 }

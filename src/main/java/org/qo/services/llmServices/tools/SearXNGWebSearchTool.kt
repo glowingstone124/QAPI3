@@ -125,6 +125,17 @@ class SearXNGWebSearchTool : Tools {
 					result.get("publishedDate")?.takeIf { it.isJsonPrimitive }?.asString?.take(80)?.let { addProperty("published_date", it) }
 				})
 			}
+			val engineFailures = root.get("unresponsive_engines")?.takeIf { it.isJsonArray }?.asJsonArray
+			if (engineFailures != null && engineFailures.size() > 0) {
+				// Keep provider diagnostics in server logs; they may contain URLs.
+				println("[LLMTool] web_search degraded results=${results.size()} unresponsive_engines=${engineFailures.toString().take(2000)}")
+				if (results.size() == 0) {
+					return ToolSupport.errorResult(
+						"search_unavailable",
+						"搜索未返回结果，且搜索引擎报告故障；请稍后重试，不能据此判断网上没有相关信息。",
+					)
+				}
+			}
 			return ToolSupport.gson.toJson(JsonObject().apply {
 				addProperty("tool", "web_search")
 				addProperty("query", query)
