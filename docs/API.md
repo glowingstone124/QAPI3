@@ -66,6 +66,52 @@
 {"result":true,"token":"<login-token>"}
 ```
 
+### SSO 单点登录 (Auth Central / CAS)
+
+QAPI3 提供基于 CAS 标准的单点登录服务，与部署在 QHub 的中央登录页（`https://app.qoriginal.vip/login`）协同工作。Minecraft 插件端继续沿用传统的 `/qo/game/login` 账号密码体系。
+
+| 方法 | 路径 | 认证 | 说明 |
+|---|---|---|---|
+| `POST` | `/qo/auth/ticket/grant` | 用户令牌 | 传入目标服务地址 `service`，签发一次性 Service Ticket（`ST-xxx`，有效期 3 分钟）。 |
+| `POST` | `/qo/auth/serviceValidate` | 公开 | 客户端携带 `ticket` 与 `service` 换取专用的 QAPI 用户令牌与用户画像。 |
+| `GET` | `/qo/auth/serviceValidate?ticket=<st>&service=<url>` | 公开 | GET 风格的 CAS 票据验证接口。 |
+
+#### 1. 申请票据 (`POST /qo/auth/ticket/grant`)
+- Header: `Authorization: Bearer <user-token>`
+- Body:
+```json
+{"service": "https://ai.qoriginal.vip/callback"}
+```
+- 响应成功 (200 OK):
+```json
+{
+  "result": true,
+  "ticket": "ST-xxxx",
+  "redirectUrl": "https://ai.qoriginal.vip/callback?ticket=ST-xxxx",
+  "expiresIn": 180
+}
+```
+
+#### 2. 校验票据 (`POST /qo/auth/serviceValidate`)
+- Body:
+```json
+{"ticket": "ST-xxxx", "service": "https://ai.qoriginal.vip/callback"}
+```
+- 响应成功 (200 OK):
+```json
+{
+  "success": true,
+  "user": "Glowingstone",
+  "uid": 1294915648,
+  "token": "...",
+  "accountType": "qo",
+  "attributes": {
+    "score": 10,
+    "frozen": false
+  }
+}
+```
+
 ### 账户和卡片
 
 | 方法 | 路径 | 认证 | 参数/请求体 |
