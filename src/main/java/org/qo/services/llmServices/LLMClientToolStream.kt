@@ -107,6 +107,7 @@ internal fun LLMServices.streamClientTools(
 		}
 	} catch (error: Exception) {
 		if (error is CancellationException) throw error
+		LLMErrorLog.record("client-tools/stream", error, provider.name, requester, requestId)
 		if (error !is QuotaSettlementException) refundUsage(
 			reservation,
 			usage,

@@ -51,6 +51,7 @@ internal suspend fun LLMServices.dispatchCompleteChat(
 		}
 		LLMNonStreamResult(statusCode, text, settled ?: quota.view)
 	} catch (e: Exception) {
+		LLMErrorLog.record("chat/complete", e, provider.name, requester, requestId)
 		if (!modelSucceeded) kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) { dailyQuotaService.refund(reservation) }
 		updateAccessRecord(
 			requestId,
@@ -157,6 +158,7 @@ internal suspend fun LLMServices.dispatchCompleteBotChat(
 		}
 		LLMNonStreamResult(statusCode, text, settled ?: quota.view)
 	} catch (e: Exception) {
+		LLMErrorLog.record("bot/complete", e, provider.name, requester, requestId)
 		if (!modelSucceeded) kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) { dailyQuotaService.refund(reservation) }
 		updateAccessRecord(
 			requestId,
@@ -243,6 +245,7 @@ internal suspend fun LLMServices.dispatchCompleteMinecraftChat(
 		}
 		LLMNonStreamResult(statusCode, text, settled ?: quota.view)
 	} catch (e: Exception) {
+		LLMErrorLog.record("minecraft/complete", e, provider.name, requester, requestId)
 		if (!modelSucceeded) kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) { dailyQuotaService.refund(reservation) }
 		updateAccessRecord(
 			requestId,

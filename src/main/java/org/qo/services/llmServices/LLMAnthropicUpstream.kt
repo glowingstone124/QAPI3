@@ -273,6 +273,7 @@ internal fun LLMServices.streamFromAnthropic(
 	} catch (e: kotlinx.coroutines.CancellationException) {
 		throw e
 	} catch (e: Exception) {
+		LLMErrorLog.record("$source/anthropic-stream", e, provider.name, requester, requestId)
 		if (e !is QuotaSettlementException) dailyQuotaService.refund(quotaReservation)
 		updateAccessRecord(
 			requestId,

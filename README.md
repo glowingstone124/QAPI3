@@ -211,6 +211,8 @@ Completed AI turns from Web, QQ, and Minecraft are written to `llm_conversation_
 - `LLM_TOOL_MAX_ROUNDS`: maximum tool-call loops per request, default `3`.
 - `LLM_TOOL_METRO_MAX_RESULTS`: maximum metro search results returned to the model, default `12`.
 
+LLM request exceptions are written to `data/llm/llm-error.log` relative to the QAPI3 working directory. Entries include the request stage, provider, requester ID, access-record ID when available, and exception stack traces. Request and response bodies and API tokens are excluded.
+
 Set `enableCommandCode: true` to try the endpoint-free `providers.commandcode` block before `defaultProvider`, with a fallback when the Command Code connection fails. See [Command Code provider setup](docs/LLM_COMMANDCODE.md), including pricing, image input, and fallback behavior.
 
 Ordinary chat requests apply the mode/source reasoning-effort policy without forcing a Fast/Thinking output-token cap. Explicit caller token limits are preserved. Chat Completions and Responses requests omit the output limit when none is supplied; Anthropic and Command Code retain their protocol adapter defaults. Builder client-tool steps and internal summaries use separate output budgets.

@@ -218,6 +218,7 @@ internal suspend fun LLMServices.completeWithFallback(
 	val primary = try {
 		completeWithCommandCodeApi(request, requester, source, provider)
 	} catch (error: CommandCodeConnectionFailure) {
+		LLMErrorLog.record("$source/commandcode-primary", error, provider.name, requester)
 		println("[LLM] Command Code connection failed; trying ${fallback.name}: ${error.message}")
 		null
 	}
@@ -226,7 +227,13 @@ internal suspend fun LLMServices.completeWithFallback(
 	}
 	val fallbackProvider = fallback.forMode(request.preset)
 	val fallbackRequest = commandCodeFallbackRequest(request, fallback)
-	val (status, body) = completeWithOptionalTools(fallbackRequest, requester, "$source/fallback", fallbackProvider)
+	val (status, body) = try {
+		completeWithOptionalTools(fallbackRequest, requester, "$source/fallback", fallbackProvider)
+	} catch (error: Exception) {
+		if (error is kotlinx.coroutines.CancellationException) throw error
+		LLMErrorLog.record("$source/fallback", error, fallbackProvider.name, requester)
+		throw error
+	}
 	return LLMCompletionOutcome(status, body, fallbackRequest, fallbackProvider)
 }
 
@@ -336,6 +343,7 @@ internal fun LLMServices.streamFromCommandCode(
 					})
 			} catch (error: Exception) {
 				if (error is kotlinx.coroutines.CancellationException) throw error
+				LLMErrorLog.record("$source/commandcode-round-${round + 1}", error, provider.name, requester, requestId)
 				if (round == 0 && assistantText.isEmpty() && provider.fallback != null) {
 					val fallback = provider.fallback.forMode(request.preset)
 					val fallbackRequest = commandCodeFallbackRequest(request, provider.fallback)
@@ -441,6 +449,7 @@ internal fun LLMServices.streamFromCommandCode(
 	} catch (error: kotlinx.coroutines.CancellationException) {
 		throw error
 	} catch (error: Exception) {
+		LLMErrorLog.record("$source/commandcode-stream", error, provider.name, requester, requestId)
 		if (error !is QuotaSettlementException) refundUsage(
 			quotaReservation,
 			usage,

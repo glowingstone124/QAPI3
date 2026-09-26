@@ -74,6 +74,7 @@ internal fun LLMServices.streamFromUpstream(
 			if (converted.second.isNotBlank()) recordConversationAnswer(requester, request.userContent, converted.second, provider)
 		} catch (error: Exception) {
 			if (error is kotlinx.coroutines.CancellationException) throw error
+			LLMErrorLog.record("$source/chat-stream-completion", error, provider.name, requester, requestId)
 			if (error !is QuotaSettlementException) refundUsage(quotaReservation, latestUsage, request, provider, requester.conversationId)
 			updateAccessRecord(requestId, "failed", errorMessage = error.message, groupName = requester.groupName ?: requester.groupId?.let { "group:$it" }, qqUid = requester.uid)
 			emit(errorJson("upstream_error", error.message ?: "LLM 上游请求失败"))
@@ -154,6 +155,7 @@ internal fun LLMServices.streamFromUpstream(
 		}
 	} catch (e: Exception) {
 		if (e is kotlinx.coroutines.CancellationException) throw e
+		LLMErrorLog.record("$source/chat-stream", e, provider.name, requester, requestId)
 		if (e !is QuotaSettlementException) refundUsage(quotaReservation, latestUsage, request, provider, requester.conversationId)
 		updateAccessRecord(requestId, "failed", errorMessage = e.message, groupName = requester.groupName ?: requester.groupId?.let { "group:$it" }, qqUid = requester.uid)
 		emit(errorJson("upstream_error", e.message ?: "LLM 上游请求失败"))
@@ -314,6 +316,7 @@ internal fun LLMServices.streamFromResponses(
 		emit(errorJson("tool_round_limit", "工具调用轮数超过限制，请调高 LLM_TOOL_MAX_ROUNDS"))
 	} catch (e: Exception) {
 		if (e is kotlinx.coroutines.CancellationException) throw e
+		LLMErrorLog.record("$source/responses-stream", e, provider.name, requester, requestId)
 		if (e !is QuotaSettlementException) refundUsage(quotaReservation, totalUsage, request, provider, requester.conversationId)
 		updateAccessRecord(requestId, "failed", errorMessage = e.message, groupName = requester.groupName ?: requester.groupId?.let { "group:$it" }, qqUid = requester.uid)
 		emit(errorJson("upstream_error", e.message ?: "LLM 上游请求失败"))

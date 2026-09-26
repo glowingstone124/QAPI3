@@ -56,6 +56,7 @@ data/redis/config.json
 data/afdian.json
 data/llm/providers.json
 data/llm/*.token
+data/llm/llm-error.log
 data/llm/images/
 
 nodes.json
