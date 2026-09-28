@@ -328,6 +328,7 @@ IP 添加/删除常见返回码：`0` 成功，`1` 令牌无效，`2` 超出数�
 Web、QQ Bot 和 Minecraft 在认证后归一到同一个 QQ UID，共享 Weekly Units 与永久 Paid Credits。QQ 身份默认每周 80 Units、最多 5 个并发请求；QO 账户每周 120 Units、最多 10 个并发请求。注册提升同一身份的上限，保留本周已用额度。每周一北京时间 00:00 切换周账本，无定时扫描、不累积。
 
 - 前端只选择 `fast / thinking`。请求 body 的 `model` 字段生效；兼容 query 参数。具体 provider、model 和计价由服务端配置。
+- 推理强度仅由网页入口调整。网页 Thinking 档可请求 low、medium 或 high（max 封顶为 high）；Fast、QQ/qbot、Minecraft 及没有可信网页身份的请求都由服务端强制设为 non-thinking。
 - `GET /qo/asking/v1/quota` 返回 `limit`、`used`、`remaining`、Unix 秒 `reset_at`、`paid_credits`、`period: weekly`。
 - `X-Request-ID` 在同一 QQ 身份的所有入口之间防重复，即使跨周也不能重用。
 - 请求按照配置的人民币计价预留；获得所有工具轮次的真实 Usage 后，按 `max(1, ceil(actualCostCny / 0.005))` 结算。优先 Weekly，不足部分使用 Paid Credits，同一请求可跨池扣费。

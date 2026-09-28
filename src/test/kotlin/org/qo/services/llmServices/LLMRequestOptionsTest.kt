@@ -8,15 +8,18 @@ import kotlin.test.assertFalse
 
 class LLMRequestOptionsTest {
     @Test
-    fun `QQ always disables reasoning while thinking elsewhere follows backend policy`() {
-        for (mode in listOf("fast", "thinking")) {
-            for (requested in LLMReasoningEffort.entries) {
-                assertEquals(LLMReasoningEffort.NONE, reasoningEffortForMode(LLMSource.QQ, mode, requested))
+    fun `only web can choose thinking strength while other sources stay non thinking`() {
+        for (source in listOf(LLMSource.QQ, LLMSource.MINECRAFT, null)) {
+            for (mode in listOf("fast", "thinking")) {
+                for (requested in LLMReasoningEffort.entries) {
+                    assertEquals(LLMReasoningEffort.NONE, reasoningEffortForMode(source, mode, requested))
+                }
             }
         }
         assertEquals(LLMReasoningEffort.NONE, reasoningEffortForMode(LLMSource.WEB, "fast", LLMReasoningEffort.MAX))
         assertEquals(LLMReasoningEffort.MEDIUM, reasoningEffortForMode(LLMSource.WEB, "thinking", LLMReasoningEffort.NONE))
-        assertEquals(LLMReasoningEffort.HIGH, reasoningEffortForMode(LLMSource.MINECRAFT, "thinking", LLMReasoningEffort.HIGH))
+        assertEquals(LLMReasoningEffort.LOW, reasoningEffortForMode(LLMSource.WEB, "thinking", LLMReasoningEffort.LOW))
+        assertEquals(LLMReasoningEffort.HIGH, reasoningEffortForMode(LLMSource.WEB, "thinking", LLMReasoningEffort.HIGH))
     }
 
     @Test

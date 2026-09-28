@@ -16,9 +16,10 @@ internal fun defaultReasoningEffort(source: LLMSource?): LLMReasoningEffort = wh
 }
 
 internal fun reasoningEffortForMode(source: LLMSource?, mode: String, requested: LLMReasoningEffort): LLMReasoningEffort = when {
-    source == LLMSource.QQ || mode == "fast" -> LLMReasoningEffort.NONE
-    requested in setOf(LLMReasoningEffort.HIGH, LLMReasoningEffort.MAX) -> LLMReasoningEffort.HIGH
-    else -> LLMReasoningEffort.MEDIUM
+	source != LLMSource.WEB || mode == "fast" -> LLMReasoningEffort.NONE
+	requested in setOf(LLMReasoningEffort.HIGH, LLMReasoningEffort.MAX) -> LLMReasoningEffort.HIGH
+	requested == LLMReasoningEffort.LOW -> LLMReasoningEffort.LOW
+	else -> LLMReasoningEffort.MEDIUM
 }
 
 internal fun extractEnableMarkdownFlag(request: JsonObject): Boolean {
