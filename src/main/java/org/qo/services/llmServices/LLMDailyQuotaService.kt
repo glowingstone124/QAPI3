@@ -7,6 +7,7 @@ import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import java.time.Instant
 import java.time.LocalDate
+import java.time.OffsetDateTime
 import java.time.ZoneId
 import java.util.UUID
 
@@ -96,15 +97,26 @@ class LLMDailyQuotaService @Autowired constructor(
 	@Value("\${qapi.llm.weekly-limit:120}") configuredDailyLimit: Int,
 	@Value("\${qapi.llm.guest-weekly-limit:80}") configuredGuestDailyLimit: Int = 80,
 	@Value("\${qapi.llm.quota-zone:Asia/Shanghai}") quotaZoneName: String = "Asia/Shanghai",
+	@Value("\${qapi.llm.promotion.multiplier:4}") configuredPromotionMultiplier: Int = 4,
+	@Value("\${qapi.llm.promotion.ends-at:2026-11-01T23:59:59+08:00}") configuredPromotionEndsAt: String = "2026-11-01T23:59:59+08:00",
 ) {
 	val weeklyLimit = configuredDailyLimit.coerceAtLeast(1)
 	val guestWeeklyLimit = configuredGuestDailyLimit.coerceAtLeast(1)
 	private val quotaZone = ZoneId.of(quotaZoneName)
+	private val promotionMultiplier = configuredPromotionMultiplier.coerceAtLeast(1)
+	private val promotionEndsAtExclusive = OffsetDateTime.parse(configuredPromotionEndsAt).toInstant().plusSeconds(1)
 
 	constructor(store: LLMQuotaStore, configuredDailyLimit: Int, quotaZoneName: String) :
 			this(store, configuredDailyLimit, 80, quotaZoneName)
 
-	fun effectiveLimit(hasAccount: Boolean): Int = if (hasAccount) weeklyLimit else guestWeeklyLimit
+	fun effectiveLimit(hasAccount: Boolean, now: Instant = Instant.now()): Int {
+		val baseLimit = if (hasAccount) weeklyLimit else guestWeeklyLimit
+		val multiplier = if (promotionMultiplier > 1 && now.isBefore(promotionEndsAtExclusive)) promotionMultiplier else 1
+		return (baseLimit.toLong() * multiplier).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+	}
+
+	fun weeklyLimits(now: Instant = Instant.now()): Pair<Int, Int> =
+		effectiveLimit(false, now) to effectiveLimit(true, now)
 
 	suspend fun reserve(
 		principal: LLMPrincipal, requestId: String = UUID.randomUUID().toString(),
@@ -112,7 +124,7 @@ class LLMDailyQuotaService @Autowired constructor(
 		provider: String = "", model: String = "", estimatedCost: java.math.BigDecimal = COST_PER_UNIT
 	): LLMQuotaDecision {
 		require(principal.qqUid > 0 && estimatedUnits > 0)
-		val limit = effectiveLimit(principal.hasAccount)
+		val limit = effectiveLimit(principal.hasAccount, now)
 		val period = period(now)
 		val reset = period.plusWeeks(1).atStartOfDay(quotaZone).toEpochSecond()
 		val key = quotaKey(principal.qqUid, period)
@@ -143,7 +155,7 @@ class LLMDailyQuotaService @Autowired constructor(
 	suspend fun snapshot(qqUid: Long, now: Instant = Instant.now()): LLMQuotaDecision = snapshot(qqUid, true, now)
 	suspend fun snapshot(qqUid: Long, hasAccount: Boolean, now: Instant = Instant.now()): LLMQuotaDecision {
 		require(qqUid > 0)
-		val limit = effectiveLimit(hasAccount)
+		val limit = effectiveLimit(hasAccount, now)
 		val period = period(now)
 		val reset = period.plusWeeks(1).atStartOfDay(quotaZone).toEpochSecond()
 		return try {

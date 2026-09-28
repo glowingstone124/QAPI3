@@ -57,7 +57,8 @@ class GetUserQuotaTool @Autowired constructor(
 			addProperty("paid_credits", view.paidCredits)
 			addProperty("period", "weekly")
 			if (!hasAccount) {
-				addProperty("tip", "QQ 身份每周 ${dailyQuotaService.guestWeeklyLimit} Units。注册 QO 账户后同一身份提升至每周 ${dailyQuotaService.weeklyLimit} Units，已用额度保留。")
+				val (guestLimit, accountLimit) = dailyQuotaService.weeklyLimits()
+				addProperty("tip", "QQ 身份每周 $guestLimit Units。注册 QO 账户后同一身份提升至每周 $accountLimit Units，已用额度保留。")
 			}
 		})
 	}

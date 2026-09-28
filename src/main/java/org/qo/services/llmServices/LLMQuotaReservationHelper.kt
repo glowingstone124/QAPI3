@@ -67,7 +67,8 @@ internal fun LLMServices.quotaErrorMessage(status: LLMQuotaStatus, principal: LL
 	LLMQuotaStatus.EXCEEDED -> if (principal.hasAccount) {
 		"本周额度和 Paid Credits 不足，可购买 Credits 继续使用"
 	} else {
-		"本周 QQ 额度为 ${dailyQuotaService.guestWeeklyLimit} Units，注册后同一身份提升至 ${dailyQuotaService.weeklyLimit} Units；可购买 Credits 继续使用"
+		val (guestLimit, accountLimit) = dailyQuotaService.weeklyLimits()
+		"本周 QQ 额度为 $guestLimit Units，注册后同一身份提升至 $accountLimit Units；可购买 Credits 继续使用"
 	}
 	LLMQuotaStatus.RATE_LIMITED -> "已达到并发限制，请稍后重试"
 	LLMQuotaStatus.DUPLICATE -> "该请求已经提交，请勿重复发送"

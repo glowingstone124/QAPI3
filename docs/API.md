@@ -336,7 +336,7 @@ Web、QQ Bot 和 Minecraft 在认证后归一到同一个 QQ UID，共享 Weekly
 - 请求失败、流提前结束、客户端取消会退款。成功后缺失真实 Usage 或结算失败，预留转为 `pending`，保留余额并等待对账。
 - `GET /qo/authorization/account/kotshi` 提供账户额度（每周免费余额与独立 `paid_credits`）、所有渠道的今日汇总和最近 20 条调用记录（不限今日）。记录返回 `source`、状态、token 用量和时间，不返回具体 `model` 或 `mode`；查询仅限当前登录用户。玩家资料的隐私开关与原接口保持兼容。
 
-配置项为 `qapi.llm.weekly-limit`（120）、`qapi.llm.guest-weekly-limit`（80），周界限使用北京时间。数据库表自动按需创建，旧 Redis 每日计数不迁移为 Paid Credits。模型缺失计价返回 503 `pricing_unavailable`，数据库扣额失败返回 503 `quota_unavailable`。
+配置项为 `qapi.llm.weekly-limit`（120）、`qapi.llm.guest-weekly-limit`（80），周界限使用北京时间。临时活动由 `qapi.llm.promotion.multiplier` 和带偏移的 `qapi.llm.promotion.ends-at` 控制；当前默认至 2026-11-01 23:59:59 UTC+8，注册用户每周 480 Units、访客每周 320 Units，截止后自动恢复基础额度。活动只提高免费周额度，不改变 Paid Credits 或实际用量扣费。数据库表自动按需创建，旧 Redis 每日计数不迁移为 Paid Credits。模型缺失计价返回 503 `pricing_unavailable`，数据库扣额失败返回 503 `quota_unavailable`。
 
 爱发电：
 
