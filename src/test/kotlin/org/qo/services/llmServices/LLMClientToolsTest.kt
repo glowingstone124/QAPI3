@@ -43,7 +43,7 @@ class LLMClientToolsTest {
     private val nativeCall = """{"id":"call_1","type":"function","function":{"name":"fill","arguments":"{\"revision\":0}"}}"""
 
     @Test fun `builder reserves enough output space for complete native tool calls`() {
-        assertEquals(4096, clientToolOutputTokens(12000, 65536))
+        assertEquals(16384, clientToolOutputTokens(12000, 65536))
         assertEquals(4096, clientToolOutputTokens(28672, 32768))
         assertFailsWith<IllegalArgumentException> { clientToolOutputTokens(31000, 32768) }
         assertTrue(clientToolFinishError("length").contains("长度上限"))
@@ -60,21 +60,30 @@ class LLMClientToolsTest {
         assertEquals(200, limited.getAsJsonObject("usage").get("completion_tokens").asInt)
     }
 
-    @Test fun `commandcode builder steps have a small budget and explicit low reasoning`() {
+    @Test fun `builder steps reason within a bounded budget and fast stays unreasoned`() {
         val step = chat().apply {
             addProperty("max_tokens", 32768)
             addProperty("max_completion_tokens", 131072)
             addProperty("max_output_tokens", 131072)
         }
-        assertEquals(LLMReasoningEffort.LOW,
+        assertEquals(LLMReasoningEffort.MEDIUM,
             configureClientToolStep(step, LLMProtocol.COMMANDCODE, LLMReasoningEffort.HIGH))
-        assertEquals(4096, step.get("max_tokens").asInt)
-        assertEquals(4096, LLMCommandCodeAdapter.fromChatRequest(step, tools, LLMReasoningEffort.LOW)
+        assertEquals(16384, step.get("max_tokens").asInt)
+        assertEquals(16384, LLMCommandCodeAdapter.fromChatRequest(step, tools, LLMReasoningEffort.MEDIUM)
             .getAsJsonObject("params").get("max_tokens").asInt)
+        assertEquals(LLMReasoningEffort.LOW, configureClientToolStep(chat(), LLMProtocol.COMMANDCODE, LLMReasoningEffort.NONE))
+        assertEquals(LLMReasoningEffort.NONE, configureClientToolStep(chat(), LLMProtocol.RESPONSES, LLMReasoningEffort.NONE))
+        assertEquals(LLMReasoningEffort.LOW, configureClientToolStep(chat(), LLMProtocol.RESPONSES, LLMReasoningEffort.LOW))
+        val completions = chat().apply { addProperty("reasoning_effort", "max") }
+        assertEquals(LLMReasoningEffort.MEDIUM, configureClientToolStep(completions, LLMProtocol.CHAT_COMPLETIONS, LLMReasoningEffort.MAX))
+        assertEquals("medium", completions.get("reasoning_effort").asString)
+        val thinkingDisabled = chat().apply { addProperty("reasoning_effort", "none") }
+        configureClientToolStep(thinkingDisabled, LLMProtocol.CHAT_COMPLETIONS, LLMReasoningEffort.HIGH)
+        assertEquals("none", thinkingDisabled.get("reasoning_effort").asString)
         val final = chat().apply { addProperty("tool_choice", "none"); addProperty("max_tokens", 32768) }
         assertEquals(LLMReasoningEffort.HIGH,
             configureClientToolStep(final, LLMProtocol.COMMANDCODE, LLMReasoningEffort.HIGH))
-        assertEquals(4096, final.get("max_tokens").asInt)
+        assertEquals(16384, final.get("max_tokens").asInt)
     }
 
     @Test fun `commandcode builder request overrides the shared 120 second timeout`() = runBlocking {
@@ -113,14 +122,62 @@ class LLMClientToolsTest {
             val (status, body) = services.runClientToolAgentTurn(client, "https://model.example/api", "token",
                 LLMProtocol.COMMANDCODE, step, tools, effort, 524288)
             assertEquals(200, status)
-            assertEquals(listOf(4096, 4096), outgoing.map { it.getAsJsonObject("params").get("max_tokens").asInt })
-            assertTrue(outgoing.all { it.getAsJsonObject("params").get("reasoning_effort").asString == "low" })
+            assertEquals(listOf(16384, 16384), outgoing.map { it.getAsJsonObject("params").get("max_tokens").asInt })
+            assertEquals(listOf("medium", "low"), outgoing.map { it.getAsJsonObject("params").get("reasoning_effort").asString })
             val recovery = outgoing[1].getAsJsonObject("params").getAsJsonArray("messages").toString()
             assertTrue(recovery.contains("Need to fill the next wall region"))
             assertFalse(recovery.contains("discard_this_partial"))
             assertFalse(body.contains("Need to fill the next wall region"))
             assertEquals("tool_calls", obj(body).getAsJsonArray("choices")[0].asJsonObject.get("finish_reason").asString)
             assertEquals(2, obj(body).getAsJsonObject("usage").get("qapi_api_calls").asInt)
+        }
+    }
+
+    @Test fun `chat completions truncation lowers wire reasoning while preserving disabled thinking`() = runBlocking {
+        for (initial in listOf("high", "none")) for (choice in listOf("auto", "none")) {
+            val outgoing = mutableListOf<JsonObject>()
+            val engine = MockEngine { request ->
+                outgoing += obj((request.body as TextContent).text)
+                val response = if (outgoing.size == 1)
+                    """{"choices":[{"message":{"role":"assistant","content":"","tool_calls":[$nativeCall]},"finish_reason":"length"}],"usage":{"prompt_tokens":30,"completion_tokens":2048}}"""
+                else """{"choices":[{"message":{"role":"assistant","content":"done"},"finish_reason":"stop"}],"usage":{"prompt_tokens":35,"completion_tokens":20}}"""
+                respond(response, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
+            }
+            val services = org.mockito.Mockito.mock(LLMServices::class.java)
+            HttpClient(engine).use { client ->
+                val (status, body) = services.runClientToolAgentTurn(client, "https://model.example/api", "token",
+                    LLMProtocol.CHAT_COMPLETIONS, chat().apply {
+                        addProperty("reasoning_effort", initial)
+                        addProperty("tool_choice", choice)
+                    }, tools, LLMReasoningEffort.HIGH, 65536)
+                assertEquals(200, status)
+                val expected = if (initial == "none") listOf("none", "none")
+                    else listOf(if (choice == "auto") "medium" else "high", "low")
+                assertEquals(expected, outgoing.map { it.get("reasoning_effort").asString })
+                assertEquals(listOf(2048,2048), outgoing.map { it.get("max_tokens").asInt })
+                assertFalse(body.contains("call_1"))
+                assertFalse(outgoing[1].getAsJsonArray("messages").toString().contains("call_1"))
+                assertEquals(2, obj(body).getAsJsonObject("usage").get("qapi_api_calls").asInt)
+            }
+        }
+    }
+
+    @Test fun `non commandcode builder requests override the shared short timeout`() = runBlocking {
+        for (protocol in listOf(LLMProtocol.CHAT_COMPLETIONS, LLMProtocol.RESPONSES, LLMProtocol.ANTHROPIC)) {
+            val engine = MockEngine {
+                delay(100)
+                val response = when (protocol) {
+                    LLMProtocol.RESPONSES -> """{"id":"resp_1","status":"completed","output":[],"usage":{"input_tokens":1,"output_tokens":1}}"""
+                    LLMProtocol.ANTHROPIC -> """{"type":"message","role":"assistant","content":[{"type":"text","text":"done"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}"""
+                    else -> """{"choices":[{"message":{"role":"assistant","content":"done"},"finish_reason":"stop"}]}"""
+                }
+                respond(response, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
+            }
+            HttpClient(engine) { install(HttpTimeout) { requestTimeoutMillis = 20; socketTimeoutMillis = 20 } }.use { client ->
+                val (status, _) = runClientToolUpstream(client, "https://model.example/api", "token", protocol,
+                    chat(), tools, LLMReasoningEffort.NONE)
+                assertEquals(200, status, protocol.wireValue)
+            }
         }
     }
 
@@ -138,7 +195,7 @@ class LLMClientToolsTest {
                 LLMProtocol.COMMANDCODE, chat().apply { addProperty("max_tokens", 131072) },
                 tools, LLMReasoningEffort.HIGH, 1048576)
             assertEquals(422, status)
-            assertEquals(listOf(4096, 4096), budgets)
+            assertEquals(listOf(16384, 16384), budgets)
             assertFalse(body.contains("partial"))
             assertFalse(obj(body).has("choices"))
             assertEquals(8192, obj(body).getAsJsonObject("usage").get("completion_tokens").asInt)
@@ -250,7 +307,7 @@ class LLMClientToolsTest {
                 LLMProtocol.CHAT_COMPLETIONS,chat,tools,LLMReasoningEffort.NONE,524288)
             assertEquals(200,status)
             assertEquals(2,outgoing.size)
-            assertEquals(listOf(4096, 4096),outgoing.map { it.get("max_tokens").asInt })
+            assertEquals(listOf(16384, 16384),outgoing.map { it.get("max_tokens").asInt })
             assertTrue(outgoing[1].toString().contains("上一尝试达到长度上限"))
             assertEquals("tool_calls",obj(body).getAsJsonArray("choices")[0].asJsonObject.get("finish_reason").asString)
             assertEquals(32788,obj(body).getAsJsonObject("usage").get("completion_tokens").asInt)

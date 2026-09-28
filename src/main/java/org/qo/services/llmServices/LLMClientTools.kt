@@ -6,6 +6,7 @@ import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import io.ktor.client.HttpClient
 import io.ktor.client.plugins.HttpRequestTimeoutException
+import io.ktor.client.plugins.timeout
 import io.ktor.client.request.header
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
@@ -16,9 +17,10 @@ import io.ktor.http.contentType
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.flow
 
-internal const val CLIENT_TOOL_OUTPUT_TOKENS = 4_096
+// Web Builder steps trade cost for design quality: room for reasoning plus a full native batch.
+internal const val CLIENT_TOOL_OUTPUT_TOKENS = 16_384
 private const val CLIENT_TOOL_DEFINITION_MAX_COUNT = 64
-private const val COMMANDCODE_CLIENT_TOOL_TIMEOUT_MILLIS = 300_000L
+private const val CLIENT_TOOL_TIMEOUT_MILLIS = 300_000L
 
 private fun prependClientInstruction(chat: JsonObject, instruction: String) {
 	val previous = chat.getAsJsonArray("messages")
@@ -38,8 +40,9 @@ internal fun clientToolStepChat(chat: JsonObject): JsonObject = chat.deepCopy().
         """
         Kotshi Builder 会自动续接工具结果。同一阶段中彼此独立的编辑和预览可合并成批；有依赖、需要最新 revision 或结果时再分批。优先区域和构件工具，不展开逐格坐标或重述完整几何。
         遵守当前 planMode：fast 直接施工，不要求创建或确认 Plan；plan 保存具体设计及阶段并等待用户界面确认，不能自行授权；build 按已确认的设计推进，设计变更需重新确认。
-        先区分新建、局部修改、续建或讨论。模糊需求应说明少量合理假设并推进；用途不明或可能破坏现有结构时问关键问题。设计应覆盖占地、高度、朝向、布局、材料和验收条件；保留用户指定的风格和未要求修改的区域。平顶、单材质、实心或悬浮结构是否合适取决于用途，不强制套用小屋、坡顶、石基座或装饰模板。
-        首批形成可辨认的主体，再分阶段完善。依据当前几何、区域查询和真实预览修正问题；启发式 quality 提示不是审美评分或完工认证。预留最终预览预算；收到客户端最终复核图片后，检查最后修改是否满足需求，需要修复则继续工具。
+        先区分新建、局部修改、续建或讨论。模糊需求应说明少量合理假设并推进；用途不明或可能破坏现有结构时问关键问题。设计应覆盖占地、高度、朝向、主次体量、材料和验收条件；保留用户指定的风格和未要求修改的区域。平顶、单材质、实心或悬浮结构是否合适取决于用途，不强制套用小屋、坡顶、石基座或装饰模板。
+        未指定规模时按用途取偏大的尺度，不做只有方盒的迷你模型；选区放不下设计、檐口和环境边距时，施工前单独 resize_bounds。观感来自轮廓的主次与高低、立面的柱梁外凸与墙窗内收、3–5 种角色明确且有明暗对比的材料、楼梯半砖栅栏等细节形状，以及入口强调和地面环境。
+        首批形成可辨认的主体，再按立面进深、屋顶、入口、细节与环境分阶段精修；批次和预览有余量时不要停在体量草稿。依据当前几何、区域查询和真实预览修正问题；启发式 quality 提示不是审美评分或完工认证。预留最终预览预算；收到客户端最终复核图片后，检查最后修改是否满足需求与观感，需要修复则继续工具。
         只报告已执行且有证据的结果，区分占用检查、图片检查和未验证部分。预算不足、截图失败或效果未满足要求时明确待办，不能把工具执行成功等同于设计完成。
         """.trimIndent()
 	)
@@ -234,6 +237,9 @@ internal suspend fun runClientToolUpstream(
 			}
 
 			LLMProtocol.CHAT_COMPLETIONS -> {
+				// This protocol carries effort in the body, including a reduced retry effort.
+				if (get("reasoning_effort")?.asString.let { it != null && it != "none" })
+					addProperty("reasoning_effort", effort.wireValue)
 				addProperty("stream", false)
 				remove("stream_options")
 				add("tools", tools)
@@ -250,10 +256,11 @@ internal suspend fun runClientToolUpstream(
 		outgoing,
 		onUpdate = onCommandCodeUpdate,
 		onRequest = onRequest,
-		requestTimeoutMillis = COMMANDCODE_CLIENT_TOOL_TIMEOUT_MILLIS
+		requestTimeoutMillis = CLIENT_TOOL_TIMEOUT_MILLIS
 	)
 	onRequest(outgoing.toString())
 	val response = client.post(url) {
+		timeout { requestTimeoutMillis = CLIENT_TOOL_TIMEOUT_MILLIS; socketTimeoutMillis = CLIENT_TOOL_TIMEOUT_MILLIS }
 		if (protocol == LLMProtocol.ANTHROPIC) {
 			header("x-api-key", token); header("anthropic-version", "2023-06-01")
 		} else header(HttpHeaders.Authorization, "Bearer $token")
@@ -357,6 +364,7 @@ internal suspend fun LLMServices.runClientToolAgentTurn(
 			}
 		}
 	}
+	val retryEffort = if (stepEffort == LLMReasoningEffort.NONE) stepEffort else LLMReasoningEffort.LOW
 	val second = runClientToolUpstream(
 		client,
 		url,
@@ -364,7 +372,7 @@ internal suspend fun LLMServices.runClientToolAgentTurn(
 		protocol,
 		retryChat,
 		tools,
-		if (stepEffort == LLMReasoningEffort.NONE) stepEffort else LLMReasoningEffort.LOW,
+		retryEffort,
 		onRequest,
 		onCommandCodeUpdate
 	)
@@ -400,6 +408,11 @@ internal fun configureClientToolStep(
 		minOf(chat.get("max_tokens")?.asInt ?: CLIENT_TOOL_OUTPUT_TOKENS, CLIENT_TOOL_OUTPUT_TOKENS)
 	)
 	if (chat.get("tool_choice")?.asString == "none") return requestedEffort
-	if (protocol == LLMProtocol.COMMANDCODE) return LLMReasoningEffort.LOW
-	return LLMReasoningEffort.NONE
+	// Fast keeps tool steps unreasoned; thinking plans geometry at up to MEDIUM so a step fits the output budget.
+	val effort = if (requestedEffort == LLMReasoningEffort.NONE && protocol != LLMProtocol.COMMANDCODE) requestedEffort
+	else requestedEffort.coerceIn(LLMReasoningEffort.LOW, LLMReasoningEffort.MEDIUM)
+	// Chat Completions carries effort in the body; providers that require thinking off keep "none".
+	if (protocol == LLMProtocol.CHAT_COMPLETIONS && chat.get("reasoning_effort")?.asString.let { it != null && it != "none" })
+		chat.addProperty("reasoning_effort", effort.wireValue)
+	return effort
 }
