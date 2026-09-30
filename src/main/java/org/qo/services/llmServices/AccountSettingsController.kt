@@ -72,6 +72,13 @@ class AccountSettingsController(private val llm: LLMServices, private val settin
                 boolean(obj,"all")))
         }
     }
+    @PostMapping("/usage/reset")
+    suspend fun resetUsage(@RequestHeader("Authorization",required=false) auth: String?, @RequestBody body: String): ResponseEntity<String> {
+        val token = AuthTokens.resolve(null,auth) ?: return response(401,mapOf("error" to mapOf("message" to "请先登录")))
+        val principal = llm.authenticateWeb(token) ?: return response(401,mapOf("error" to mapOf("message" to "登录状态已失效")))
+        if (!settings.canGrant(principal.qqUid)) return response(403,mapOf("error" to mapOf("message" to "没有重置用量权限")))
+        return authenticated(auth) { settings.resetAllUsage(it.qqUid,string(parse(body),"request_id")) }
+    }
     private fun string(obj: JsonObject, key: String): String {
         val value = obj.get(key)
         require(value != null && value.isJsonPrimitive && value.asJsonPrimitive.isString) { "$key 必须为字符串" }

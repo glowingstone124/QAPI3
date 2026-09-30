@@ -28,7 +28,7 @@ class AiBillingIntegrationTest {
     private val principal=LLMPrincipal(123456,"Tester",LLMSource.WEB,"test")
     private val now=Instant.now()
     @BeforeEach fun setup() = runBlocking {
-        store=SqlLLMQuotaStore(db); store.schema(); service=LLMDailyQuotaService(store,90,30,"Asia/Shanghai")
+        store=SqlLLMQuotaStore(db); store.schema(); service=LLMDailyQuotaService(store,90,30,"Asia/Shanghai",configuredPromotionMultiplier=1)
         for(table in listOf("ai_afdian_pending_order","ai_system_usage","ai_usage","ai_credit_ledger","ai_payment_order","ai_purchase_intent","ai_quota_reservation","ai_weekly_usage","ai_quota_account","ai_free_budget")) db.execute("DELETE FROM $table")
     }
     private fun usage(units: Int)=AiQuotaUsage(10,20,0,5,BigDecimal("0.005")*BigDecimal(units),units)

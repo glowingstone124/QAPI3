@@ -40,7 +40,7 @@ class LLMQuotaAdmissionTest {
             }
             override suspend fun refund(reservation: LLMQuotaReservation): Int = 0
             override suspend fun used(quotaKey: String): Int = 0
-        },120,80,"Asia/Shanghai")
+        },120,80,"Asia/Shanghai",configuredPromotionMultiplier=1)
         Mockito.`when`(services.dailyQuotaService).thenReturn(quota)
         return quota
     }

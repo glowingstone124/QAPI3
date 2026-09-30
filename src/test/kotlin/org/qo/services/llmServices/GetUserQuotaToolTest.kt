@@ -15,7 +15,7 @@ class GetUserQuotaToolTest {
 	@Test
 	fun `tool returns remaining quota and guest details when user is not registered`() = runBlocking {
 		val store = InMemoryQuotaStore()
-		val quotaService = LLMDailyQuotaService(store, 50, 20, "Asia/Shanghai")
+		val quotaService = LLMDailyQuotaService(store, 50, 20, "Asia/Shanghai", configuredPromotionMultiplier = 1)
 		val now = Instant.now()
 		val tool = GetUserQuotaTool(quotaService)
 
@@ -42,7 +42,7 @@ class GetUserQuotaToolTest {
 	@Test
 	fun `tool supports querying target_uid from args`() = runBlocking {
 		val store = InMemoryQuotaStore()
-		val quotaService = LLMDailyQuotaService(store, 50, 20, "Asia/Shanghai")
+		val quotaService = LLMDailyQuotaService(store, 50, 20, "Asia/Shanghai", configuredPromotionMultiplier = 1)
 		val now = Instant.now()
 		val tool = GetUserQuotaTool(quotaService)
 
@@ -59,7 +59,7 @@ class GetUserQuotaToolTest {
 
 	@Test
 	fun `tool returns missing_uid error when context has no uid and args is empty`() = runBlocking {
-		val quotaService = LLMDailyQuotaService(InMemoryQuotaStore(), 50, 20, "Asia/Shanghai")
+		val quotaService = LLMDailyQuotaService(InMemoryQuotaStore(), 50, 20, "Asia/Shanghai", configuredPromotionMultiplier = 1)
 		val tool = GetUserQuotaTool(quotaService)
 
 		val context = LLMToolContext(groupId = 100L, uid = null, name = "tester")

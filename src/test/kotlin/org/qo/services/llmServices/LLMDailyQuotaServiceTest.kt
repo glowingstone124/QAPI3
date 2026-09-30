@@ -12,7 +12,7 @@ import kotlin.test.assertTrue
 class LLMDailyQuotaServiceTest {
     @Test
     fun `QQ default is eighty units and QO upgrade retains usage within one hundred twenty units`(): Unit = runBlocking {
-        val service = LLMDailyQuotaService(InMemoryQuotaStore(),120,"Asia/Shanghai")
+        val service = LLMDailyQuotaService(InMemoryQuotaStore(),120,80,"Asia/Shanghai",configuredPromotionMultiplier=1)
         val now = Instant.parse("2026-09-13T04:00:00Z")
         val guest = principal(LLMSource.QQ).copy(hasAccount=false)
         repeat(40) { service.reserve(guest,"guest-$it",now) }
@@ -26,7 +26,7 @@ class LLMDailyQuotaServiceTest {
 
     @Test
     fun `web qq and minecraft share one qq uid quota`() = runBlocking {
-        val service = LLMDailyQuotaService(InMemoryQuotaStore(), 50, "Asia/Shanghai")
+        val service = LLMDailyQuotaService(InMemoryQuotaStore(), 50, 80, "Asia/Shanghai", configuredPromotionMultiplier = 1)
         val now = Instant.parse("2026-08-31T08:00:00Z")
 
         val decisions = listOf(
@@ -42,7 +42,7 @@ class LLMDailyQuotaServiceTest {
 
     @Test
     fun `the fifty first request is rejected atomically`() = runBlocking {
-        val service = LLMDailyQuotaService(InMemoryQuotaStore(), 50, "Asia/Shanghai")
+        val service = LLMDailyQuotaService(InMemoryQuotaStore(), 50, 80, "Asia/Shanghai", configuredPromotionMultiplier = 1)
         val now = Instant.parse("2026-08-31T08:00:00Z")
 
         val pool = Executors.newFixedThreadPool(12)
@@ -63,7 +63,7 @@ class LLMDailyQuotaServiceTest {
 
     @Test
     fun `same request id is idempotent within one source`() = runBlocking {
-        val service = LLMDailyQuotaService(InMemoryQuotaStore(), 50, "Asia/Shanghai")
+        val service = LLMDailyQuotaService(InMemoryQuotaStore(), 50, 80, "Asia/Shanghai", configuredPromotionMultiplier = 1)
         val now = Instant.parse("2026-08-31T08:00:00Z")
 
         val first = service.reserve(principal(LLMSource.QQ), "same-request", now)
@@ -76,7 +76,7 @@ class LLMDailyQuotaServiceTest {
 
     @Test
     fun `quota resets at Shanghai Monday midnight`() = runBlocking {
-        val service = LLMDailyQuotaService(InMemoryQuotaStore(), 50, "Asia/Shanghai")
+        val service = LLMDailyQuotaService(InMemoryQuotaStore(), 50, 80, "Asia/Shanghai", configuredPromotionMultiplier = 1)
         val beforeMidnight = Instant.parse("2026-09-06T15:59:59Z")
         val afterMidnight = Instant.parse("2026-09-06T16:00:00Z")
 
@@ -91,7 +91,7 @@ class LLMDailyQuotaServiceTest {
 
     @Test
     fun `failed upstream reservation can only be refunded once`() = runBlocking {
-        val service = LLMDailyQuotaService(InMemoryQuotaStore(), 50, "Asia/Shanghai")
+        val service = LLMDailyQuotaService(InMemoryQuotaStore(), 50, 80, "Asia/Shanghai", configuredPromotionMultiplier = 1)
         val now = Instant.parse("2026-08-31T08:00:00Z")
         val accepted = service.reserve(principal(LLMSource.MINECRAFT), "refund", now)
         val reservation = assertNotNull(accepted.reservation)
@@ -104,7 +104,7 @@ class LLMDailyQuotaServiceTest {
     @Test
     fun `quota fails closed when the store is unavailable`() = runBlocking {
         val store = InMemoryQuotaStore().apply { available = false }
-        val service = LLMDailyQuotaService(store, 50, "Asia/Shanghai")
+        val service = LLMDailyQuotaService(store, 50, 80, "Asia/Shanghai", configuredPromotionMultiplier = 1)
 
         val decision = service.reserve(
             principal(LLMSource.WEB),
@@ -117,7 +117,7 @@ class LLMDailyQuotaServiceTest {
 
     @Test
     fun `guest users have 20 rounds limit while registered users have 50 rounds limit`() = runBlocking {
-        val service = LLMDailyQuotaService(InMemoryQuotaStore(), 50, 20, "Asia/Shanghai")
+        val service = LLMDailyQuotaService(InMemoryQuotaStore(), 50, 20, "Asia/Shanghai", configuredPromotionMultiplier = 1)
         val now = Instant.parse("2026-08-31T08:00:00Z")
         val guestPrincipal = LLMPrincipal(999999L, "guest", LLMSource.QQ, "guest", hasAccount = false)
 
@@ -144,6 +144,27 @@ class LLMDailyQuotaServiceTest {
         assertEquals(LLMQuotaStatus.ACCEPTED, userSnapshot.status)
         assertEquals(50, userSnapshot.view.limit)
         assertEquals(30, userSnapshot.view.remaining)
+    }
+
+    @Test
+    fun `promotion expiry restores base limits without resetting existing usage`(): Unit = runBlocking {
+        val service = LLMDailyQuotaService(
+            InMemoryQuotaStore(), 120, 80, "Asia/Shanghai",
+            configuredPromotionMultiplier = 4,
+            configuredPromotionEndsAt = "2026-10-01T23:59:59+08:00",
+        )
+        val before = Instant.parse("2026-10-01T15:59:59Z")
+        val after = before.plusSeconds(1)
+        val guest = principal(LLMSource.QQ).copy(hasAccount = false)
+        assertEquals(480, service.effectiveLimit(true, before))
+        assertEquals(320, service.effectiveLimit(false, before))
+        repeat(81) { service.reserve(guest, "promotion-$it", before) }
+        val expired = service.snapshot(guest.qqUid, false, after)
+        assertEquals(LLMQuotaStatus.EXCEEDED, expired.status)
+        assertEquals(80, expired.view.limit)
+        assertEquals(81, expired.view.used)
+        assertEquals(-1, expired.view.remaining)
+        assertEquals(120, service.effectiveLimit(true, after))
     }
 
     private fun principal(source: LLMSource) = LLMPrincipal(

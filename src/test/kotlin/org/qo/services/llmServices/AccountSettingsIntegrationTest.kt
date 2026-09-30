@@ -29,7 +29,7 @@ class AccountSettingsIntegrationTest {
     @BeforeEach fun setup() { runBlocking {
         store=SqlLLMQuotaStore(db)
         repository=SqlAccountSettingsRepository(db)
-        quota=LLMDailyQuotaService(store,90,30,"Asia/Shanghai")
+        quota=LLMDailyQuotaService(store,90,30,"Asia/Shanghai",configuredPromotionMultiplier=1)
         val providersFile=tempDir.resolve("providers.json")
         Files.writeString(providersFile,"""
             {
@@ -47,7 +47,7 @@ class AccountSettingsIntegrationTest {
         settings=AccountSettingsService(repository,store,quota,ReloadableLLMProvider(providersFile))
         settings.schema()
         db.execute("CREATE TABLE IF NOT EXISTS users (uid BIGINT PRIMARY KEY)")
-        for (table in listOf("ai_reset_ledger","ai_reset_grant","ai_reset_balance","ai_usage","ai_quota_reservation","ai_weekly_usage","ai_quota_account","ai_free_budget","users")) db.execute("DELETE FROM $table")
+        for (table in listOf("ai_reset_ledger","ai_reset_card_batch","ai_reset_grant","ai_reset_balance","ai_usage_reset","ai_usage","ai_quota_reservation","ai_weekly_usage","ai_quota_account","ai_free_budget","users")) db.execute("DELETE FROM $table")
         db.execute("INSERT INTO users VALUES (?)",listOf(user.qqUid))
         db.execute("INSERT INTO ai_quota_account VALUES (?,800)",listOf(user.qqUid))
     } }
@@ -86,7 +86,11 @@ class AccountSettingsIntegrationTest {
         db.execute("INSERT INTO users VALUES (222)")
         db.execute("INSERT INTO ai_quota_account VALUES (333,0)")
         val request=ResetGrantRequest("grant-everyone",1,all=true)
-        assertEquals(3,settings.grant(999,request).recipients)
+        val grant = settings.grant(999,request)
+        assertEquals(3,grant.recipients)
+        assertEquals(listOf(grant.expiresAt), db.all("SELECT DISTINCT expires_at FROM ai_reset_card_batch WHERE grant_id=?", listOf(request.requestId)) {
+            (it.get("expires_at") as Number).toLong()
+        })
         db.execute("INSERT INTO users VALUES (444)")
         assertEquals(3,settings.grant(999,request).recipients)
         for (uid in listOf(user.qqUid,222L,333L)) assertEquals(1,settings.balance(uid))
@@ -96,10 +100,9 @@ class AccountSettingsIntegrationTest {
     @Test fun `account settings repository owns aggregate and reset transactions`() = runBlocking {
         assertTrue(repository.accountTargetExists(user.qqUid))
         assertFalse(repository.accountTargetExists(888L))
-        assertEquals(
-            ResetGrantResult("repository-grant", 1, 2),
-            repository.grant(999, ResetGrantRequest("repository-grant", 2, user.qqUid)),
-        )
+        val grant = repository.grant(999, ResetGrantRequest("repository-grant", 2, user.qqUid))
+        assertEquals(ResetGrantResult("repository-grant", 1, 2, grant.expiresAt), grant)
+        assertNotNull(grant.expiresAt)
         assertEquals(2, repository.balance(user.qqUid))
 
         spend("repository-call", 5)
@@ -161,5 +164,155 @@ class AccountSettingsIntegrationTest {
         assertFailsWith<SettingsConflict> { settings.use(user,"reset-again") }
         assertEquals(2,settings.balance(user.qqUid))
         assertTrue(settings.history(222,0).items.isEmpty())
+    }
+
+    @Test fun `new grants expire after exactly 30 days and retries retain the original expiry`(): Unit = runBlocking {
+        val request = ResetGrantRequest("grant-expiring", 2, user.qqUid)
+        val grant = settings.grant(999, request)
+        val createdAt = db.one("SELECT created_at FROM ai_reset_grant WHERE request_id=?", listOf(request.requestId)) {
+            (it.get("created_at") as Number).toLong()
+        }!!
+        assertEquals(createdAt + 30 * 24 * 60 * 60L, grant.expiresAt)
+        assertEquals(grant.expiresAt, settings.settings(user).resetHistory.single().expiresAt)
+        spend("expiry-call")
+        val historyBefore = settings.history(user.qqUid, 0)
+        val budgetBefore = budget()
+        db.execute("UPDATE ai_reset_card_batch SET expires_at=? WHERE grant_id=?", listOf(Instant.now().epochSecond, request.requestId))
+        assertEquals(0, settings.balance(user.qqUid))
+        assertEquals(0, settings.settings(user).resetCards)
+        assertFailsWith<SettingsConflict> { settings.use(user, "expired-redemption") }
+        assertEquals(20, quota.snapshot(user.qqUid).view.used)
+        assertEquals(800, store.balance(user.qqUid))
+        assertEquals(historyBefore, settings.history(user.qqUid, 0))
+        assertEquals(budgetBefore, budget())
+        assertEquals(grant, settings.grant(999, request))
+        assertEquals(0, settings.balance(user.qqUid))
+    }
+
+    @Test fun `redemption consumes the earliest valid batch before legacy cards`(): Unit = runBlocking {
+        db.execute("INSERT INTO ai_reset_balance VALUES (?,2)", listOf(user.qqUid))
+        settings.grant(999, ResetGrantRequest("grant-later", 1, user.qqUid))
+        settings.grant(999, ResetGrantRequest("grant-sooner", 1, user.qqUid))
+        settings.grant(999, ResetGrantRequest("grant-expired", 1, user.qqUid))
+        val now = Instant.now().epochSecond
+        db.execute("UPDATE ai_reset_card_batch SET expires_at=? WHERE grant_id='grant-sooner'", listOf(now + 1000))
+        db.execute("UPDATE ai_reset_card_batch SET expires_at=? WHERE grant_id='grant-expired'", listOf(now))
+        assertEquals(4, settings.balance(user.qqUid))
+        spend("batch-call-one")
+        settings.use(user, "batch-reset-one")
+        assertEquals(0, remaining("grant-sooner"))
+        assertEquals(1, remaining("grant-later"))
+        assertEquals(1, remaining("grant-expired"))
+        spend("batch-call-two")
+        settings.use(user, "batch-reset-two")
+        assertEquals(0, remaining("grant-later"))
+        assertEquals(2, settings.balance(user.qqUid))
+        spend("legacy-call")
+        settings.use(user, "legacy-reset")
+        assertEquals(1, settings.balance(user.qqUid))
+    }
+
+    @Test fun `legacy grant schema migrates without expiring existing cards or changing grant retries`(): Unit = runBlocking {
+        db.execute("ALTER TABLE ai_reset_grant DROP COLUMN expires_at")
+        db.execute("INSERT INTO ai_reset_balance VALUES (?,3)", listOf(user.qqUid))
+        db.execute(
+            "INSERT INTO ai_reset_grant (request_id,actor_id,target_id,card_count,recipients,status,created_at) VALUES ('legacy-grant',999,?,3,1,'complete',1)",
+            listOf(user.qqUid),
+        )
+        val migrated = SqlAccountSettingsRepository(db)
+        migrated.schema()
+        migrated.schema()
+        assertEquals(3, migrated.balance(user.qqUid))
+        assertEquals(ResetGrantResult("legacy-grant", 1, 3), migrated.grant(999, ResetGrantRequest("legacy-grant", 3, user.qqUid)))
+        val newGrant = migrated.grant(999, ResetGrantRequest("migrated-grant", 1, user.qqUid))
+        assertNotNull(newGrant.expiresAt)
+        assertEquals(4, migrated.balance(user.qqUid))
+    }
+
+    @Test fun `admin reset clears all current users usage and preserves cards credits history budget and old periods`(): Unit = runBlocking {
+        val guest = LLMPrincipal(333, "Guest", LLMSource.QQ, "333", hasAccount = false)
+        spend("global-web-call", 20)
+        val r = assertNotNull(quota.reserve(guest, "global-guest-call").reservation)
+        quota.settle(r, AiQuotaUsage(10, 20, 0, 0, BigDecimal("0.175"), 35))
+        assertEquals(-5, quota.snapshot(guest.qqUid, false).view.remaining)
+        val period = quota.period(Instant.now()).toString()
+        db.execute("INSERT INTO ai_weekly_usage VALUES (?, '2000-01-03', 77)", listOf(user.qqUid))
+        settings.grant(999, ResetGrantRequest("global-cards", 2, all = true))
+        val stateBefore = settings.settings(user)
+        val historyBefore = settings.history(user.qqUid, 0)
+        val budgetBefore = budget()
+
+        val result = settings.resetAllUsage(999, "reset-all-users")
+        assertEquals(UsageResetResult("reset-all-users", period, 2, 55), result)
+        for (uid in listOf(user.qqUid, guest.qqUid)) {
+            assertEquals(0, quota.snapshot(uid).view.used)
+            assertEquals(2, settings.balance(uid))
+        }
+        assertEquals(800, store.balance(user.qqUid))
+        assertEquals(historyBefore, settings.history(user.qqUid, 0))
+        assertEquals(stateBefore.statistics, settings.settings(user).statistics)
+        assertEquals(stateBefore.quota.resetAtEpochSeconds, settings.settings(user).quota.resetAtEpochSeconds)
+        assertEquals(budgetBefore, budget())
+        assertEquals(77, db.one("SELECT used FROM ai_weekly_usage WHERE period='2000-01-03'") { (it.get("used") as Number).toInt() })
+        assertEquals(stateBefore.resetHistory, settings.settings(user).resetHistory)
+        assertEquals(2, db.one("SELECT COUNT(*) AS n FROM ai_reset_ledger WHERE reference_id='reset-all-users' AND kind='admin_reset' AND delta=0") {
+            (it.get("n") as Number).toInt()
+        })
+
+        spend("global-call-after", 5)
+        assertEquals(result, settings.resetAllUsage(999, "reset-all-users"))
+        assertEquals(result, repository.resetAllUsage(999, "reset-all-users", "2099-01-05"))
+        assertEquals(5, quota.snapshot(user.qqUid).view.used)
+        assertFailsWith<IllegalArgumentException> { repository.resetAllUsage(888, "reset-all-users", period) }
+    }
+
+    @Test fun `admin reset rejects unauthorized invalid and active requests without partial changes`(): Unit = runBlocking {
+        spend("reset-blocked-call")
+        val guest = LLMPrincipal(333, "Guest", LLMSource.QQ, "333", hasAccount = false)
+        val r = assertNotNull(quota.reserve(guest, "reset-still-active").reservation)
+        assertFailsWith<IllegalArgumentException> { settings.resetAllUsage(user.qqUid, "admin-reset-denied") }
+        assertFailsWith<IllegalArgumentException> { settings.resetAllUsage(999, "bad") }
+        assertFailsWith<SettingsConflict> { settings.resetAllUsage(999, "admin-reset-blocked") }
+        assertEquals(20, quota.snapshot(user.qqUid).view.used)
+        assertEquals(1, quota.snapshot(guest.qqUid).view.used)
+        assertNull(repository.completedUsageReset(999, "admin-reset-blocked"))
+        assertTrue(settings.settings(user).resetHistory.isEmpty())
+        quota.refund(r)
+        assertEquals(20, settings.resetAllUsage(999, "admin-reset-blocked").restoredUnits)
+        assertEquals(0, quota.snapshot(user.qqUid).view.used)
+    }
+
+    @Test fun `admin reset reconciles known pending usage and refunds zombies before resetting`(): Unit = runBlocking {
+        val known = assertNotNull(quota.reserve(user, "reset-known-pending").reservation)
+        store.retain(known, AiQuotaUsage(10, 20, 0, 0, BigDecimal("0.1"), 20))
+        val guest = LLMPrincipal(333, "Guest", LLMSource.QQ, "333", hasAccount = false)
+        val zombie = assertNotNull(quota.reserve(guest, "reset-zombie-pending").reservation)
+        store.retain(zombie, null)
+        assertFailsWith<SettingsConflict> { settings.resetAllUsage(999, "reset-pending-all") }
+        db.execute("UPDATE ai_quota_reservation SET created_at=1 WHERE request_key=?", listOf(zombie.requestKey))
+        assertEquals(UsageResetResult("reset-pending-all", quota.period(Instant.now()).toString(), 1, 20), settings.resetAllUsage(999, "reset-pending-all"))
+        assertEquals(0, quota.snapshot(user.qqUid).view.used)
+        assertEquals(0, quota.snapshot(guest.qqUid).view.used)
+        assertEquals("refunded", db.one("SELECT status FROM ai_quota_reservation WHERE request_key=?", listOf(zombie.requestKey)) { it.get("status", String::class.java) })
+    }
+
+    @Test fun `concurrent global resets are idempotent and empty usage succeeds`(): Unit = runBlocking {
+        assertEquals(0, settings.resetAllUsage(999, "reset-empty-all").recipients)
+        spend("reset-concurrent-call")
+        val results = (1..5).map { async { settings.resetAllUsage(999, "reset-concurrent-all") } }.awaitAll()
+        assertEquals(1, results.distinct().size)
+        assertEquals(20, results.first().restoredUnits)
+        assertEquals(0, quota.snapshot(user.qqUid).view.used)
+        assertTrue(settings.settings(user).resetHistory.isEmpty())
+        assertEquals(1, db.one("SELECT COUNT(*) AS n FROM ai_reset_ledger WHERE kind='admin_reset'") { (it.get("n") as Number).toInt() })
+        assertEquals(0, settings.balance(user.qqUid))
+    }
+
+    private suspend fun remaining(grantId: String) = db.one(
+        "SELECT remaining FROM ai_reset_card_batch WHERE user_id=? AND grant_id=?", listOf(user.qqUid, grantId),
+    ) { (it.get("remaining") as Number).toInt() }
+
+    private suspend fun budget() = db.all("SELECT actual_cost,reserved_cost FROM ai_free_budget ORDER BY period") {
+        (it.get("actual_cost") as BigDecimal) to (it.get("reserved_cost") as BigDecimal)
     }
 }

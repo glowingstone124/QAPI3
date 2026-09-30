@@ -5,7 +5,8 @@ import java.time.Instant
 
 class SettingsConflict(message: String) : RuntimeException(message)
 data class ResetGrantRequest(val requestId: String, val count: Int, val userId: Long? = null, val all: Boolean = false)
-data class ResetGrantResult(val requestId: String, val recipients: Int, val count: Int)
+data class ResetGrantResult(val requestId: String, val recipients: Int, val count: Int, val expiresAt: Long? = null)
+data class UsageResetResult(val requestId: String, val period: String, val recipients: Int, val restoredUnits: Long)
 data class ResetUseResult(val requestId: String, val restoredUnits: Int)
 data class UsageTotals(val calls: Long, val inputTokens: Long, val outputTokens: Long, val chargedUnits: Long)
 data class UsageEntry(
@@ -18,7 +19,7 @@ data class UsageEntry(
     val chargedUnits: Long,
 )
 data class UsagePage(val items: List<UsageEntry>, val page: Int, val hasMore: Boolean)
-data class ResetCardEvent(val kind: String, val count: Int, val createdAt: Long, val restoredUnits: Int)
+data class ResetCardEvent(val kind: String, val count: Int, val createdAt: Long, val restoredUnits: Int, val expiresAt: Long? = null)
 data class AccountSettings(
     val userId: Long,
     val username: String,
@@ -91,6 +92,18 @@ class AccountSettingsService(
             }
         }
         return repository.grant(actor, request)
+    }
+
+    suspend fun resetAllUsage(actor: Long, requestId: String): UsageResetResult {
+        require(canGrant(actor)) { "没有重置用量权限" }
+        validateId(requestId)
+        schema()
+        repository.completedUsageReset(actor, requestId)?.let { return it }
+        for (uid in repository.quotaAccountIds()) {
+            store.reconcileKnownUsage(uid)
+            store.cancelZombiePending(uid)
+        }
+        return repository.resetAllUsage(actor, requestId, quota.period(Instant.now()).toString())
     }
 
     suspend fun use(principal: LLMPrincipal, requestId: String): ResetUseResult {
