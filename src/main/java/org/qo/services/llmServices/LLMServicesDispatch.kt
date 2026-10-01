@@ -142,7 +142,8 @@ internal suspend fun LLMServices.dispatchCompleteBotChat(
 		modelSucceeded = statusCode in 200..299
 		val usage = parseUsage(rawText)
 		val settled = if (modelSucceeded) settleUsage(reservation, usage, actualRequest, actualProvider, requester.conversationId) else null
-		val text = if (settled != null) publicModel(attachQuota(rawText, settled), request.preset) else rawText
+		val formatted = if (modelSucceeded && request.botReplyMessages) LLMBotReplyFormat.formatResponse(rawText) else rawText
+		val text = if (settled != null) publicModel(attachQuota(formatted, settled), request.preset) else formatted
 		updateAccessRecord(
 			requestId,
 			if (statusCode in 200..299) "completed" else "failed",

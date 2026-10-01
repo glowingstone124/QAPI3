@@ -58,6 +58,8 @@ internal suspend fun LLMServices.normalizeRequest(
 	provider: LLMProvider,
 ): LLMServices.NormalizedRequest {
 	val obj = JsonParser.parseString(body).asJsonObject
+	val botReplyMessages = LLMBotReplyFormat.consume(obj, requester?.source)
+	val groupImages = LLMGroupImages.consume(obj, requester?.source, requester?.groupId, requester?.messageId)
 	val clientTools = extractClientTools(obj, requester?.source)
 	obj.remove("conversation_id")
 	obj.remove("conversationId")
@@ -141,6 +143,8 @@ internal suspend fun LLMServices.normalizeRequest(
 		memberProfileContext,
 		resolvedModel,
 		enableMarkdown,
+		botReplyMessages,
+		groupImages,
 	)
 	if (clientTools != null) {
 		// Keep native assistant/tool-result pairs intact; never truncate a tool chain.
@@ -160,6 +164,7 @@ internal suspend fun LLMServices.normalizeRequest(
 		reasoningEffort = reasoningEffort,
 		pricing = provider.modelConfig(model).pricing?.at(java.time.Instant.now()),
 		clientTools = clientTools,
+		botReplyMessages = botReplyMessages,
 	)
 }
 
@@ -170,6 +175,8 @@ internal suspend fun LLMServices.enrichMessages(
 	memberProfileContext: String?,
 	model: String,
 	enableMarkdown: Boolean,
+	botReplyMessages: Boolean = false,
+	groupImages: LLMGroupImages? = null,
 ): LLMPromptCacheLayout.CurrentTurn {
 	val enriched = JsonArray()
 	val userQuestion = latestUserQuestion(messages)
@@ -191,6 +198,8 @@ internal suspend fun LLMServices.enrichMessages(
 	stableContextParts.add(LLMServices.hardOutputRules(enableMarkdown, isWeb))
 	val groupConversation = groupContext != null || requester?.groupId != null
 	if (groupConversation && !isWeb) stableContextParts.add(LLMGroupChatPolicy.systemRules)
+	if (botReplyMessages && requester?.source == LLMSource.QQ.value) stableContextParts.add(LLMBotReplyFormat.systemRules)
+	if (groupImages?.metadata()?.size()?.let { it > 0 } == true) stableContextParts.add(LLMGroupImages.systemRules)
 	requester?.takeIf { !isWeb }?.let { currentRequester ->
 		requesterSpecificRules(currentRequester)?.let(stableContextParts::add)
 		buildMinecraftRelatedContext(currentRequester.minecraftRelated)?.let { minecraftContext ->
@@ -227,8 +236,10 @@ internal suspend fun LLMServices.enrichMessages(
 			referenceContext = referenceContextParts,
 			groupHistory = groupContext,
 			currentMessageOnly = groupConversation,
+			groupImages = groupImages?.metadata(),
 		),
 	)
+	groupImages?.attach(currentTurn.messages)
 	currentTurn.messages.forEach(enriched::add)
 	return currentTurn.copy(messages = enriched)
 }

@@ -365,6 +365,7 @@ class LLMServices(
 		val reasoningEffort: LLMReasoningEffort,
 		val pricing: LLMModelPricing? = null,
 		val clientTools: JsonArray? = null,
+		val botReplyMessages: Boolean = false,
 	)
 
 	internal data class LLMRequester(

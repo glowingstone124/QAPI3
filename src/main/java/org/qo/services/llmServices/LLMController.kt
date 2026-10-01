@@ -164,7 +164,8 @@ class LLMController(
 		@RequestHeader("X-QQ-Message-ID", required = false) qqMessageId: Long?,
 		@RequestHeader("X-Request-ID", required = false) requestId: String?,
 		@RequestParam(name = "model", required = false, defaultValue = "fast") model: String = "fast",
-		@RequestBody body: String
+		@RequestBody body: String,
+		@RequestHeader("X-QBot-Reply-Format", required = false) replyFormat: String? = null,
 	): ResponseEntity<String> {
 		val requestToken = AuthTokens.resolve(token, authorization)
 			?: return jsonResponse(
@@ -174,7 +175,7 @@ class LLMController(
 
 		val result = runCatching {
 			llmServices.completeBotChat(
-				body = body,
+				body = LLMBotReplyFormat.withRequestedFormat(body, replyFormat),
 				token = requestToken,
 				qqUid = qqUid,
 				qqGroupId = qqGroupId,

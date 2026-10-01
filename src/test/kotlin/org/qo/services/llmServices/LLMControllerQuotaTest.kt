@@ -159,6 +159,35 @@ class LLMControllerQuotaTest {
     }
 
     @Test
+    fun `bot delivery header is forwarded as an internal format option`(): Unit = runBlocking {
+        val body = """{"messages":[{"role":"user","content":"hi"}],"qbot_reply_format":"messages_v1"}"""
+        Mockito.`when`(
+            llmServices.completeBotChat(
+                body = eq(body),
+                token = eq("server-token"),
+                qqUid = eq(12345L),
+                qqGroupId = eq(67890L),
+                qqName = Mockito.isNull(),
+                qqMessageId = Mockito.isNull(),
+                model = eq("fast"),
+                clientRequestId = Mockito.isNull(),
+                qqGroupName = Mockito.isNull(),
+            )
+        ).thenReturn(LLMNonStreamResult(200, """{"response":"ok"}"""))
+        webTestClient.post()
+            .uri("/qo/asking/v1/chat/completions/bot?model=fast")
+            .header("token", "server-token")
+            .header("X-QQ-UID", "12345")
+            .header("X-QQ-Group-ID", "67890")
+            .header("X-QBot-Reply-Format", "messages_v1")
+            .contentType(MediaType.APPLICATION_JSON)
+            .bodyValue("""{"messages":[{"role":"user","content":"hi"}]}""")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody().jsonPath("$.response").isEqualTo("ok")
+    }
+
+    @Test
     fun `group token stats endpoint returns group token statistics`(): Unit = runBlocking {
         Mockito.`when`(llmServices.authenticateServerToken("server-token")).thenReturn(true)
         Mockito.`when`(tokenStatisticsService.listGroupStats(100)).thenReturn(
