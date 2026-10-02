@@ -59,12 +59,13 @@ internal suspend fun LLMServices.summarizeConversation(
 	}
 }
 
+private fun firstChatChoice(responseBody: String): JsonObject? =
+	JsonParser.parseString(responseBody).asJsonObject.getAsJsonArray("choices")
+		?.firstOrNull()?.asJsonObject
+
 internal fun LLMServices.extractToolCalls(responseBody: String): List<LLMServices.ToolCall> = runCatching {
-	val root = JsonParser.parseString(responseBody).asJsonObject
-	val choices = root.getAsJsonArray("choices") ?: return emptyList()
-	if (choices.size() == 0) return emptyList()
-	val message = choices[0].asJsonObject.getAsJsonObject("message") ?: return emptyList()
-	message.getAsJsonArray("tool_calls")?.let { toolCalls ->
+	val message = firstChatChoice(responseBody)?.getAsJsonObject("message") ?: return emptyList()
+	message.get("tool_calls")?.takeIf { it.isJsonArray && it.asJsonArray.size() > 0 }?.asJsonArray?.let { toolCalls ->
 		return toolCalls.mapNotNull { item ->
 			val call = item.takeIf { it.isJsonObject }?.asJsonObject ?: return@mapNotNull null
 			val function = call.getAsJsonObject("function") ?: return@mapNotNull null
@@ -253,12 +254,17 @@ internal fun LLMServices.sanitizeResponseBody(responseBody: String, enableMarkdo
 	}.getOrDefault(responseBody)
 }
 
-internal fun LLMServices.containsToolMarkup(text: String): Boolean {
-	return text.contains("tool_calls", ignoreCase = true) ||
-			text.contains("invoke name=", ignoreCase = true) ||
-			text.contains("｜｜DSML｜｜") ||
-			text.contains("<tool_call", ignoreCase = true)
-}
+internal fun LLMServices.containsToolMarkup(responseBody: String): Boolean = runCatching {
+	val choice = firstChatChoice(responseBody) ?: return@runCatching false
+	if (choice.get("finish_reason")?.takeIf { it.isJsonPrimitive }?.asString == "tool_calls") return@runCatching true
+	val message = choice.getAsJsonObject("message") ?: return@runCatching false
+	val calls = message.get("tool_calls")?.takeUnless { it.isJsonNull }
+	if (calls != null && (!calls.isJsonArray || calls.asJsonArray.size() > 0)) return@runCatching true
+	val content = message.get("content")?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isString }?.asString.orEmpty()
+	toolMarkupPattern.containsMatchIn(content)
+}.getOrDefault(false)
+
+private val toolMarkupPattern = Regex("""<[^>\n]*(?:tool_calls?|invoke)\b|<[^>\n]*｜｜DSML｜｜""", RegexOption.IGNORE_CASE)
 
 internal fun LLMServices.sanitizeAssistantText(content: String, enableMarkdown: Boolean): String {
 	var sanitized = content

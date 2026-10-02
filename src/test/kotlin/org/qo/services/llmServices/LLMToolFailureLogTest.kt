@@ -43,6 +43,16 @@ class LLMToolFailureLogTest {
 	}
 
 	@Test
+	fun `response archive preserves null fields that can explain parser decisions`() {
+		val path = tempDir.resolve("failure.log")
+		val response = """{"choices":[{"message":{"content":"正常回答","tool_calls":null}}],"metadata":{"routing":null}}"""
+		LLMToolFailureLog(path).recordInvalidToolCall(response, context, "bot", "provider", "model", 1)
+		val saved = Files.readString(path)
+		assertTrue(saved.contains("\"tool_calls\": null"))
+		assertTrue(saved.contains("\"routing\": null"))
+	}
+
+	@Test
 	fun `execution details are expanded and credentials and binary payloads are redacted`() {
 		val path = tempDir.resolve("toolcall-failure.log")
 		val args = """{"query":"上海","nested":{"api_key":"secret-key"},"header":"Bearer secret-bearer","image":"data:image/png;base64,c2VjcmV0","arguments":"{\"password\":\"secret-password\"}"}"""

@@ -55,6 +55,22 @@ class LLMDispatchTest {
 	}
 
 	@Test
+	fun `normal answers with null or empty tool fields succeed without failure archives`(): Unit = runBlocking {
+		for (calls in listOf("null", "[]")) {
+			val response = JsonParser.parseString(completion("正常回答")).asJsonObject.apply {
+				getAsJsonArray("choices")[0].asJsonObject.getAsJsonObject("message")
+					.add("tool_calls", JsonParser.parseString(calls))
+			}
+			fixture(response.toString()).use { fixture ->
+				val result = fixture.dispatch(LLMSource.QQ, body)
+				assertEquals(200, result.status)
+				assertEquals("正常回答", fixture.history().single()[2])
+				assertFalse(Mockito.mockingDetails(fixture.service.toolService).invocations.any { it.method.name.startsWith("logInvalidToolCall") })
+			}
+		}
+	}
+
+	@Test
 	fun `all three entry points archive unparseable tool calls before returning the error`(): Unit = runBlocking {
 		val response = completion("<tool_call>broken\n模型原始输出</tool_call>")
 		for (source in LLMSource.entries) {

@@ -117,7 +117,7 @@ internal class LLMToolFailureLog(
 
 	private companion object {
 		val lock = Any()
-		val gson = GsonBuilder().disableHtmlEscaping().setPrettyPrinting().create()
+		val gson = GsonBuilder().disableHtmlEscaping().serializeNulls().setPrettyPrinting().create()
 		val sensitiveKeys = setOf("authorization", "api_key", "apikey", "api_token", "apitoken", "access_token", "token", "password", "cookie", "set-cookie")
 		val bearerPattern = Regex("""(?i)\bBearer\s+[a-zA-Z0-9._~+/=-]+""")
 		val dataPattern = Regex("""data:[a-zA-Z0-9.+/-]+;base64,[a-zA-Z0-9+/=_-]+""")
