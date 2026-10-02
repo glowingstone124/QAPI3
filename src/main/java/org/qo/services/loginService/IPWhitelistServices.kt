@@ -13,32 +13,18 @@ import java.net.Inet6Address
 import java.net.InetAddress
 
 @Service
-class IPWhitelistServices {
-	private val login: Login
-	private val authorityNeededServices: AuthorityNeededServicesImpl
-	private val repository: LoginSecurityDbRepository
-
+class IPWhitelistServices(
+	private val login: Login,
+	private val authorityNeededServices: AuthorityNeededServicesImpl,
+	private val repository: LoginSecurityDbRepository,
+) {
 	@Autowired
 	constructor(
 		login: Login,
 		authorityNeededServices: AuthorityNeededServicesImpl,
 		database: ReactiveDatabase,
 		@Autowired(required = false) repository: LoginSecurityDbRepository? = null,
-	) {
-		this.login = login
-		this.authorityNeededServices = authorityNeededServices
-		this.repository = repository ?: LoginSecurityDbRepository(database)
-	}
-
-	constructor(
-		login: Login,
-		authorityNeededServices: AuthorityNeededServicesImpl,
-		repository: LoginSecurityDbRepository,
-	) {
-		this.login = login
-		this.authorityNeededServices = authorityNeededServices
-		this.repository = repository
-	}
+	) : this(login, authorityNeededServices, repository ?: LoginSecurityDbRepository(database))
 
 	constructor(login: Login, authorityNeededServices: AuthorityNeededServicesImpl) : this(
 		login,

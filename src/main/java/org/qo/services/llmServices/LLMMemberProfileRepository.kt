@@ -1,11 +1,6 @@
 package org.qo.services.llmServices
 
 import jakarta.annotation.PreDestroy
-import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
-import kotlinx.coroutines.launch
 import org.qo.datas.ReactiveDatabase
 import org.springframework.boot.context.event.ApplicationReadyEvent
 import org.springframework.context.event.EventListener
@@ -27,60 +22,49 @@ interface LLMMemberProfileRepository {
 class R2dbcLLMMemberProfileRepository(
 	private val database: ReactiveDatabase,
 ) : LLMMemberProfileRepository {
-	private val initializationScope = CoroutineScope(SupervisorJob())
-	private val schemaReady = CompletableDeferred<Unit>()
+	private val schema = StartupSchemaInitializer("LLM member profile table init failed")
 
 	@EventListener(ApplicationReadyEvent::class)
-	fun initializeSchema() {
-		initializationScope.launch {
-			try {
-				database.execute(
-					"""
-					CREATE TABLE IF NOT EXISTS llm_member_profiles (
-						qq_uid BIGINT PRIMARY KEY,
-						profile_id VARCHAR(36) NOT NULL,
-						created_at BIGINT NOT NULL,
-						updated_at BIGINT NOT NULL,
-						UNIQUE KEY uk_llm_member_profile_id (profile_id),
-						INDEX idx_llm_member_profile_updated (updated_at)
-					)
-					""".trimIndent()
-				)
-				database.execute(
-					"""
-					CREATE TABLE IF NOT EXISTS llm_member_profile_fields (
-						id VARCHAR(36) PRIMARY KEY,
-						qq_uid BIGINT NOT NULL,
-						scope_group_id BIGINT NOT NULL DEFAULT 0,
-						field_key VARCHAR(80) NOT NULL,
-						field_value TEXT NOT NULL,
-						category VARCHAR(40) NOT NULL,
-						source_uid VARCHAR(128) NULL,
-						source_name VARCHAR(160) NULL,
-						created_at BIGINT NOT NULL,
-						updated_at BIGINT NOT NULL,
-						UNIQUE KEY uk_llm_member_profile_field (qq_uid, scope_group_id, field_key),
-						INDEX idx_llm_member_profile_field_uid (qq_uid, updated_at),
-						CONSTRAINT fk_llm_member_profile_uid FOREIGN KEY (qq_uid)
-							REFERENCES llm_member_profiles(qq_uid) ON DELETE CASCADE
-					)
-					""".trimIndent()
-				)
-				schemaReady.complete(Unit)
-			} catch (error: Exception) {
-				schemaReady.completeExceptionally(error)
-				println("LLM member profile table init failed: ${error.message}")
-			}
-		}
+	fun initializeSchema() = schema.start {
+		database.execute(
+			"""
+			CREATE TABLE IF NOT EXISTS llm_member_profiles (
+				qq_uid BIGINT PRIMARY KEY,
+				profile_id VARCHAR(36) NOT NULL,
+				created_at BIGINT NOT NULL,
+				updated_at BIGINT NOT NULL,
+				UNIQUE KEY uk_llm_member_profile_id (profile_id),
+				INDEX idx_llm_member_profile_updated (updated_at)
+			)
+			""".trimIndent()
+		)
+		database.execute(
+			"""
+			CREATE TABLE IF NOT EXISTS llm_member_profile_fields (
+				id VARCHAR(36) PRIMARY KEY,
+				qq_uid BIGINT NOT NULL,
+				scope_group_id BIGINT NOT NULL DEFAULT 0,
+				field_key VARCHAR(80) NOT NULL,
+				field_value TEXT NOT NULL,
+				category VARCHAR(40) NOT NULL,
+				source_uid VARCHAR(128) NULL,
+				source_name VARCHAR(160) NULL,
+				created_at BIGINT NOT NULL,
+				updated_at BIGINT NOT NULL,
+				UNIQUE KEY uk_llm_member_profile_field (qq_uid, scope_group_id, field_key),
+				INDEX idx_llm_member_profile_field_uid (qq_uid, updated_at),
+				CONSTRAINT fk_llm_member_profile_uid FOREIGN KEY (qq_uid)
+					REFERENCES llm_member_profiles(qq_uid) ON DELETE CASCADE
+			)
+			""".trimIndent()
+		)
 	}
 
 	@PreDestroy
-	fun shutdown() {
-		initializationScope.cancel()
-	}
+	fun shutdown() = schema.close()
 
 	override suspend fun findProfile(uid: Long): LLMStoredMemberProfileHeader? {
-		schemaReady.await()
+		schema.await()
 		return database.one(
 			"SELECT qq_uid, profile_id, created_at, updated_at FROM llm_member_profiles WHERE qq_uid = ? LIMIT 1",
 			listOf(uid),
@@ -91,7 +75,7 @@ class R2dbcLLMMemberProfileRepository(
 	override suspend fun findProfiles(uids: Collection<Long>): List<LLMStoredMemberProfileHeader> {
 		val distinct = uids.distinct()
 		if (distinct.isEmpty()) return emptyList()
-		schemaReady.await()
+		schema.await()
 		return database.all(
 			"SELECT qq_uid, profile_id, created_at, updated_at FROM llm_member_profiles WHERE qq_uid IN (${placeholders(distinct.size)})",
 			distinct,
@@ -100,7 +84,7 @@ class R2dbcLLMMemberProfileRepository(
 	}
 
 	override suspend fun insertProfile(profile: LLMStoredMemberProfileHeader): Boolean {
-		schemaReady.await()
+		schema.await()
 		return database.execute(
 			"INSERT IGNORE INTO llm_member_profiles(qq_uid, profile_id, created_at, updated_at) VALUES (?, ?, ?, ?)",
 			listOf(profile.qqUid, profile.profileId, profile.createdAt, profile.updatedAt),
@@ -108,7 +92,7 @@ class R2dbcLLMMemberProfileRepository(
 	}
 
 	override suspend fun touchProfile(uid: Long, updatedAt: Long) {
-		schemaReady.await()
+		schema.await()
 		database.execute(
 			"UPDATE llm_member_profiles SET updated_at = ? WHERE qq_uid = ?",
 			listOf(updatedAt, uid),
@@ -116,7 +100,7 @@ class R2dbcLLMMemberProfileRepository(
 	}
 
 	override suspend fun findField(uid: Long, scopeGroupId: Long, fieldKey: String): LLMMemberProfileField? {
-		schemaReady.await()
+		schema.await()
 		return database.one(
 			"""
 			SELECT id, qq_uid, scope_group_id, field_key, field_value, category, source_uid, source_name, created_at, updated_at
@@ -132,7 +116,7 @@ class R2dbcLLMMemberProfileRepository(
 	override suspend fun findFields(uids: Collection<Long>, groupId: Long?): List<LLMMemberProfileField> {
 		val distinct = uids.distinct()
 		if (distinct.isEmpty()) return emptyList()
-		schemaReady.await()
+		schema.await()
 		val scopes = if (groupId == null) listOf(GLOBAL_SCOPE) else listOf(GLOBAL_SCOPE, groupId)
 		return database.all(
 			"""
@@ -147,7 +131,7 @@ class R2dbcLLMMemberProfileRepository(
 	}
 
 	override suspend fun insertField(field: LLMMemberProfileField): Boolean {
-		schemaReady.await()
+		schema.await()
 		return database.execute(
 			"""
 			INSERT IGNORE INTO llm_member_profile_fields
@@ -159,7 +143,7 @@ class R2dbcLLMMemberProfileRepository(
 	}
 
 	override suspend fun updateField(field: LLMMemberProfileField) {
-		schemaReady.await()
+		schema.await()
 		database.execute(
 			"""
 			UPDATE llm_member_profile_fields
@@ -171,7 +155,7 @@ class R2dbcLLMMemberProfileRepository(
 	}
 
 	override suspend fun deleteField(uid: Long, scopeGroupId: Long, fieldKey: String): Boolean {
-		schemaReady.await()
+		schema.await()
 		return database.execute(
 			"DELETE FROM llm_member_profile_fields WHERE qq_uid = ? AND scope_group_id = ? AND field_key = ?",
 			listOf(uid, scopeGroupId, fieldKey),

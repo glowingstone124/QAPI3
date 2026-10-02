@@ -1,12 +1,6 @@
 package org.qo.services.llmServices
 
 import com.google.gson.JsonObject
-import org.qo.redis.DatabaseType
-
-internal fun LLMServices.reserveRequest(qqUid: Long): Boolean {
-	return redis.setIfAbsentWithExpire("llm:req:$qqUid", "1", DatabaseType.QO_ASSISTANT_DATABASE.value, 2)
-		.ignoreException() ?: true
-}
 
 internal suspend fun LLMServices.reserveQuota(
 	principal: LLMPrincipal,

@@ -67,25 +67,24 @@ class RemoteWebFetchTool(private val search: DuckDuckGoWebSearchTool) : Tools {
 			if (!response.status.isSuccess()) {
 				val code = body?.get("error")?.takeIf { it.isJsonPrimitive }?.asString
 					?.takeIf { it.matches(Regex("[a-z_]{1,40}")) } ?: "fetch_unavailable"
-			val message = if (exposeUrl) {
-				body?.get("message")?.takeIf { it.isJsonPrimitive }?.asString?.take(200)
-					?: "网页读取服务返回 HTTP ${response.status.value}"
-			} else {
-				"网页读取失败"
-			}
+				val message = if (exposeUrl) {
+					body?.get("message")?.takeIf { it.isJsonPrimitive }?.asString?.take(200)
+						?: "网页读取服务返回 HTTP ${response.status.value}"
+				} else {
+					"网页读取失败"
+				}
 				return ToolSupport.errorResult(code, message)
 			}
 			val page = body ?: return ToolSupport.errorResult("invalid_fetch_response", "网页读取服务返回了无效 JSON")
 			val content = page.get("content")?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isString }?.asString?.trim().orEmpty()
 			if (content.isBlank()) return ToolSupport.errorResult("empty_page", "网页没有可提取的正文")
-			return ToolSupport.gson.toJson(JsonObject().apply {
-				addProperty("tool", "web_fetch")
+			return ToolSupport.result("web_fetch") {
 				if (exposeUrl) addProperty("url", url)
 				page.get("title")?.takeIf { it.isJsonPrimitive }?.asString?.let { addProperty("title", it.take(200)) }
 				page.get("date")?.takeIf { it.isJsonPrimitive }?.asString?.let { addProperty("date", it.take(80)) }
 				addProperty("content", content.take(12_000))
 				addProperty("truncated", content.length > 12_000 || page.get("truncated")?.takeIf { it.isJsonPrimitive }?.asBoolean == true)
-			})
+			}
 		}
 	}
 }

@@ -27,13 +27,13 @@ class AddMemoryTool(
 		val groupId = context.groupId
 			?: return ToolSupport.errorResult("missing_group", "缺少群上下文，无法保存记忆")
 		val fact = (args.get("fact") ?: args.get("data"))?.takeIf { !it.isJsonNull }?.asString?.trim().orEmpty()
-		val subject = args.get("subject")?.takeIf { !it.isJsonNull }?.asString?.trim().orEmpty()
-		val memoryKey = args.get("memory_key")?.takeIf { !it.isJsonNull }?.asString?.trim().orEmpty()
+		val subject = args.stringArgument("subject").orEmpty()
+		val memoryKey = args.stringArgument("memory_key").orEmpty()
 		if (subject.isBlank() || memoryKey.isBlank() || fact.isBlank()) {
 			return ToolSupport.errorResult("bad_arguments", "subject、memory_key 和 fact 不能为空")
 		}
-		val category = args.get("category")?.takeIf { !it.isJsonNull }?.asString ?: "general"
-		val expiryDays = args.get("expires_in_days")?.takeIf { !it.isJsonNull }?.asLong?.coerceIn(1, 3650)
+		val category = args.argument("category")?.asString ?: "general"
+		val expiryDays = args.argument("expires_in_days")?.asLong?.coerceIn(1, 3650)
 		val expiresAt = expiryDays?.let { System.currentTimeMillis() + it * 86_400_000L }
 		val mutation = llmMemoryService.upsertMemory(
 			groupId = groupId,
@@ -45,12 +45,11 @@ class AddMemoryTool(
 			sourceName = context.name,
 			expiresAt = expiresAt,
 		) ?: return ToolSupport.errorResult("bad_arguments", "记忆内容无效")
-		return ToolSupport.gson.toJson(JsonObject().apply {
-			addProperty("tool", id)
+		return ToolSupport.result(id) {
 			addProperty("saved", true)
 			addProperty("created", mutation.created)
 			addProperty("group_id", groupId)
 			add("memory", ToolSupport.gson.toJsonTree(mutation.record))
-		})
+		}
 	}
 }

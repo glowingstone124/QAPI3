@@ -1,55 +1,35 @@
 package org.qo.services.llmServices
 
 import com.google.gson.JsonArray
-import com.google.gson.JsonElement
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
-import com.google.gson.JsonPrimitive
 import io.ktor.client.HttpClient
-import io.ktor.client.call.body
-import io.ktor.client.engine.cio.CIO
-import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.request.header
 import io.ktor.client.request.post
-import io.ktor.client.request.preparePost
 import io.ktor.client.request.setBody
-import io.ktor.client.statement.bodyAsChannel
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.contentType
 import io.ktor.http.isSuccess
-import io.ktor.utils.io.readUTF8Line
-import jakarta.annotation.PostConstruct
-import jakarta.annotation.PreDestroy
-import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withTimeoutOrNull
-import org.qo.datas.Mapping
-import org.qo.datas.Nodes
-import org.qo.datas.ReactiveDatabase
-import org.qo.orm.UserORM
-import org.qo.redis.DatabaseType
-import org.qo.redis.Redis
-import org.qo.services.loginService.AuthorityNeededServicesImpl
-import org.qo.services.loginService.Login
-import org.qo.services.loginService.QqLoginService
-import org.qo.services.messageServices.Message
-import org.qo.services.messageServices.Msg
-import org.springframework.boot.context.event.ApplicationReadyEvent
-import org.springframework.context.event.EventListener
-import org.springframework.stereotype.Service
 import java.net.URLDecoder
-import java.nio.file.Path
 import java.nio.charset.StandardCharsets
-import java.util.UUID
-import java.util.concurrent.atomic.AtomicBoolean
+
+internal fun LLMServices.adaptUpstreamRequest(
+	request: LLMServices.NormalizedRequest,
+	protocol: LLMProtocol,
+	stream: Boolean = false,
+	thinkingMode: String = "enabled",
+): JsonObject = LLMAdapterRegistry.forProtocol(protocol).adapt(
+	LLMAdapterRequest(
+		chat = JsonParser.parseString(request.body).asJsonObject,
+		functionTools = toolService.definitions(),
+		reasoningEffort = request.reasoningEffort,
+		stream = stream,
+		webSearch = !toolService.usesRemoteSearch(),
+		thinkingMode = thinkingMode,
+	)
+)
 
 internal suspend fun LLMServices.completeWithOptionalTools(
 	request: LLMServices.NormalizedRequest,
@@ -68,15 +48,8 @@ internal suspend fun LLMServices.completeWithOptionalTools(
 	if (provider.supportsResponses(request.preset)) {
 		return completeWithResponsesApi(request, requester, source, provider)
 	}
-	val functionTools = toolService.definitions()
-	val obj = LLMAdapterRegistry.forProtocol(LLMProtocol.CHAT_COMPLETIONS).adapt(
-		LLMAdapterRequest(
-			chat = JsonParser.parseString(request.body).asJsonObject,
-			functionTools = functionTools,
-			reasoningEffort = request.reasoningEffort,
-			webSearch = !toolService.usesRemoteSearch(),
-		)
-	)
+
+	val obj = adaptUpstreamRequest(request, LLMProtocol.CHAT_COMPLETIONS)
 
 	var latestStatus = 502
 	var latestBody = ""
@@ -93,6 +66,10 @@ internal suspend fun LLMServices.completeWithOptionalTools(
 		val toolCalls = extractToolCalls(latestBody)
 		if (toolCalls.isEmpty()) {
 			if (containsToolMarkup(latestBody)) {
+				toolService.logInvalidToolCall(
+					latestBody, requester.toolContext(request.currentUserText), source,
+					provider.name, request.model, round + 1,
+				)
 				return 502 to withUsage(errorJson("invalid_tool_call", "LLM 输出了无法解析的工具调用"), totalUsage)
 			}
 			return latestStatus to sanitizeResponseBody(withUsage(latestBody, totalUsage), request.enableMarkdown)
@@ -116,15 +93,7 @@ internal suspend fun LLMServices.completeWithResponsesApi(
 	source: String,
 	provider: LLMProvider,
 ): Pair<Int, String> {
-	val functionTools = toolService.definitions()
-	val body = LLMAdapterRegistry.forProtocol(LLMProtocol.RESPONSES).adapt(
-		LLMAdapterRequest(
-			chat = JsonParser.parseString(request.body).asJsonObject,
-			functionTools = functionTools,
-			reasoningEffort = request.reasoningEffort,
-			webSearch = !toolService.usesRemoteSearch(),
-		)
-	)
+	val body = adaptUpstreamRequest(request, LLMProtocol.RESPONSES)
 	var totalUsage: LLMServices.Usage? = null
 	repeat(maxToolRounds) { round ->
 		val response = postUpstream("$source/responses-round-${round + 1}", body.toString(), provider, provider.responsesUrl)

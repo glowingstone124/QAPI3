@@ -9,10 +9,6 @@ import org.qo.services.llmServices.tools.Tools
 import org.qo.services.llmServices.tools.DuckDuckGoWebSearchTool
 import org.qo.services.llmServices.tools.RemoteWebFetchTool
 import org.springframework.stereotype.Service
-import java.nio.charset.StandardCharsets
-import java.nio.file.Files
-import java.nio.file.Path
-import java.nio.file.StandardOpenOption
 
 @Service
 class LLMToolService(
@@ -21,7 +17,7 @@ class LLMToolService(
 	private val webFetch: RemoteWebFetchTool,
 ) {
 	private val qoGroupId = System.getenv("LLM_QO_GROUP_ID")?.trim()?.toLongOrNull()
-	private val failureLogPath: Path = Path.of("data/llm/toolcall-failure.log")
+	private val failureLog = LLMToolFailureLog()
 	private val qoScopedToolIds = setOf(
 		"get_server_status",
 		"get_player_rankings",
@@ -100,28 +96,24 @@ class LLMToolService(
 
 	private fun logFailure(name: String, rawArguments: String?, context: LLMToolContext, result: String) {
 		val parsed = runCatching { JsonParser.parseString(result).asJsonObject }.getOrNull()
-		val entry = gson.toJson(JsonObject().apply {
-			addProperty("tool", name)
-			addProperty("arguments", rawArguments?.take(500))
-			addProperty("group_id", context.groupId)
-			addProperty("uid", context.uid)
-			addProperty("name", context.name)
-			addProperty("error", parsed?.get("error")?.asString ?: "unknown")
-			addProperty("message", (parsed?.get("message")?.asString ?: result).take(500))
-			addProperty("time", System.currentTimeMillis())
-		})
-		println("[LLMTool] call failed: $entry")
-		runCatching {
-			failureLogPath.parent?.let { Files.createDirectories(it) }
-			Files.writeString(
-				failureLogPath,
-				entry + System.lineSeparator(),
-				StandardCharsets.UTF_8,
-				StandardOpenOption.CREATE,
-				StandardOpenOption.APPEND,
-			)
-		}.onFailure { println("[LLMTool] failed to write failure log: ${it.message}") }
+		failureLog.record(
+			context = context,
+			stage = "execute",
+			error = runCatching { parsed?.get("error")?.asString }.getOrNull() ?: "unknown",
+			message = runCatching { parsed?.get("message")?.asString }.getOrNull() ?: "工具执行失败",
+			tool = name,
+			details = linkedMapOf("arguments" to (rawArguments ?: "{}"), "result" to result),
+		)
 	}
+
+	internal fun logInvalidToolCall(
+		responseBody: String,
+		context: LLMToolContext,
+		requestSource: String,
+		provider: String,
+		model: String,
+		round: Int,
+	) = failureLog.recordInvalidToolCall(responseBody, context, requestSource, provider, model, round)
 
 	private fun parseArguments(rawArguments: String?): JsonObject {
 		if (rawArguments.isNullOrBlank()) {

@@ -21,16 +21,15 @@ class GetMemberProfileTool(
 	override suspend fun execute(args: JsonObject, context: LLMToolContext): String {
 		val currentUid = context.uid?.toLongOrNull()
 			?: return ToolSupport.errorResult("missing_uid", "缺少当前提问者 QQ uid")
-		val targetUid = args.get("qq_uid")?.takeIf { !it.isJsonNull }?.asString?.trim()?.toLongOrNull() ?: currentUid
+		val targetUid = args.stringArgument("qq_uid")?.toLongOrNull() ?: currentUid
 		if (targetUid != currentUid) {
 			return ToolSupport.errorResult("forbidden_target", "只能读取当前提问者本人的完整画像")
 		}
 		val profile = profileService.profile(targetUid, context.groupId)
-		return ToolSupport.gson.toJson(JsonObject().apply {
-			addProperty("tool", id)
+		return ToolSupport.result(id) {
 			addProperty("qq_uid", targetUid)
 			addProperty("found", profile != null)
 			profile?.let { add("profile", ToolSupport.gson.toJsonTree(it)) }
-		})
+		}
 	}
 }

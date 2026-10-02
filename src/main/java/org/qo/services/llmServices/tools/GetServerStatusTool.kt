@@ -26,15 +26,14 @@ class GetServerStatusTool(
 	)
 
 	override suspend fun execute(args: JsonObject, context: LLMToolContext): String {
-		val serverId = args.get("server_id")?.takeIf { !it.isJsonNull }?.asInt
-			?: serverIdFromName(args.get("server_name")?.takeIf { !it.isJsonNull }?.asString)
+		val serverId = args.argument("server_id")?.asInt
+			?: serverIdFromName(args.argument("server_name")?.asString)
 			?: 1
 		val data = status.downloadAsync(serverId)
-		return ToolSupport.gson.toJson(JsonObject().apply {
-			addProperty("tool", id)
+		return ToolSupport.result(id) {
 			addProperty("server_id", serverId)
 			add("status", data.deepCopy())
-		})
+		}
 	}
 
 	private fun serverIdFromName(name: String?): Int? = when (name?.trim()?.lowercase().orEmpty()) {

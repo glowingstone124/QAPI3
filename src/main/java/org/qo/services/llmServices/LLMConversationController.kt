@@ -33,10 +33,10 @@ class LLMConversationController(
 		return ResponseEntity.status(status).contentType(MediaType.APPLICATION_JSON).body(body)
 	}
 
-	@GetMapping("/v1/conversations", produces = [MediaType.APPLICATION_JSON_VALUE])
-	suspend fun listConversations(
-		@RequestHeader("token", required = false) token: String?,
-		@RequestHeader(HttpHeaders.AUTHORIZATION, required = false) authorization: String?,
+	private suspend fun authenticated(
+		token: String?,
+		authorization: String?,
+		block: suspend (LLMPrincipal) -> ResponseEntity<String>,
 	): ResponseEntity<String> {
 		val requestToken = AuthTokens.resolve(token, authorization)
 			?: return jsonResponse(
@@ -48,8 +48,16 @@ class LLMConversationController(
 				"""{"error":{"message":"权限验证失败","type":"invalid_token","code":"invalid_token"}}""",
 				HttpStatus.UNAUTHORIZED
 			)
+		return block(user)
+	}
+
+	@GetMapping("/v1/conversations", produces = [MediaType.APPLICATION_JSON_VALUE])
+	suspend fun listConversations(
+		@RequestHeader("token", required = false) token: String?,
+		@RequestHeader(HttpHeaders.AUTHORIZATION, required = false) authorization: String?,
+	): ResponseEntity<String> = authenticated(token, authorization) { user ->
 		val list = kotshiConversationService.listConversations(user.qqUid)
-		return ResponseEntity.ok(gson.toJson(list))
+		ResponseEntity.ok(gson.toJson(list))
 	}
 
 	@PostMapping("/v1/conversations", produces = [MediaType.APPLICATION_JSON_VALUE])
@@ -57,23 +65,13 @@ class LLMConversationController(
 		@RequestHeader("token", required = false) token: String?,
 		@RequestHeader(HttpHeaders.AUTHORIZATION, required = false) authorization: String?,
 		@RequestBody(required = false) body: String?,
-	): ResponseEntity<String> {
-		val requestToken = AuthTokens.resolve(token, authorization)
-			?: return jsonResponse(
-				"""{"error":{"message":"缺少或无效的令牌","type":"invalid_token","code":"invalid_token"}}""",
-				HttpStatus.UNAUTHORIZED
-			)
-		val user = llmServices.authenticateWeb(requestToken)
-			?: return jsonResponse(
-				"""{"error":{"message":"权限验证失败","type":"invalid_token","code":"invalid_token"}}""",
-				HttpStatus.UNAUTHORIZED
-			)
+	): ResponseEntity<String> = authenticated(token, authorization) { user ->
 		val json = runCatching { JsonParser.parseString(body.orEmpty()).asJsonObject }.getOrNull()
 		val title = json?.get("title")?.takeIf { !it.isJsonNull }?.asString
 		val model = json?.get("model")?.takeIf { !it.isJsonNull }?.asString ?: "fast"
 		val customId = json?.get("id")?.takeIf { !it.isJsonNull }?.asString
 		val conv = kotshiConversationService.createConversation(user.qqUid, title, model, customId)
-		return ResponseEntity.ok(gson.toJson(conv))
+		ResponseEntity.ok(gson.toJson(conv))
 	}
 
 	@GetMapping("/v1/conversations/{id}/messages", produces = [MediaType.APPLICATION_JSON_VALUE])
@@ -81,19 +79,9 @@ class LLMConversationController(
 		@RequestHeader("token", required = false) token: String?,
 		@RequestHeader(HttpHeaders.AUTHORIZATION, required = false) authorization: String?,
 		@PathVariable("id") id: String,
-	): ResponseEntity<String> {
-		val requestToken = AuthTokens.resolve(token, authorization)
-			?: return jsonResponse(
-				"""{"error":{"message":"缺少或无效的令牌","type":"invalid_token","code":"invalid_token"}}""",
-				HttpStatus.UNAUTHORIZED
-			)
-		val user = llmServices.authenticateWeb(requestToken)
-			?: return jsonResponse(
-				"""{"error":{"message":"权限验证失败","type":"invalid_token","code":"invalid_token"}}""",
-				HttpStatus.UNAUTHORIZED
-			)
+	): ResponseEntity<String> = authenticated(token, authorization) { user ->
 		val messages = kotshiConversationService.getMessages(user.qqUid, id)
-		return ResponseEntity.ok(gson.toJson(messages))
+		ResponseEntity.ok(gson.toJson(messages))
 	}
 
 	@DeleteMapping("/v1/conversations/{id}", produces = [MediaType.APPLICATION_JSON_VALUE])
@@ -101,20 +89,10 @@ class LLMConversationController(
 		@RequestHeader("token", required = false) token: String?,
 		@RequestHeader(HttpHeaders.AUTHORIZATION, required = false) authorization: String?,
 		@PathVariable("id") id: String,
-	): ResponseEntity<String> {
-		val requestToken = AuthTokens.resolve(token, authorization)
-			?: return jsonResponse(
-				"""{"error":{"message":"缺少或无效的令牌","type":"invalid_token","code":"invalid_token"}}""",
-				HttpStatus.UNAUTHORIZED
-			)
-		val user = llmServices.authenticateWeb(requestToken)
-			?: return jsonResponse(
-				"""{"error":{"message":"权限验证失败","type":"invalid_token","code":"invalid_token"}}""",
-				HttpStatus.UNAUTHORIZED
-			)
+	): ResponseEntity<String> = authenticated(token, authorization) { user ->
 		val deleted = kotshiConversationService.deleteConversation(user.qqUid, id)
 		llmServices.conversationService.delete("web:${user.qqUid}:${id.trim()}")
-		return ResponseEntity.ok("""{"success":$deleted}""")
+		ResponseEntity.ok("""{"success":$deleted}""")
 	}
 
 	@PatchMapping("/v1/conversations/{id}", produces = [MediaType.APPLICATION_JSON_VALUE])
@@ -123,21 +101,11 @@ class LLMConversationController(
 		@RequestHeader(HttpHeaders.AUTHORIZATION, required = false) authorization: String?,
 		@PathVariable("id") id: String,
 		@RequestBody body: String,
-	): ResponseEntity<String> {
-		val requestToken = AuthTokens.resolve(token, authorization)
-			?: return jsonResponse(
-				"""{"error":{"message":"缺少或无效的令牌","type":"invalid_token","code":"invalid_token"}}""",
-				HttpStatus.UNAUTHORIZED
-			)
-		val user = llmServices.authenticateWeb(requestToken)
-			?: return jsonResponse(
-				"""{"error":{"message":"权限验证失败","type":"invalid_token","code":"invalid_token"}}""",
-				HttpStatus.UNAUTHORIZED
-			)
+	): ResponseEntity<String> = authenticated(token, authorization) { user ->
 		val json = runCatching { JsonParser.parseString(body).asJsonObject }.getOrNull()
 		val title = json?.get("title")?.takeIf { !it.isJsonNull }?.asString
 		val model = json?.get("model")?.takeIf { !it.isJsonNull }?.asString
 		val updated = kotshiConversationService.updateConversation(user.qqUid, id, title, model)
-		return ResponseEntity.ok("""{"success":$updated}""")
+		ResponseEntity.ok("""{"success":$updated}""")
 	}
 }

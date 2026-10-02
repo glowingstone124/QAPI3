@@ -1,6 +1,7 @@
 package org.qo.services.advancementServices
 
-import org.qo.datas.Enumerations
+import org.qo.datas.Enumerations.AdvancementsEnum
+import org.qo.datas.Enumerations.Card_PixelFantasia_Enum
 import org.qo.datas.ReactiveDatabase
 import org.qo.db.repository.AdvancementDbRepository
 import org.qo.orm.CardProfileOrm
@@ -33,22 +34,12 @@ class AdvancementServiceImpl @Autowired constructor(
 		INVALID_PLAYER,
 	}
 
-	private val advancementOperations: Map<Enumerations.AdvancementsEnum, suspend (String) -> Boolean> = mapOf(
-		Enumerations.AdvancementsEnum.ADVANCEMENT_PATCHOULI to { uuid: String ->
-			cardProfileOrm.addCardToOwnedAsync(uuid, Enumerations.Card_PixelFantasia_Enum.PATCHOULI_LIB.id.toLong())
-		},
-		Enumerations.AdvancementsEnum.ADVANCEMENT_PROMETHUS to { uuid: String ->
-			cardProfileOrm.addCardToOwnedAsync(uuid, Enumerations.Card_PixelFantasia_Enum.PROMETHUS.id.toLong())
-		},
-		Enumerations.AdvancementsEnum.ADVANCEMENT_KOISHI to { uuid: String ->
-			cardProfileOrm.addCardToOwnedAsync(uuid, Enumerations.Card_PixelFantasia_Enum.KOISHI_NORZ.id.toLong())
-		},
-		Enumerations.AdvancementsEnum.ADVANCEMENT_ORIN to { uuid: String ->
-			cardProfileOrm.addCardToOwnedAsync(uuid, Enumerations.Card_PixelFantasia_Enum.FUISLAND.id.toLong())
-		},
-		Enumerations.AdvancementsEnum.ADVANCEMENT_WHITE_JADE to { uuid: String ->
-			cardProfileOrm.addCardToOwnedAsync(uuid, Enumerations.Card_PixelFantasia_Enum.CHERRY.id.toLong())
-		},
+	private val advancementCards = mapOf(
+		AdvancementsEnum.ADVANCEMENT_PATCHOULI to Card_PixelFantasia_Enum.PATCHOULI_LIB,
+		AdvancementsEnum.ADVANCEMENT_PROMETHUS to Card_PixelFantasia_Enum.PROMETHUS,
+		AdvancementsEnum.ADVANCEMENT_KOISHI to Card_PixelFantasia_Enum.KOISHI_NORZ,
+		AdvancementsEnum.ADVANCEMENT_ORIN to Card_PixelFantasia_Enum.FUISLAND,
+		AdvancementsEnum.ADVANCEMENT_WHITE_JADE to Card_PixelFantasia_Enum.CHERRY,
 	)
 
 	suspend fun getCompleteAdvancements(username: String): List<Advancement> =
@@ -56,11 +47,11 @@ class AdvancementServiceImpl @Autowired constructor(
 			Advancement(it.id, it.name, it.description)
 		}
 
-	suspend fun getAchievementCompletePlayerCount(adv: Enumerations.AdvancementsEnum): Long =
+	suspend fun getAchievementCompletePlayerCount(adv: AdvancementsEnum): Long =
 		advancementDbRepository.getAchievementCompletePlayerCount(adv.id.toLong())
 
 	suspend fun addAdvancementCompletionSQL(
-		adv: Enumerations.AdvancementsEnum,
+		adv: AdvancementsEnum,
 		player: String,
 	): AddAdvancementResult {
 		return try {
@@ -80,7 +71,7 @@ class AdvancementServiceImpl @Autowired constructor(
 	}
 
 	suspend fun addAdvancementCompletion(
-		adv: Enumerations.AdvancementsEnum,
+		adv: AdvancementsEnum,
 		player: String,
 	): AddAdvancementResult {
 		return try {
@@ -90,12 +81,12 @@ class AdvancementServiceImpl @Autowired constructor(
 					return@inTransaction result
 				}
 
-				val operation = advancementOperations[adv] ?: return@inTransaction result
+				val card = advancementCards[adv] ?: return@inTransaction result
 				val profileId = userORM.getProfileWithUserAsync(player)
 				if (profileId.isBlank() || cardProfileOrm.readAsync(profileId) == null) {
 					error("Card profile not found for player $player")
 				}
-				if (!operation(profileId)) {
+				if (!cardProfileOrm.addCardToOwnedAsync(profileId, card.id.toLong())) {
 					error("Failed to update card profile for player $player")
 				}
 				result

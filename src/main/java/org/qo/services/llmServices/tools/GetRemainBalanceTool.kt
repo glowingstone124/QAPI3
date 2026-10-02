@@ -25,10 +25,9 @@ class GetRemainBalanceTool(
 		if (!balance.first) {
 			return ToolSupport.errorResult("invalid_balance", "LLM API不支持余额调用。")
 		}
-		return ToolSupport.gson.toJson(JsonObject().apply {
-			addProperty("tool", id)
+		return ToolSupport.result(id) {
 			addProperty("balance", balance.second)
 			addProperty("unit", "CNY")
-		})
+		}
 	}
 }

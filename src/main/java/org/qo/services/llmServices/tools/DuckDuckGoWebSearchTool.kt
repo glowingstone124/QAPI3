@@ -125,11 +125,10 @@ class DuckDuckGoWebSearchTool : Tools {
 					addProperty("snippet", result.get("snippet")?.takeIf { it.isJsonPrimitive }?.asString?.take(600).orEmpty())
 				})
 			}
-			return ToolSupport.gson.toJson(JsonObject().apply {
-				addProperty("tool", "web_search")
+			return ToolSupport.result("web_search") {
 				addProperty("query", query)
 				add("results", results)
-			})
+			}
 		}
 	}
 }

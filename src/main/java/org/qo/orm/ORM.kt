@@ -128,18 +128,22 @@ class UserORM() : CrudDao<Users> {
 		private const val SEARCH_USER_BY_PROFILE_UUID = "SELECT username FROM users WHERE profile_id = ? LIMIT 1"
 		private const val COUNT_USERS_SQL = "SELECT COUNT(*) AS total FROM users"
 
+		private fun removeCachedUser(uid: Long, cached: CachedUser) {
+			userByUidCache.remove(uid)
+			userByNameCache.remove(cached.user.username)
+			uidToNameCache.remove(uid)
+			nameToUidCache.remove(cached.user.username)
+			profileToNameCache.remove(cached.user.profile_id)
+			nameToProfileCache.remove(cached.user.username)
+		}
+
 		private fun trimUserCacheIfNeeded() {
 			if (userByUidCache.size <= maxUserCacheEntries) return
 
 			val currentTime = System.currentTimeMillis()
 			userByUidCache.forEach { (uid, cached) ->
 				if (currentTime >= cached.expiresAt) {
-					userByUidCache.remove(uid)
-					userByNameCache.remove(cached.user.username)
-					uidToNameCache.remove(uid)
-					nameToUidCache.remove(cached.user.username)
-					profileToNameCache.remove(cached.user.profile_id)
-					nameToProfileCache.remove(cached.user.username)
+					removeCachedUser(uid, cached)
 				}
 			}
 
@@ -149,14 +153,7 @@ class UserORM() : CrudDao<Users> {
 			userByUidCache.entries
 				.sortedBy { it.value.expiresAt }
 				.take(overflow)
-				.forEach { (uid, cached) ->
-					userByUidCache.remove(uid)
-					userByNameCache.remove(cached.user.username)
-					uidToNameCache.remove(uid)
-					nameToUidCache.remove(cached.user.username)
-					profileToNameCache.remove(cached.user.profile_id)
-					nameToProfileCache.remove(cached.user.username)
-				}
+				.forEach { (uid, cached) -> removeCachedUser(uid, cached) }
 		}
 	}
 
@@ -270,14 +267,11 @@ class UserORM() : CrudDao<Users> {
 
 	fun updatePassword(uid: Long, newPassword: String): Boolean = unsupportedSyncApi("UserORM.updatePassword")
 
-	suspend fun updatePasswordAsync(uid: Long, newPassword: String): Boolean = try {
-		database.execute(
+	suspend fun updatePasswordAsync(uid: Long, newPassword: String): Boolean =
+		updateField(
 			"UPDATE users SET password = ? WHERE uid = ?",
-			listOf(newPassword, uid),
-		) > 0
-	} finally {
-		invalidateUser(uid, null)
-	}
+			newPassword, uid,
+		)
 
 	fun invalidateByUsername(username: String) {
 		invalidateUser(null, username)
@@ -285,96 +279,60 @@ class UserORM() : CrudDao<Users> {
 
 	fun updateFrozenByUid(uid: Long, frozen: Boolean): Boolean = unsupportedSyncApi("UserORM.updateFrozenByUid")
 
-	suspend fun updateFrozenByUidAsync(uid: Long, frozen: Boolean): Boolean = try {
-		database.execute(
+	suspend fun updateFrozenByUidAsync(uid: Long, frozen: Boolean): Boolean =
+		updateField(
 			"UPDATE users SET frozen = ? WHERE uid = ?",
-			listOf(frozen, uid),
-		) > 0
-	} finally {
-		invalidateUser(uid, null)
-	}
+			frozen, uid,
+		)
 
 	fun updateLevelByUsername(username: String, newLevel: Int): Boolean =
 		unsupportedSyncApi("UserORM.updateLevelByUsername")
 
-	suspend fun updateLevelByUsernameAsync(username: String, newLevel: Int): Boolean = try {
-		database.execute(
+	suspend fun updateLevelByUsernameAsync(username: String, newLevel: Int): Boolean =
+		updateField(
 			"UPDATE users SET exp_level = ? WHERE username = ?",
-			listOf(newLevel, username),
-		) > 0
-	} finally {
-		invalidateUser(null, username)
-	}
+			newLevel, username,
+		)
 
 	fun updateLastLoginByUsername(username: String, lastLogin: Long): Boolean =
 		unsupportedSyncApi("UserORM.updateLastLoginByUsername")
 
-	suspend fun updateLastLoginByUsernameAsync(username: String, lastLogin: Long): Boolean = try {
-		database.execute(
+	suspend fun updateLastLoginByUsernameAsync(username: String, lastLogin: Long): Boolean =
+		updateField(
 			"UPDATE users SET last_login = ? WHERE username = ?",
-			listOf(lastLogin, username),
-		) > 0
+			lastLogin, username,
+		)
+
+	private suspend fun updateField(sql: String, value: Any, identity: Any): Boolean = try {
+		database.execute(sql, listOf(value, identity)) > 0
 	} finally {
-		invalidateUser(null, username)
+		when (identity) {
+			is Long -> invalidateUser(identity, null)
+			is String -> invalidateUser(null, identity)
+		}
 	}
 
 	override fun update(user: Users): Boolean = unsupportedSyncApi("UserORM.update")
 
 	suspend fun updateAsync(user: Users): Boolean {
-		val fields = mutableListOf<String>()
-		val values = mutableListOf<Any?>()
-		fields += "username = ?"
-		values += user.username
-		user.frozen?.let {
-			fields += "frozen = ?"
-			values += it
-		}
-		user.remain?.let {
-			fields += "remain = ?"
-			values += it
-		}
-		user.economy?.let {
-			fields += "economy = ?"
-			values += it
-		}
-		user.signed?.let {
-			fields += "signed = ?"
-			values += it
-		}
-		user.playtime?.let {
-			fields += "playtime = ?"
-			values += it
-		}
-		fields += "password = ?"
-		values += user.password
-		user.temp?.let {
-			fields += "temp = ?"
-			values += it
-		}
-		user.invite?.let {
-			fields += "invite = ?"
-			values += it
-		}
-		user.exp_level?.let {
-			fields += "exp_level = ?"
-			values += it
-		}
-		user.score?.let {
-			fields += "score = ?"
-			values += it
-		}
-		user.damage?.let {
-			fields += "damage = ?"
-			values += it
-		}
-		user.last_login?.let {
-			fields += "last_login = ?"
-			values += it
-		}
-		if (fields.isEmpty()) return false
+		val fields = listOf<Pair<String, Any?>>(
+			"username" to user.username,
+			"frozen" to user.frozen,
+			"remain" to user.remain,
+			"economy" to user.economy,
+			"signed" to user.signed,
+			"playtime" to user.playtime,
+			"password" to user.password,
+			"temp" to user.temp,
+			"invite" to user.invite,
+			"exp_level" to user.exp_level,
+			"score" to user.score,
+			"damage" to user.damage,
+			"last_login" to user.last_login,
+		).filter { (_, value) -> value != null }
 		val result = database.execute(
-			"UPDATE users SET ${fields.joinToString(", ")} WHERE uid = ?",
-			values + user.uid,
+			"UPDATE users SET ${fields.joinToString(", ") { (name, _) -> "$name = ?" }} WHERE uid = ?",
+			fields.map { it.second } + user.uid,
 		) > 0
 		invalidateUser(user.uid, user.username)
 		return result

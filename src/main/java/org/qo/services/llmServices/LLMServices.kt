@@ -4,22 +4,9 @@ import com.google.gson.JsonArray
 import com.google.gson.JsonElement
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
-import com.google.gson.JsonPrimitive
 import io.ktor.client.HttpClient
-import io.ktor.client.call.body
 import io.ktor.client.engine.cio.CIO
 import io.ktor.client.plugins.HttpTimeout
-import io.ktor.client.request.header
-import io.ktor.client.request.post
-import io.ktor.client.request.preparePost
-import io.ktor.client.request.setBody
-import io.ktor.client.statement.bodyAsChannel
-import io.ktor.client.statement.bodyAsText
-import io.ktor.http.ContentType
-import io.ktor.http.HttpHeaders
-import io.ktor.http.contentType
-import io.ktor.http.isSuccess
-import io.ktor.utils.io.readUTF8Line
 import jakarta.annotation.PostConstruct
 import jakarta.annotation.PreDestroy
 import kotlinx.coroutines.CompletableDeferred
@@ -28,29 +15,17 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.flow.onCompletion
-import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withTimeoutOrNull
 import org.qo.datas.Mapping
 import org.qo.datas.Nodes
 import org.qo.datas.ReactiveDatabase
 import org.qo.orm.UserORM
-import org.qo.redis.DatabaseType
-import org.qo.redis.Redis
 import org.qo.services.loginService.AuthorityNeededServicesImpl
 import org.qo.services.loginService.Login
 import org.qo.services.loginService.QqLoginService
-import org.qo.services.messageServices.Message
-import org.qo.services.messageServices.Msg
 import org.springframework.boot.context.event.ApplicationReadyEvent
 import org.springframework.context.event.EventListener
 import org.springframework.stereotype.Service
-import java.net.URLDecoder
 import java.nio.file.Path
-import java.nio.charset.StandardCharsets
-import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 
 @Service
@@ -74,7 +49,6 @@ class LLMServices(
 	internal val tokenStatisticsService: LLMTokenStatisticsService? = null,
 	internal val accessRecordRepository: org.qo.db.repository.LlmAccessRecordDbRepository = org.qo.db.repository.LlmAccessRecordDbRepository(database),
 ) {
-	internal val redis = Redis()
 	internal val debugPrompt = readBoolean("LLM_DEBUG_PROMPT", false)
 	internal val debugPromptMaxChars = readInt("LLM_DEBUG_PROMPT_MAX_CHARS", 12000).coerceAtLeast(1000)
 	internal val maxToolRounds = readInt("LLM_TOOL_MAX_ROUNDS", 3).coerceIn(1, 8)

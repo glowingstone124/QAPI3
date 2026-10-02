@@ -5,7 +5,6 @@ import com.google.gson.JsonElement
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import io.ktor.client.HttpClient
-import io.ktor.client.plugins.HttpRequestTimeoutException
 import io.ktor.client.plugins.timeout
 import io.ktor.client.request.header
 import io.ktor.client.request.post
@@ -14,8 +13,6 @@ import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.contentType
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.flow.flow
 
 // Web Builder steps trade cost for design quality: room for reasoning plus a full native batch.
 internal const val CLIENT_TOOL_OUTPUT_TOKENS = 16_384

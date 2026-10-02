@@ -50,18 +50,17 @@ class TransportationServiceImpl @Autowired constructor(
 
 	suspend fun queryStationsByLineId(lineId: Int): List<Station> {
 		val line = getLineById(lineId) ?: return emptyList()
-		val stationMap = repository.fetchStationsByIds(line.stationIds.toList())
-		return line.stationIds.mapNotNull { stationMap[it] }
+		return stationsForLine(line)
 	}
 
-	suspend fun queryStationsByLineName(name: String, fuzzy: Boolean = true): List<LineStations> {
-		return queryLinesByName(name, fuzzy).map { line ->
-			val stationMap = repository.fetchStationsByIds(line.stationIds.toList())
-			LineStations(
-				line = line,
-				stations = line.stationIds.mapNotNull { stationMap[it] },
-			)
+	suspend fun queryStationsByLineName(name: String, fuzzy: Boolean = true): List<LineStations> =
+		queryLinesByName(name, fuzzy).map { line ->
+			LineStations(line, stationsForLine(line))
 		}
+
+	private suspend fun stationsForLine(line: LineRecord): List<Station> {
+		val stationMap = repository.fetchStationsByIds(line.stationIds.toList())
+		return line.stationIds.mapNotNull { stationMap[it] }
 	}
 
 	suspend fun queryLineDetailById(lineId: Int): LineDetail? {
@@ -114,18 +113,7 @@ class TransportationServiceImpl @Autowired constructor(
 				val to = line.stationIds[i + 1]
 				val time = line.stationTimes[i].coerceAtLeast(0)
 				if (!stationMap.containsKey(from) || !stationMap.containsKey(to)) continue
-				adjacency.getOrPut(from) { mutableListOf() }.add(
-					Edge(
-						to = to,
-						time = time,
-						lineId = line.id,
-						lineName = line.name,
-						lineNameEn = line.name_en,
-						lineType = line.lineType,
-						dimension = line.dimension,
-						color = line.color,
-					),
-				)
+				adjacency.getOrPut(from) { mutableListOf() }.add(Edge(to, time, line))
 			}
 		}
 
@@ -141,14 +129,14 @@ class TransportationServiceImpl @Autowired constructor(
 			if (current.dist != currentDist) continue
 			val edges = adjacency[current.state.stationId] ?: continue
 			for (edge in edges) {
-				val transferCost = if (current.state.lineId != null && current.state.lineId != edge.lineId) {
+				val transferPenalty = if (current.state.lineId != null && current.state.lineId != edge.line.id) {
 					val fromType = lineTypeById[current.state.lineId]
-					if (fromType == LineType.WALK || edge.lineType == LineType.WALK) 0 else transferTimeSeconds
+					transferCost(fromType, edge.line.lineType)
 				} else {
 					0
 				}
-				val newDist = currentDist + edge.time + transferCost
-				val nextState = State(edge.to, edge.lineId)
+				val newDist = currentDist + edge.time + transferPenalty
+				val nextState = State(edge.to, edge.line.id)
 				val oldDist = dist[nextState]
 				if (oldDist == null || newDist < oldDist) {
 					dist[nextState] = newDist
@@ -169,7 +157,7 @@ class TransportationServiceImpl @Autowired constructor(
 		stationPath.add(currentState.stationId)
 		while (currentState.stationId != startStationId) {
 			val prevEdge = prev[currentState] ?: return null
-			edgePath.add(prevEdge.edge.copy(to = currentState.stationId))
+			edgePath.add(prevEdge.edge)
 			currentState = prevEdge.from
 			stationPath.add(currentState.stationId)
 		}
@@ -180,65 +168,26 @@ class TransportationServiceImpl @Autowired constructor(
 		val transfers = mutableListOf<TransferPoint>()
 		var transferTimeTotal = 0
 		if (edgePath.isNotEmpty()) {
-			var currentLineId = edgePath[0].lineId
-			var currentLineName = edgePath[0].lineName
-			var currentLineNameEn = edgePath[0].lineNameEn
-			var currentLineType = edgePath[0].lineType
-			var currentDimension = edgePath[0].dimension
-			var currentColor = edgePath[0].color
+			var currentLine = edgePath[0].line
 			var segmentTime = 0
 			var segmentStations = mutableListOf(stationPath[0])
 			for (i in edgePath.indices) {
 				val edge = edgePath[i]
-				if (edge.lineId != currentLineId) {
-					if (currentLineType != LineType.WALK && edge.lineType != LineType.WALK) {
-						segmentTime += transferTimeSeconds
-						transferTimeTotal += transferTimeSeconds
-					}
-					segments.add(
-						RouteSegment(
-							lineId = currentLineId,
-							lineName = currentLineName,
-							lineNameEn = currentLineNameEn,
-							lineType = currentLineType,
-							dimension = currentDimension,
-							color = currentColor,
-							stationIds = segmentStations.toList(),
-							time = segmentTime,
-						),
-					)
+				if (edge.line.id != currentLine.id) {
+					val transferPenalty = transferCost(currentLine.lineType, edge.line.lineType)
+					segmentTime += transferPenalty
+					transferTimeTotal += transferPenalty
+					segments.add(currentLine.toRouteSegment(segmentStations, segmentTime))
 					val transferStationId = stationPath[i]
-					transfers.add(
-						TransferPoint(
-							stationId = transferStationId,
-							fromLineId = currentLineId,
-							toLineId = edge.lineId,
-						),
-					)
-					currentLineId = edge.lineId
-					currentLineName = edge.lineName
-					currentLineNameEn = edge.lineNameEn
-					currentLineType = edge.lineType
-					currentDimension = edge.dimension
-					currentColor = edge.color
+					transfers.add(TransferPoint(transferStationId, currentLine.id, edge.line.id))
+					currentLine = edge.line
 					segmentTime = 0
 					segmentStations = mutableListOf(transferStationId)
 				}
 				segmentTime += edge.time
 				segmentStations.add(edge.to)
 			}
-			segments.add(
-				RouteSegment(
-					lineId = currentLineId,
-					lineName = currentLineName,
-					lineNameEn = currentLineNameEn,
-					lineType = currentLineType,
-					dimension = currentDimension,
-					color = currentColor,
-					stationIds = segmentStations.toList(),
-					time = segmentTime,
-				),
-			)
+			segments.add(currentLine.toRouteSegment(segmentStations, segmentTime))
 		}
 
 		return RouteResult(
@@ -248,9 +197,23 @@ class TransportationServiceImpl @Autowired constructor(
 			segments = segments,
 			transfers = transfers,
 			totalTime = edgePath.sumOf { it.time } + transferTimeTotal,
-			totalStops = edgePath.count { it.lineType != LineType.WALK },
+			totalStops = edgePath.count { it.line.lineType != LineType.WALK },
 		)
 	}
+
+	private fun transferCost(from: LineType?, to: LineType): Int =
+		if (from == LineType.WALK || to == LineType.WALK) 0 else transferTimeSeconds
+
+	private fun LineRecord.toRouteSegment(stations: List<String>, time: Int): RouteSegment = RouteSegment(
+		lineId = id,
+		lineName = name,
+		lineNameEn = name_en,
+		lineType = lineType,
+		dimension = dimension,
+		color = color,
+		stationIds = stations.toList(),
+		time = time,
+	)
 
 	private fun validateLineOrThrow(line: Line) {
 		require(line.stationIds.size >= 2) { "stationIds must have at least 2 stations" }
@@ -271,12 +234,7 @@ class TransportationServiceImpl @Autowired constructor(
 	private data class Edge(
 		val to: String,
 		val time: Int,
-		val lineId: Int,
-		val lineName: String,
-		val lineNameEn: String,
-		val lineType: LineType,
-		val dimension: Dimension,
-		val color: String,
+		val line: LineRecord,
 	)
 
 	private data class PrevEdge(

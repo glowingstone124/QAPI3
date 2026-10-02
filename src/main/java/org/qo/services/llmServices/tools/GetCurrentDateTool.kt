@@ -29,12 +29,7 @@ class GetCurrentDateTool : Tools {
 		executeAt(args, Clock.systemUTC())
 
 	internal fun executeAt(args: JsonObject, clock: Clock): String {
-		val requestedZone = args.get("timezone")
-			?.takeIf { !it.isJsonNull }
-			?.asString
-			?.trim()
-			.orEmpty()
-		val zoneName = requestedZone.ifBlank { DEFAULT_ZONE_ID }
+		val zoneName = args.stringArgument("timezone").orEmpty().ifBlank { DEFAULT_ZONE_ID }
 		val zone = try {
 			ZoneId.of(zoneName)
 		} catch (_: DateTimeException) {
@@ -45,8 +40,7 @@ class GetCurrentDateTool : Tools {
 		}
 
 		val now = ZonedDateTime.now(clock.withZone(zone))
-		return ToolSupport.gson.toJson(JsonObject().apply {
-			addProperty("tool", id)
+		return ToolSupport.result(id) {
 			addProperty("timezone", zone.id)
 			addProperty("datetime", DATE_TIME_FORMATTER.format(now))
 			addProperty("date", DATE_FORMATTER.format(now))
@@ -56,7 +50,7 @@ class GetCurrentDateTool : Tools {
 			addProperty("offset", now.offset.id)
 			addProperty("unix_timestamp", now.toEpochSecond())
 			addProperty("unix_timestamp_ms", now.toInstant().toEpochMilli())
-		})
+		}
 	}
 
 	private companion object {

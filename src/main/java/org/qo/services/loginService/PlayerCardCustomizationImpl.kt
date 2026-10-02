@@ -141,18 +141,10 @@ class PlayerCardCustomizationImpl @Autowired constructor(
 		}
 		card = cardProfileOrm.readAsync(uuid)!!
 		val jsonArray = JsonArray().apply {
-			add(JsonObject().apply {
-				val statistic = getStatistic(card.statistic1 ?: 0, uuid)
-				addProperty(statistic.first, statistic.second)
-			})
-			add(JsonObject().apply {
-				val statistic = getStatistic(card.statistic2 ?: 0, uuid)
-				addProperty(statistic.first, statistic.second)
-			})
-			add(JsonObject().apply {
-				val statistic = getStatistic(card.statistic3 ?: 0, uuid)
-				addProperty(statistic.first, statistic.second)
-			})
+			listOf(card.statistic1, card.statistic2, card.statistic3).forEach { type ->
+				val (name, value) = getStatistic(type ?: 0, uuid)
+				add(JsonObject().apply { addProperty(name, value) })
+			}
 		}
 		return JsonObject().apply {
 			addProperty("uuid", uuid)

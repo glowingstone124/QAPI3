@@ -22,17 +22,16 @@ class ForgetMemoryTool(
 	override suspend fun execute(args: JsonObject, context: LLMToolContext): String {
 		val groupId = context.groupId
 			?: return ToolSupport.errorResult("missing_group", "缺少群上下文，无法删除记忆")
-		val memoryId = args.get("memory_id")?.takeIf { !it.isJsonNull }?.asString?.trim()
-		val query = args.get("query")?.takeIf { !it.isJsonNull }?.asString?.trim()
+		val memoryId = args.stringArgument("memory_id")
+		val query = args.stringArgument("query")
 		if (memoryId.isNullOrBlank() && query.isNullOrBlank()) {
 			return ToolSupport.errorResult("bad_arguments", "memory_id 和 query 至少提供一个")
 		}
 		val removed = llmMemoryService.forget(groupId, memoryId, query)
-		return ToolSupport.gson.toJson(JsonObject().apply {
-			addProperty("tool", id)
+		return ToolSupport.result(id) {
 			addProperty("group_id", groupId)
 			addProperty("removed", removed.size)
 			add("memories", ToolSupport.gson.toJsonTree(removed))
-		})
+		}
 	}
 }

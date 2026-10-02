@@ -195,14 +195,7 @@ class LLMConversationService @Autowired constructor(
 		conversation.summary?.let { addProperty("summary", it) }
 		addProperty("updated_at", conversation.updatedAt)
 		addProperty("version", conversation.version)
-		add("messages", JsonArray().apply {
-			conversation.messages.forEach { message ->
-				add(JsonObject().apply {
-					addProperty("role", message.role)
-					add("content", message.content.deepCopy())
-				})
-			}
-		})
+		add("messages", conversation.messages.toJsonArray())
 	}.toString()
 
 	private fun decodeState(json: String): Conversation {
@@ -233,37 +226,10 @@ class LLMConversationService @Autowired constructor(
 		System.getenv(name)?.trim()?.toLongOrNull() ?: defaultValue
 
 	private fun estimateConversationTokens(conversation: Conversation): Int {
-		val summaryTokens = conversation.summary?.let(::estimateTextTokens) ?: 0
+		val summaryTokens = conversation.summary?.let(::estimateLlmTextTokens) ?: 0
 		return summaryTokens + conversation.messages.sumOf { message ->
-			estimateTextTokens(message.role) + estimateTokens(message.content) + 4
+			estimateLlmTextTokens(message.role) + estimateLlmTokens(message.content) + 4
 		}
-	}
-
-	private fun estimateTokens(element: JsonElement): Int = when {
-		element.isJsonNull -> 0
-		element.isJsonPrimitive -> estimateTextTokens(element.asString)
-		element.isJsonArray -> element.asJsonArray.sumOf(::estimateTokens)
-		element.isJsonObject -> element.asJsonObject.entrySet().sumOf { (key, value) ->
-			estimateTextTokens(key) + estimateTokens(value) + 1
-		}
-
-		else -> 0
-	}
-
-	private fun estimateTextTokens(text: String): Int {
-		if (text.isBlank()) return 1
-		var tokens = 0
-		var asciiCharacters = 0
-		for (character in text) {
-			if (character.code in 0x20..0x7E) {
-				asciiCharacters++
-			} else {
-				tokens += (asciiCharacters + 3) / 4
-				asciiCharacters = 0
-				tokens++
-			}
-		}
-		return (tokens + (asciiCharacters + 3) / 4).coerceAtLeast(1)
 	}
 
 	private data class Conversation(

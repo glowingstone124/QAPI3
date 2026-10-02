@@ -15,53 +15,7 @@ internal suspend fun LLMServices.dispatchCompleteChat(
 	val resolvedConvId = conversationId ?: extractConversationId(body)
 	val requester = principal.toRequester(conversationId = resolvedConvId, model = model)
 	val provider = providers.current().forMode(model)
-	if (provider.apiToken.isBlank()) {
-		return LLMNonStreamResult(500, errorJson("server_error", "LLM 上游令牌未配置"))
-	}
-	val request = normalizeRequest(body, false, requester, model, provider)
-	val requestId = insertAccessRecord(principal, request.preset, false, requester.groupName)
-	val quota = reserveQuota(principal, clientRequestId, request, provider)
-	quotaFailure(quota, principal)?.let {
-		updateAccessRecord(requestId, "rejected", errorMessage = it.body.take(512))
-		return it
-	}
-	val reservation = requireNotNull(quota.reservation)
-
-	var modelSucceeded = false
-	return try {
-		val (statusCode, rawText, actualRequest, actualProvider) = completeWithFallback(request, requester, "chat", provider)
-		modelSucceeded = statusCode in 200..299
-		val usage = parseUsage(rawText)
-		val settled = if (modelSucceeded) settleUsage(reservation, usage, actualRequest, actualProvider, requester.conversationId) else null
-		val text = if (settled != null) publicModel(attachQuota(rawText, settled), request.preset) else rawText
-		updateAccessRecord(
-			requestId,
-			if (statusCode in 200..299) "completed" else "failed",
-			usage,
-			text.take(512),
-			groupName = requester.groupName,
-			qqUid = requester.uid,
-		)
-		if (statusCode in 200..299) {
-			if (request.clientTools == null || extractToolCalls(rawText).isEmpty()) {
-				recordConversation(requester, request.userContent, text, actualProvider)
-			}
-		} else {
-			refundUsage(reservation, usage, actualRequest, actualProvider, requester.conversationId)
-		}
-		LLMNonStreamResult(statusCode, text, settled ?: quota.view)
-	} catch (e: Exception) {
-		LLMErrorLog.record("chat/complete", e, provider.name, requester, requestId)
-		if (!modelSucceeded) kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) { dailyQuotaService.refund(reservation) }
-		updateAccessRecord(
-			requestId,
-			"failed",
-			errorMessage = e.message,
-			groupName = requester.groupName,
-			qqUid = requester.uid,
-		)
-		LLMNonStreamResult(502, errorJson("upstream_error", e.message ?: "LLM 上游请求失败"), quota.view)
-	}
+	return completeAuthenticatedChat(body, principal, requester, model, provider, "chat", clientRequestId)
 }
 
 internal suspend fun LLMServices.dispatchStreamChat(
@@ -124,52 +78,7 @@ internal suspend fun LLMServices.dispatchCompleteBotChat(
 	val provider = providers.current().forMode(model)
 	val modelPreset = modelPresetFromRequest(model)
 		?: return LLMNonStreamResult(400, errorJson("model_not_available", "请求的模型不可用"))
-	if (provider.apiToken.isBlank()) {
-		return LLMNonStreamResult(500, errorJson("server_error", "LLM 上游令牌未配置"))
-	}
-	val request = normalizeRequest(body, false, requester, modelPreset, provider)
-	val requestId = insertAccessRecord(principal, request.preset, false, requester.groupName)
-	val quota = reserveQuota(principal, clientRequestId, request, provider)
-	quotaFailure(quota, principal)?.let {
-		updateAccessRecord(requestId, "rejected", errorMessage = it.body.take(512))
-		return it
-	}
-	val reservation = requireNotNull(quota.reservation)
-
-	var modelSucceeded = false
-	return try {
-		val (statusCode, rawText, actualRequest, actualProvider) = completeWithFallback(request, requester, "bot", provider)
-		modelSucceeded = statusCode in 200..299
-		val usage = parseUsage(rawText)
-		val settled = if (modelSucceeded) settleUsage(reservation, usage, actualRequest, actualProvider, requester.conversationId) else null
-		val formatted = if (modelSucceeded && request.botReplyMessages) LLMBotReplyFormat.formatResponse(rawText) else rawText
-		val text = if (settled != null) publicModel(attachQuota(formatted, settled), request.preset) else formatted
-		updateAccessRecord(
-			requestId,
-			if (statusCode in 200..299) "completed" else "failed",
-			usage,
-			text.take(512),
-			groupName = requester.groupName,
-			qqUid = requester.uid,
-		)
-		if (statusCode in 200..299) {
-			recordConversation(requester, request.userContent, text, actualProvider)
-		} else {
-			refundUsage(reservation, usage, actualRequest, actualProvider, requester.conversationId)
-		}
-		LLMNonStreamResult(statusCode, text, settled ?: quota.view)
-	} catch (e: Exception) {
-		LLMErrorLog.record("bot/complete", e, provider.name, requester, requestId)
-		if (!modelSucceeded) kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) { dailyQuotaService.refund(reservation) }
-		updateAccessRecord(
-			requestId,
-			"failed",
-			errorMessage = e.message,
-			groupName = requester.groupName,
-			qqUid = requester.uid,
-		)
-		LLMNonStreamResult(502, errorJson("upstream_error", e.message ?: "LLM 上游请求失败"), quota.view)
-	}
+	return completeAuthenticatedChat(body, principal, requester, modelPreset, provider, "bot", clientRequestId)
 }
 
 internal suspend fun LLMServices.dispatchCompleteMinecraftChat(
@@ -212,6 +121,18 @@ internal suspend fun LLMServices.dispatchCompleteMinecraftChat(
 		)
 	)
 	val provider = providers.current().forMode(model)
+	return completeAuthenticatedChat(body, principal, requester, model, provider, "minecraft", clientRequestId)
+}
+
+private suspend fun LLMServices.completeAuthenticatedChat(
+	body: String,
+	principal: LLMPrincipal,
+	requester: LLMServices.LLMRequester,
+	model: String,
+	provider: LLMProvider,
+	source: String,
+	clientRequestId: String?,
+): LLMNonStreamResult {
 	if (provider.apiToken.isBlank()) {
 		return LLMNonStreamResult(500, errorJson("server_error", "LLM 上游令牌未配置"))
 	}
@@ -226,27 +147,31 @@ internal suspend fun LLMServices.dispatchCompleteMinecraftChat(
 
 	var modelSucceeded = false
 	return try {
-		val (statusCode, rawText, actualRequest, actualProvider) = completeWithFallback(request, requester, "minecraft", provider)
+		val (statusCode, rawText, actualRequest, actualProvider) = completeWithFallback(request, requester, source, provider)
 		modelSucceeded = statusCode in 200..299
 		val usage = parseUsage(rawText)
 		val settled = if (modelSucceeded) settleUsage(reservation, usage, actualRequest, actualProvider, requester.conversationId) else null
-		val text = if (settled != null) publicModel(attachQuota(rawText, settled), request.preset) else rawText
+		val formatted = if (modelSucceeded && principal.source == LLMSource.QQ && request.botReplyMessages)
+			LLMBotReplyFormat.formatResponse(rawText) else rawText
+		val text = if (settled != null) publicModel(attachQuota(formatted, settled), request.preset) else formatted
 		updateAccessRecord(
 			requestId,
-			if (statusCode in 200..299) "completed" else "failed",
+			if (modelSucceeded) "completed" else "failed",
 			usage,
 			text.take(512),
 			groupName = requester.groupName,
 			qqUid = requester.uid,
 		)
-		if (statusCode in 200..299) {
-			recordConversation(requester, request.userContent, text, actualProvider)
+		if (modelSucceeded) {
+			if (principal.source != LLMSource.WEB || request.clientTools == null || extractToolCalls(rawText).isEmpty()) {
+				recordConversation(requester, request.userContent, text, actualProvider)
+			}
 		} else {
 			refundUsage(reservation, usage, actualRequest, actualProvider, requester.conversationId)
 		}
 		LLMNonStreamResult(statusCode, text, settled ?: quota.view)
 	} catch (e: Exception) {
-		LLMErrorLog.record("minecraft/complete", e, provider.name, requester, requestId)
+		LLMErrorLog.record("$source/complete", e, provider.name, requester, requestId)
 		if (!modelSucceeded) kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) { dailyQuotaService.refund(reservation) }
 		updateAccessRecord(
 			requestId,

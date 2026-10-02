@@ -84,12 +84,11 @@ class SetMsgEmojiLikeTool : Tools {
 				"Bot 返回 HTTP ${response.statusCode()}：${response.body().take(200)}"
 			)
 		}
-		return ToolSupport.gson.toJson(JsonObject().apply {
-			addProperty("tool", id)
+		return ToolSupport.result(id) {
 			addProperty("message_id", messageId)
 			addProperty("emoji_id", emoji.id)
 			addProperty("result", "ok")
-		})
+		}
 	}
 
 	private fun resolveEmoji(raw: String): EmojiReaction? {

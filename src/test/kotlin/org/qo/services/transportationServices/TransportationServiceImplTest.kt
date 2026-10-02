@@ -5,6 +5,8 @@ import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.EnumSource
 import org.qo.datas.ReactiveDatabase
 import org.springframework.r2dbc.connection.R2dbcTransactionManager
 import org.springframework.r2dbc.core.DatabaseClient
@@ -39,6 +41,54 @@ class TransportationServiceImplTest {
 		assertEquals("1号线-潜影贝农场方向-快速", route.segments.single().lineName)
 		assertEquals(58, route.segments.single().time)
 		assertEquals(0, route.transfers.size)
+	}
+
+	@ParameterizedTest
+	@EnumSource(value = LineType::class, names = ["RAPID", "WALK"])
+	fun calculateRoute_preservesSegmentsAndChargesOnlyVehicleTransfers(middleType: LineType) = runTest {
+		insertStations(listOf("S1", "S2", "S3", "S4", "S5"))
+		database.execute(
+			"""
+			INSERT INTO transportation_lines (id, name, name_en, color, line_type, dimension, station_ids, station_times)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?, ?)
+			""".trimIndent(),
+			listOf(
+				21, "First", "First EN", "#111111", "METRO", "OVERWORLD", """["S1","S2","S3"]""", "[10,20]",
+				22, "Middle", "Middle EN", "#222222", middleType.name, "NETHER", """["S3","S4"]""", "[30]",
+				23, "Last", "Last EN", "#333333", "METRO", "THE_END", """["S4","S5"]""", "[5]",
+			),
+		)
+
+		val route = requireNotNull(service.calculateRoute("S1", "S5"))
+		val penalty = if (middleType == LineType.WALK) 0 else 15
+		assertEquals(listOf("S1", "S2", "S3", "S4", "S5"), route.stationIds)
+		assertEquals(route.stationIds, route.stations.map { it.ID })
+		assertEquals(listOf(21, 22, 23), route.lineIds)
+		assertEquals(
+			listOf(
+				RouteSegment(21, "First", "First EN", LineType.METRO, Dimension.OVERWORLD,
+					"#111111", listOf("S1", "S2", "S3"), 30 + penalty),
+				RouteSegment(22, "Middle", "Middle EN", middleType, Dimension.NETHER,
+					"#222222", listOf("S3", "S4"), 30 + penalty),
+				RouteSegment(23, "Last", "Last EN", LineType.METRO, Dimension.THE_END,
+					"#333333", listOf("S4", "S5"), 5),
+			),
+			route.segments,
+		)
+		assertEquals(listOf(TransferPoint("S3", 21, 22), TransferPoint("S4", 22, 23)), route.transfers)
+		assertEquals(65 + 2 * penalty, route.totalTime)
+		assertEquals(route.totalTime, route.segments.sumOf { it.time })
+		assertEquals(if (middleType == LineType.WALK) 3 else 4, route.totalStops)
+	}
+
+	@Test
+	fun calculateRoute_sameStationReturnsEmptyJourney() = runTest {
+		val route = requireNotNull(service.calculateRoute("0111", "0111"))
+		assertEquals(listOf("0111"), route.stationIds)
+		assertEquals(emptyList<RouteSegment>(), route.segments)
+		assertEquals(emptyList<TransferPoint>(), route.transfers)
+		assertEquals(0, route.totalTime)
+		assertEquals(0, route.totalStops)
 	}
 
 	@Test
@@ -126,11 +176,7 @@ class TransportationServiceImplTest {
 			"0102",
 			"0101",
 		)
-		val stationPlaceholders = stationIds.joinToString(", ") { "(?, ?, ?, ?)" }
-		database.execute(
-			"INSERT INTO transportation_stations (id, name, name_en, screen_location) VALUES $stationPlaceholders",
-			stationIds.flatMap { stationId -> listOf(stationId, stationId, stationId, "[]") },
-		)
+		insertStations(stationIds)
 
 		database.execute(
 			"""
@@ -155,6 +201,14 @@ class TransportationServiceImplTest {
 				"""["0111","0108","0107","0106","0105","0104","0103","0102","0101"]""",
 				"[58,26,14,10,13,48,30,21,22]",
 			),
+		)
+	}
+
+	private suspend fun insertStations(ids: List<String>) {
+		val placeholders = ids.joinToString(", ") { "(?, ?, ?, ?)" }
+		database.execute(
+			"INSERT INTO transportation_stations (id, name, name_en, screen_location) VALUES $placeholders",
+			ids.flatMap { id -> listOf(id, id, id, "[]") },
 		)
 	}
 }

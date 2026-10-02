@@ -23,16 +23,15 @@ class SearchMinecraftKnowledgeTool(
 	)
 
 	override suspend fun execute(args: JsonObject, context: LLMToolContext): String {
-		val query = args.get("query")?.takeIf { !it.isJsonNull }?.asString?.trim().orEmpty()
+		val query = args.stringArgument("query").orEmpty()
 		if (query.isBlank()) {
 			return ToolSupport.errorResult("bad_arguments", "query 不能为空")
 		}
 		val content = ragService.buildContext(query, context.groupId)
-		return ToolSupport.gson.toJson(JsonObject().apply {
-			addProperty("tool", id)
+		return ToolSupport.result(id) {
 			addProperty("query", query)
 			addProperty("found", content != null)
 			addProperty("content", content ?: "知识库没有检索到相关资料。")
-		})
+		}
 	}
 }

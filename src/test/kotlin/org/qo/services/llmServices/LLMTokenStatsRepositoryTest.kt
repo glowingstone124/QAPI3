@@ -3,6 +3,7 @@ package org.qo.services.llmServices
 import io.r2dbc.spi.ConnectionFactories
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -57,6 +58,8 @@ class LLMTokenStatsRepositoryTest {
 		assertEquals(75L, updated.completionTokens)
 		assertEquals(525L, updated.totalTokens)
 		assertEquals(2L, updated.requestCount)
+		assertEquals(initial.createdAt, updated.createdAt)
+		assertTrue(updated.updatedAt >= initial.updatedAt)
 	}
 
 	@Test
@@ -83,6 +86,8 @@ class LLMTokenStatsRepositoryTest {
 		assertEquals(100L, updated.completionTokens)
 		assertEquals(1000L, updated.totalTokens)
 		assertEquals(2L, updated.requestCount)
+		assertEquals(initial.createdAt, updated.createdAt)
+		assertTrue(updated.updatedAt >= initial.updatedAt)
 	}
 
 	@Test
@@ -96,6 +101,7 @@ class LLMTokenStatsRepositoryTest {
 		assertEquals("group_high", groups[0].groupName)
 		assertEquals("group_mid", groups[1].groupName)
 		assertEquals("group_low", groups[2].groupName)
+		assertEquals("group_high", repository.listGroupStats(0).single().groupName)
 
 		repository.recordUserTokens(101L, cachedTokens = 10, uncachedTokens = 20, completionTokens = 10, totalTokens = 40)
 		repository.recordUserTokens(102L, cachedTokens = 500, uncachedTokens = 500, completionTokens = 100, totalTokens = 1100)
@@ -104,6 +110,39 @@ class LLMTokenStatsRepositoryTest {
 		assertEquals(2, users.size)
 		assertEquals(102L, users[0].qqUid)
 		assertEquals(101L, users[1].qqUid)
+		assertEquals(102L, repository.listUserStats(-1).single().qqUid)
+	}
+
+	@Test
+	fun `group keys truncate consistently for recording and querying`() = runTest {
+		val prefix = "g".repeat(128)
+		assertTrue(repository.recordGroupTokens("${prefix}first", 1, 2, 3, 6))
+		assertTrue(repository.recordGroupTokens("${prefix}second", 4, 5, 6, 15))
+
+		val stats = requireNotNull(repository.getGroupStats("${prefix}third"))
+		assertEquals(prefix, stats.groupName)
+		assertEquals(5L, stats.cachedTokens)
+		assertEquals(7L, stats.uncachedTokens)
+		assertEquals(9L, stats.completionTokens)
+		assertEquals(21L, stats.totalTokens)
+		assertEquals(2L, stats.requestCount)
+		assertEquals(stats, repository.listGroupStats().single())
+	}
+
+	@Test
+	fun `invalid keys are rejected and write failures return false`() = runTest {
+		assertFalse(repository.recordGroupTokens(" \t", 1, 2, 3, 6))
+		assertFalse(repository.recordUserTokens(0L, 1, 2, 3, 6))
+		assertFalse(repository.recordUserTokens(-1L, 1, 2, 3, 6))
+		assertNull(repository.getGroupStats(" \t"))
+		assertNull(repository.getUserStats(-1L))
+		assertTrue(repository.listGroupStats().isEmpty())
+		assertTrue(repository.listUserStats().isEmpty())
+
+		database.execute("DROP TABLE llm_group_token_stats")
+		database.execute("DROP TABLE llm_user_token_stats")
+		assertFalse(repository.recordGroupTokens("failed", 1, 2, 3, 6))
+		assertFalse(repository.recordUserTokens(1L, 1, 2, 3, 6))
 	}
 
 	@Test

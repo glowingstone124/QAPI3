@@ -3,8 +3,6 @@ package org.qo.db.repository
 import io.r2dbc.spi.R2dbcException
 import io.r2dbc.spi.Row
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import org.qo.datas.ReactiveDatabase
 import org.qo.services.llmServices.KotshiUsageRecord
 import org.qo.services.llmServices.KotshiUsageSummary
@@ -14,46 +12,39 @@ import org.springframework.stereotype.Repository
 class LlmAccessRecordDbRepository(
 	private val database: ReactiveDatabase,
 ) {
-	private val mutex = Mutex()
-	@Volatile
-	private var ready = false
+	private val schema = SchemaInitializer()
 
-	suspend fun ensureSchema() {
-		if (ready) return
-		mutex.withLock {
-			if (ready) return
-			database.execute(
-				"""
-				CREATE TABLE IF NOT EXISTS llm_access_records (
-					id BIGINT AUTO_INCREMENT PRIMARY KEY,
-					uid BIGINT NOT NULL,
-					username VARCHAR(128) NOT NULL,
-					source VARCHAR(32) NOT NULL DEFAULT 'unknown',
-					source_identity VARCHAR(128) NULL,
-					group_name VARCHAR(128) NULL,
-					request_id VARCHAR(80) NOT NULL,
-					model VARCHAR(128) NOT NULL,
-					stream BOOLEAN NOT NULL,
-					status VARCHAR(32) NOT NULL,
-					prompt_tokens INT NULL,
-					completion_tokens INT NULL,
-					total_tokens INT NULL,
-					cached_tokens INT NULL,
-					uncached_tokens INT NULL,
-					error_message VARCHAR(512) NULL,
-					created_at BIGINT NOT NULL,
-					completed_at BIGINT NULL,
-					INDEX idx_llm_access_uid_created (uid, created_at)
-				)
-				""".trimIndent(),
+	suspend fun ensureSchema() = schema.ensure {
+		database.execute(
+			"""
+			CREATE TABLE IF NOT EXISTS llm_access_records (
+				id BIGINT AUTO_INCREMENT PRIMARY KEY,
+				uid BIGINT NOT NULL,
+				username VARCHAR(128) NOT NULL,
+				source VARCHAR(32) NOT NULL DEFAULT 'unknown',
+				source_identity VARCHAR(128) NULL,
+				group_name VARCHAR(128) NULL,
+				request_id VARCHAR(80) NOT NULL,
+				model VARCHAR(128) NOT NULL,
+				stream BOOLEAN NOT NULL,
+				status VARCHAR(32) NOT NULL,
+				prompt_tokens INT NULL,
+				completion_tokens INT NULL,
+				total_tokens INT NULL,
+				cached_tokens INT NULL,
+				uncached_tokens INT NULL,
+				error_message VARCHAR(512) NULL,
+				created_at BIGINT NOT NULL,
+				completed_at BIGINT NULL,
+				INDEX idx_llm_access_uid_created (uid, created_at)
 			)
-			ensureColumn("source", "VARCHAR(32) NOT NULL DEFAULT 'unknown'")
-			ensureColumn("source_identity", "VARCHAR(128) NULL")
-			ensureColumn("group_name", "VARCHAR(128) NULL")
-			ensureColumn("cached_tokens", "INT NULL")
-			ensureColumn("uncached_tokens", "INT NULL")
-			ready = true
-		}
+			""".trimIndent(),
+		)
+		ensureColumn("source", "VARCHAR(32) NOT NULL DEFAULT 'unknown'")
+		ensureColumn("source_identity", "VARCHAR(128) NULL")
+		ensureColumn("group_name", "VARCHAR(128) NULL")
+		ensureColumn("cached_tokens", "INT NULL")
+		ensureColumn("uncached_tokens", "INT NULL")
 	}
 
 	private suspend fun columnExists(name: String): Boolean = database.one(

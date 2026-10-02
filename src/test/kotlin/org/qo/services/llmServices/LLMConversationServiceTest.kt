@@ -3,14 +3,40 @@ package org.qo.services.llmServices
 import com.google.gson.JsonParser
 import com.google.gson.JsonPrimitive
 import kotlinx.coroutines.runBlocking
+import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Files
+import java.nio.file.Path
 import java.util.Base64
 import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class LLMConversationServiceTest {
+    @TempDir lateinit var tempDir: Path
+
+    @Test
+    fun `token threshold compaction preserves role overhead and Unicode rounding`(): Unit = runBlocking {
+        val service = LLMConversationService(LLMImageStore.forTest(tempDir))
+        val compact = LLMCompactConfig(triggerTurns = 10, triggerPercent = 50, keepTurns = 1)
+        try {
+            repeat(2) {
+                service.append("below-threshold", JsonPrimitive("a中b"), "😀", compact)
+                service.append("at-threshold", JsonPrimitive("a中b"), "😀", compact)
+            }
+            // Each turn costs 17: user role 1 + content 3 + overhead 4; assistant role 3 + content 2 + overhead 4.
+            var summaries = 0
+            assertFalse(service.compactIfNeeded("below-threshold", 70, compact) { _, _ -> summaries++; "summary" })
+            assertTrue(service.compactIfNeeded("at-threshold", 68, compact) { _, _ -> summaries++; "summary" })
+            assertEquals(1, summaries)
+            assertEquals(4, service.historyMessages("below-threshold").size())
+            assertEquals(3, service.historyMessages("at-threshold").size())
+        } finally {
+            service.shutdown()
+        }
+    }
+
     @Test
     fun `compacts older turns and keeps a rolling summary with recent turns`() = runBlocking {
         val dir = createTempDirectory("qapi3-llm-compact-test")

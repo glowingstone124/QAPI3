@@ -106,6 +106,15 @@ class AuthCentralTest {
 		// 1. Unauthorized if no token
 		val unauth = controller.grantTicket(null, null, TicketGrantBody("https://ai.qoriginal.vip/callback"))
 		assertEquals(HttpStatus.UNAUTHORIZED, unauth.statusCode)
+		assertTrue(unauth.body!!.contains("\"result\":false"))
+
+		val missingService = controller.grantTicket("Bearer $userToken", null, TicketGrantBody())
+		assertEquals(HttpStatus.BAD_REQUEST, missingService.statusCode)
+		assertTrue(missingService.body!!.contains("\"message\":\"缺少 service 参数\""))
+		val missingParameters = controller.serviceValidateGet(null, null)
+		assertEquals(HttpStatus.BAD_REQUEST, missingParameters.statusCode)
+		assertTrue(missingParameters.body!!.contains("\"success\":false"))
+		assertTrue(missingParameters.body!!.contains("\"code\":\"BAD_REQUEST\""))
 
 		// 2. Bad request if service is untrusted
 		val untrusted = controller.grantTicket("Bearer $userToken", null, TicketGrantBody("https://phishing.com/callback"))
@@ -135,6 +144,7 @@ class AuthCentralTest {
 		// 5. Re-validation must fail
 		val replayedResp = controller.serviceValidatePost(ServiceValidateBody(ticket, "https://ai.qoriginal.vip/callback"))
 		assertEquals(HttpStatus.UNAUTHORIZED, replayedResp.statusCode)
+		assertTrue(replayedResp.body!!.contains("\"success\":false"))
 		assertTrue(replayedResp.body!!.contains("INVALID_TICKET"))
 
 		// 6. Test GET validation

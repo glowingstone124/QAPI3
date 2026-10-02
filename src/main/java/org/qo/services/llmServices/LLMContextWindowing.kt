@@ -47,17 +47,21 @@ internal fun LLMServices.requestedOutputTokens(request: JsonObject, contextWindo
 	return (explicit ?: minOf(4096, contextWindow / 4)).coerceAtLeast(0)
 }
 
-internal fun LLMServices.estimateTokens(element: JsonElement): Int = when {
+internal fun LLMServices.estimateTokens(element: JsonElement): Int = estimateLlmTokens(element)
+
+internal fun LLMServices.estimateTextTokens(text: String): Int = estimateLlmTextTokens(text)
+
+internal fun estimateLlmTokens(element: JsonElement): Int = when {
 	element.isJsonNull -> 0
-	element.isJsonPrimitive -> estimateTextTokens(element.asString)
-	element.isJsonArray -> element.asJsonArray.sumOf(::estimateTokens)
+	element.isJsonPrimitive -> estimateLlmTextTokens(element.asString)
+	element.isJsonArray -> element.asJsonArray.sumOf(::estimateLlmTokens)
 	element.isJsonObject -> element.asJsonObject.entrySet().sumOf { (key, value) ->
-		estimateTextTokens(key) + estimateTokens(value) + 1
+		estimateLlmTextTokens(key) + estimateLlmTokens(value) + 1
 	}
 	else -> 0
 }
 
-internal fun LLMServices.estimateTextTokens(text: String): Int {
+internal fun estimateLlmTextTokens(text: String): Int {
 	if (text.isBlank()) return 1
 	var tokens = 0
 	var asciiCharacters = 0

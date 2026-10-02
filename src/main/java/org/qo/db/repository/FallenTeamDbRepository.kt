@@ -1,8 +1,5 @@
 package org.qo.db.repository
 
-import io.r2dbc.spi.Row
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import org.qo.datas.ReactiveDatabase
 import org.qo.services.fallenServices.FallenRegistration
 import org.qo.services.fallenServices.FallenTeam
@@ -15,38 +12,31 @@ import java.time.Instant
 class FallenTeamDbRepository(
 	private val database: ReactiveDatabase,
 ) {
-	private val schemaMutex = Mutex()
-	@Volatile
-	private var schemaReady = false
+	private val schema = SchemaInitializer()
 
-	suspend fun ensureSchema() {
-		if (schemaReady) return
-		schemaMutex.withLock {
-			if (schemaReady) return
-			database.execute(
-				"""
-				CREATE TABLE IF NOT EXISTS fallen_team_selections (
-					username VARCHAR(64) NOT NULL PRIMARY KEY,
-					team CHAR(1) NOT NULL,
-					selected_at BIGINT NOT NULL,
-					actual_team CHAR(1) NULL,
-					assigned_at BIGINT NULL,
-					CONSTRAINT chk_fallen_team CHECK (team IN ('A', 'B', 'C'))
-				)
-				""".trimIndent(),
+	suspend fun ensureSchema() = schema.ensure {
+		database.execute(
+			"""
+			CREATE TABLE IF NOT EXISTS fallen_team_selections (
+				username VARCHAR(64) NOT NULL PRIMARY KEY,
+				team CHAR(1) NOT NULL,
+				selected_at BIGINT NOT NULL,
+				actual_team CHAR(1) NULL,
+				assigned_at BIGINT NULL,
+				CONSTRAINT chk_fallen_team CHECK (team IN ('A', 'B', 'C'))
 			)
-			database.execute(
-				"""
-				CREATE TABLE IF NOT EXISTS fallen_team_assignment_lock (
-					id TINYINT NOT NULL PRIMARY KEY
-				)
-				""".trimIndent(),
+			""".trimIndent(),
+		)
+		database.execute(
+			"""
+			CREATE TABLE IF NOT EXISTS fallen_team_assignment_lock (
+				id TINYINT NOT NULL PRIMARY KEY
 			)
-			database.execute("INSERT IGNORE INTO fallen_team_assignment_lock(id) VALUES (1)")
-			addColumnIfMissing("actual_team", "CHAR(1) NULL")
-			addColumnIfMissing("assigned_at", "BIGINT NULL")
-			schemaReady = true
-		}
+			""".trimIndent(),
+		)
+		database.execute("INSERT IGNORE INTO fallen_team_assignment_lock(id) VALUES (1)")
+		addColumnIfMissing("actual_team", "CHAR(1) NULL")
+		addColumnIfMissing("assigned_at", "BIGINT NULL")
 	}
 
 	private suspend fun addColumnIfMissing(column: String, definition: String) {

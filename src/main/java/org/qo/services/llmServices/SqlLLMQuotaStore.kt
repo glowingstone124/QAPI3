@@ -1,9 +1,8 @@
 package org.qo.services.llmServices
 
 import io.r2dbc.spi.Row
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import org.qo.datas.ReactiveDatabase
+import org.qo.db.repository.SchemaInitializer
 import org.springframework.stereotype.Component
 import java.math.BigDecimal
 import java.time.Instant
@@ -12,16 +11,9 @@ import java.time.ZoneId
 /** Durable account, reservations and payment grants share the same database transactions. */
 @Component
 class SqlLLMQuotaStore(private val db: ReactiveDatabase) : LLMQuotaStore {
-	private val schemaLock = Mutex()
-	@Volatile
-	private var ready = false
-	suspend fun schema() {
-		if (ready) return
-		schemaLock.withLock {
-			if (ready) return
-			for (sql in SCHEMA) db.execute(sql)
-			ready = true
-		}
+	private val schemaInitializer = SchemaInitializer()
+	suspend fun schema() = schemaInitializer.ensure {
+		for (sql in SCHEMA) db.execute(sql)
 	}
 
 	private fun period(key: String) = key.substringAfter("llm:weekly:").substringBeforeLast(':')

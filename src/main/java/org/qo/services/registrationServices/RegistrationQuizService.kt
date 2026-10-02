@@ -106,25 +106,19 @@ class RegistrationQuizService(
 		) return null
 
 		val score = session.questions.indices.count { answers[it] == session.questions[it].correctOption }
-		if (score < session.passingScore) {
-			return RegistrationQuizResult(
-				passed = false,
+		val passed = score >= session.passingScore
+		val token = if (passed) {
+			val token = Funcs.generateRandomString(48)
+			proofs[token] = RegistrationQuizProof(
+				name = session.name,
+				uid = session.uid,
 				score = score,
-				questionCount = session.questions.size,
-				passingScore = session.passingScore,
-				verificationToken = null
+				expiresAt = System.currentTimeMillis() + REGISTRATION_PROOF_TTL_MILLIS
 			)
-		}
-
-		val token = Funcs.generateRandomString(48)
-		proofs[token] = RegistrationQuizProof(
-			name = session.name,
-			uid = session.uid,
-			score = score,
-			expiresAt = System.currentTimeMillis() + REGISTRATION_PROOF_TTL_MILLIS
-		)
+			token
+		} else null
 		return RegistrationQuizResult(
-			passed = true,
+			passed = passed,
 			score = score,
 			questionCount = session.questions.size,
 			passingScore = session.passingScore,

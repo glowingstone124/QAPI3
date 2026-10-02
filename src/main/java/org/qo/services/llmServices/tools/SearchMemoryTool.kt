@@ -22,14 +22,13 @@ class SearchMemoryTool(
 	override suspend fun execute(args: JsonObject, context: LLMToolContext): String {
 		val groupId = context.groupId
 			?: return ToolSupport.errorResult("missing_group", "缺少群上下文，无法查询记忆")
-		val query = args.get("query")?.takeIf { !it.isJsonNull }?.asString?.trim().orEmpty()
+		val query = args.stringArgument("query").orEmpty()
 		if (query.isBlank()) return ToolSupport.errorResult("bad_arguments", "query 不能为空")
 		val memories = llmMemoryService.search(groupId, query, 8)
-		return ToolSupport.gson.toJson(JsonObject().apply {
-			addProperty("tool", id)
+		return ToolSupport.result(id) {
 			addProperty("group_id", groupId)
 			addProperty("returned", memories.size)
 			add("memories", ToolSupport.gson.toJsonTree(memories))
-		})
+		}
 	}
 }

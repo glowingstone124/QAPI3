@@ -12,6 +12,20 @@ import kotlin.test.assertFalse
 class LLMOutputBudgetTest {
     private val limitKeys = listOf("max_tokens", "max_completion_tokens", "max_output_tokens")
 
+    @Test
+    fun `token estimates preserve blank ASCII Unicode and nested JSON costs`() {
+        val services = Mockito.mock(LLMServices::class.java)
+        for ((text, expected) in listOf("" to 1, " \t\n" to 1, "abcd" to 1, "abcde" to 2, "a中b" to 3, "😀" to 2, "abcdef\n中" to 4)) {
+            assertEquals(expected, estimateLlmTextTokens(text), text)
+            assertEquals(expected, services.estimateTextTokens(text), text)
+        }
+        for ((json, expected) in listOf("null" to 0, "[]" to 0, "\"\"" to 1, """{"a":[null,"abcde",true,12],"中":"ab"}""" to 9)) {
+            val value = JsonParser.parseString(json)
+            assertEquals(expected, estimateLlmTokens(value), json)
+            assertEquals(expected, services.estimateTokens(value), json)
+        }
+    }
+
     private suspend fun normalize(protocol: LLMProtocol, mode: String, limitKey: String? = null): LLMServices.NormalizedRequest {
         val services = Mockito.mock(LLMServices::class.java, Mockito.RETURNS_DEEP_STUBS)
         Mockito.`when`(services.systemPrompt.current()).thenReturn("")

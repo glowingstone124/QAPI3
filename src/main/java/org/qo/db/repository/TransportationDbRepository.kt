@@ -2,8 +2,6 @@ package org.qo.db.repository
 
 import com.google.gson.Gson
 import io.r2dbc.spi.Row
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import org.qo.datas.ReactiveDatabase
 import org.qo.services.transportationServices.Dimension
 import org.qo.services.transportationServices.Line
@@ -19,9 +17,7 @@ class TransportationDbRepository(
 	private val database: ReactiveDatabase,
 ) {
 	private val gson = Gson()
-	private val schemaMutex = Mutex()
-	@Volatile
-	private var schemaReady = false
+	private val schema = SchemaInitializer()
 
 	private val createStationsTableSql = """
 		CREATE TABLE IF NOT EXISTS transportation_stations (
@@ -45,17 +41,12 @@ class TransportationDbRepository(
 		)
 	""".trimIndent()
 
-	suspend fun ensureTables() {
-		if (schemaReady) return
-		schemaMutex.withLock {
-			if (schemaReady) return
-			database.execute(createStationsTableSql)
-			database.execute(createLinesTableSql)
-			addColumnIfMissing("transportation_stations", "name_en", "VARCHAR(255) NOT NULL DEFAULT ''")
-			addColumnIfMissing("transportation_lines", "name_en", "VARCHAR(255) NOT NULL DEFAULT ''")
-			addColumnIfMissing("transportation_lines", "dimension", "VARCHAR(32) NOT NULL DEFAULT 'OVERWORLD'")
-			schemaReady = true
-		}
+	suspend fun ensureTables() = schema.ensure {
+		database.execute(createStationsTableSql)
+		database.execute(createLinesTableSql)
+		addColumnIfMissing("transportation_stations", "name_en", "VARCHAR(255) NOT NULL DEFAULT ''")
+		addColumnIfMissing("transportation_lines", "name_en", "VARCHAR(255) NOT NULL DEFAULT ''")
+		addColumnIfMissing("transportation_lines", "dimension", "VARCHAR(32) NOT NULL DEFAULT 'OVERWORLD'")
 	}
 
 	private suspend fun addColumnIfMissing(table: String, column: String, definition: String) {
@@ -133,15 +124,7 @@ class TransportationDbRepository(
 			""".trimIndent()
 			val affected = database.execute(
 				sql,
-				listOf(
-					line.name,
-					line.nameEn,
-					line.color,
-					line.lineType.name,
-					line.dimension.name,
-					gson.toJson(line.stationIds),
-					gson.toJson(line.stationTimes),
-				),
+				lineBindings(line),
 			)
 			if (affected == 0L) return@inTransaction null
 			runCatching {
@@ -167,16 +150,7 @@ class TransportationDbRepository(
 		""".trimIndent()
 		return database.execute(
 			sql,
-			listOf(
-				line.name,
-				line.nameEn,
-				line.color,
-				line.lineType.name,
-				line.dimension.name,
-				gson.toJson(line.stationIds),
-				gson.toJson(line.stationTimes),
-				lineId,
-			),
+			lineBindings(line) + lineId,
 		) > 0
 	}
 
@@ -220,10 +194,20 @@ class TransportationDbRepository(
 		).associateBy { it.ID }
 	}
 
+	private fun lineBindings(line: Line): List<Any> = listOf(
+		line.name,
+		line.nameEn,
+		line.color,
+		line.lineType.name,
+		line.dimension.name,
+		gson.toJson(line.stationIds),
+		gson.toJson(line.stationTimes),
+	)
+
 	private fun toStation(row: Row): Station = Station(
 		NAME = row.get("name", String::class.java).orEmpty(),
 		ID = row.get("id", String::class.java)!!,
-		SCREEN_LOCATION = parseLocations(row.get("screen_location", String::class.java)),
+		SCREEN_LOCATION = parseArray(row.get("screen_location", String::class.java), Array<Location>::class.java),
 		NAME_EN = row.get("name_en", String::class.java).orEmpty(),
 	)
 
@@ -231,8 +215,8 @@ class TransportationDbRepository(
 		val lineType = parseLineType(row.get("line_type", String::class.java)) ?: return null
 		return LineRecord(
 			id = numberValue(row, "id").toInt(),
-			stationIds = parseStringArray(row.get("station_ids", String::class.java)),
-			stationTimes = parseIntArray(row.get("station_times", String::class.java)),
+			stationIds = parseArray(row.get("station_ids", String::class.java), Array<String>::class.java),
+			stationTimes = parseArray(row.get("station_times", String::class.java), Array<Int>::class.java),
 			lineType = lineType,
 			dimension = parseDimension(row.get("dimension", String::class.java)) ?: Dimension.OVERWORLD,
 			name = row.get("name", String::class.java).orEmpty(),
@@ -249,19 +233,9 @@ class TransportationDbRepository(
 		}
 	}
 
-	private fun parseLocations(value: String?): Array<Location> {
+	private inline fun <reified T> parseArray(value: String?, type: Class<Array<T>>): Array<T> {
 		if (value.isNullOrBlank()) return emptyArray()
-		return gson.fromJson(value, Array<Location>::class.java)
-	}
-
-	private fun parseIntArray(value: String?): Array<Int> {
-		if (value.isNullOrBlank()) return emptyArray()
-		return gson.fromJson(value, Array<Int>::class.java)
-	}
-
-	private fun parseStringArray(value: String?): Array<String> {
-		if (value.isNullOrBlank()) return emptyArray()
-		return gson.fromJson(value, Array<String>::class.java)
+		return gson.fromJson(value, type)
 	}
 
 	private fun parseLineType(value: String?): LineType? {

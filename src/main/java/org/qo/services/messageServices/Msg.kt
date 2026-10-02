@@ -27,17 +27,10 @@ import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.atomic.AtomicBoolean
 
 @Service
-class Msg {
-	private val repository: MessageDbRepository
-
+class Msg(private val repository: MessageDbRepository) {
 	@Autowired
-	constructor(database: ReactiveDatabase, @Autowired(required = false) repository: MessageDbRepository? = null) {
-		this.repository = repository ?: MessageDbRepository(database)
-	}
-
-	constructor(repository: MessageDbRepository) {
-		this.repository = repository
-	}
+	constructor(database: ReactiveDatabase, @Autowired(required = false) repository: MessageDbRepository? = null) :
+		this(repository ?: MessageDbRepository(database))
 
 	private val scope = CoroutineScope(SupervisorJob())
 	private val flushMutex = Mutex()
@@ -74,13 +67,7 @@ class Msg {
 		}
 
 		fun put(message: String, from: Int, sender: String, time: Long) {
-			val msg = JsonObject().apply {
-				addProperty("message", message)
-				addProperty("from", from)
-				addProperty("sender", sender)
-				addProperty("time", time)
-			}
-			put(msg)
+			generalPut(Message(message, from, sender, time))
 		}
 
 		fun putSys(message: String) {

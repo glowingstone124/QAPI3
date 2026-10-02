@@ -22,7 +22,7 @@ class GetPlayerRankingsTool(
 	)
 
 	override suspend fun execute(args: JsonObject, context: LLMToolContext): String {
-		val limit = args.get("limit")?.takeIf { !it.isJsonNull }?.asInt ?: 10
+		val limit = args.argument("limit")?.asInt ?: 10
 		return rankingService.leaderboards(limit.coerceIn(1, 20)).toString()
 	}
 }

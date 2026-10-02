@@ -44,38 +44,19 @@ class CardProfileOrm : CrudDao<Mapping.CardProfile> {
 	override fun update(item: Mapping.CardProfile): Boolean = unsupportedSyncApi("CardProfileOrm.update")
 
 	suspend fun updateAsync(item: Mapping.CardProfile): Boolean {
-		val updates = mutableListOf<String>()
-		val params = mutableListOf<Any?>()
-
-		item.cardId?.let {
-			updates += "cardId = ?"
-			params += it
-		}
-		item.statistic1?.let {
-			updates += "statistic1 = ?"
-			params += it
-		}
-		item.statistic2?.let {
-			updates += "statistic2 = ?"
-			params += it
-		}
-		item.statistic3?.let {
-			updates += "statistic3 = ?"
-			params += it
-		}
-		item.avatar?.let {
-			updates += "avatar = ?"
-			params += it
-		}
-		item.owned?.let {
-			updates += "owned = ?"
-			params += it
-		}
+		val updates = listOf<Pair<String, Any?>>(
+			"cardId" to item.cardId,
+			"statistic1" to item.statistic1,
+			"statistic2" to item.statistic2,
+			"statistic3" to item.statistic3,
+			"avatar" to item.avatar,
+			"owned" to item.owned,
+		).filter { (_, value) -> value != null }
 		if (updates.isEmpty()) return false
 
 		return database.execute(
-			"UPDATE card_profile SET ${updates.joinToString(", ")} WHERE uuid = ?",
-			params + item.uuid,
+			"UPDATE card_profile SET ${updates.joinToString(", ") { (name, _) -> "$name = ?" }} WHERE uuid = ?",
+			updates.map { it.second } + item.uuid,
 		) > 0
 	}
 

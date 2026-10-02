@@ -149,14 +149,8 @@ internal suspend fun LLMServices.completeWithAnthropicApi(
 	source: String,
 	provider: LLMProvider,
 ): Pair<Int, String> {
-	val body = LLMAdapterRegistry.forProtocol(LLMProtocol.ANTHROPIC).adapt(
-		LLMAdapterRequest(
-			chat = JsonParser.parseString(request.body).asJsonObject,
-			functionTools = toolService.definitions(),
-			reasoningEffort = request.reasoningEffort,
-			webSearch = !toolService.usesRemoteSearch(),
-			thinkingMode = provider.modelConfig(request.preset).thinkingMode,
-		)
+	val body = adaptUpstreamRequest(
+		request, LLMProtocol.ANTHROPIC, thinkingMode = provider.modelConfig(request.preset).thinkingMode,
 	)
 	val (status, text) = runAnthropicUpstream(
 		client, provider.endpoint(LLMProtocol.ANTHROPIC), provider.apiToken, body, maxToolRounds,
@@ -185,7 +179,6 @@ internal fun LLMServices.streamFromAnthropic(
 	provider: LLMProvider,
 	quotaReservation: LLMQuotaReservation,
 ): kotlinx.coroutines.flow.Flow<String> = kotlinx.coroutines.flow.flow {
-	var accepted = false
 	var lastPhase: String? = null
 	val assistant = StringBuilder()
 	suspend fun progress(phase: String, label: String) {
@@ -211,15 +204,8 @@ internal fun LLMServices.streamFromAnthropic(
 	}
 	progress("analyzing", "正在分析问题…")
 	try {
-		val body = LLMAdapterRegistry.forProtocol(LLMProtocol.ANTHROPIC).adapt(
-			LLMAdapterRequest(
-				chat = JsonParser.parseString(request.body).asJsonObject,
-				functionTools = toolService.definitions(),
-				reasoningEffort = request.reasoningEffort,
-				stream = true,
-				webSearch = !toolService.usesRemoteSearch(),
-				thinkingMode = provider.modelConfig(request.preset).thinkingMode,
-			)
+		val body = adaptUpstreamRequest(
+			request, LLMProtocol.ANTHROPIC, stream = true, thinkingMode = provider.modelConfig(request.preset).thinkingMode,
 		)
 		val (status, text) = runAnthropicUpstream(
 			client, provider.endpoint(LLMProtocol.ANTHROPIC), provider.apiToken, body, maxToolRounds,
@@ -229,7 +215,6 @@ internal fun LLMServices.streamFromAnthropic(
 				toolService.execute(call.name, call.arguments, requester.toolContext(request.currentUserText))
 			},
 			onUpdate = { update(it) },
-			onAccepted = { accepted = true },
 			onRequest = { outgoing ->
 				logUpstreamRequest(source, outgoing, provider, "anthropic"); debugPrompt(
 				source,

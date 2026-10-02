@@ -1,7 +1,5 @@
 package org.qo.db.repository
 
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import org.qo.datas.ReactiveDatabase
 import org.springframework.stereotype.Repository
 import java.nio.charset.StandardCharsets
@@ -10,34 +8,28 @@ import java.security.MessageDigest
 /** Full turn archive plus the compact context needed to resume a conversation after a restart. */
 @Repository
 class LlmConversationHistoryDbRepository(private val database: ReactiveDatabase) {
-	private val schemaMutex = Mutex()
-	@Volatile private var schemaReady = false
+	private val schema = SchemaInitializer()
 
-	private suspend fun ensureSchema() {
-		if (schemaReady) return
-		schemaMutex.withLock {
-			if (schemaReady) return
-			database.execute("""
-				CREATE TABLE IF NOT EXISTS llm_conversation_turns (
-					id BIGINT AUTO_INCREMENT PRIMARY KEY,
-					conversation_hash CHAR(64) NOT NULL,
-					conversation_key TEXT NOT NULL,
-					user_content LONGTEXT NOT NULL,
-					assistant_content MEDIUMTEXT NOT NULL,
-					created_at BIGINT NOT NULL,
-					INDEX idx_llm_conversation_turns (conversation_hash, id)
-				)
-			""".trimIndent())
-			database.execute("""
-				CREATE TABLE IF NOT EXISTS llm_conversation_state (
-					conversation_hash CHAR(64) PRIMARY KEY,
-					conversation_key TEXT NOT NULL,
-					state_json LONGTEXT NOT NULL,
-					updated_at BIGINT NOT NULL
-				)
-			""".trimIndent())
-			schemaReady = true
-		}
+	private suspend fun ensureSchema() = schema.ensure {
+		database.execute("""
+			CREATE TABLE IF NOT EXISTS llm_conversation_turns (
+				id BIGINT AUTO_INCREMENT PRIMARY KEY,
+				conversation_hash CHAR(64) NOT NULL,
+				conversation_key TEXT NOT NULL,
+				user_content LONGTEXT NOT NULL,
+				assistant_content MEDIUMTEXT NOT NULL,
+				created_at BIGINT NOT NULL,
+				INDEX idx_llm_conversation_turns (conversation_hash, id)
+			)
+		""".trimIndent())
+		database.execute("""
+			CREATE TABLE IF NOT EXISTS llm_conversation_state (
+				conversation_hash CHAR(64) PRIMARY KEY,
+				conversation_key TEXT NOT NULL,
+				state_json LONGTEXT NOT NULL,
+				updated_at BIGINT NOT NULL
+			)
+		""".trimIndent())
 	}
 
 	suspend fun loadState(conversationKey: String): String? {

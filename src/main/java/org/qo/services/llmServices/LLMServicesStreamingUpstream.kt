@@ -25,16 +25,7 @@ internal fun LLMServices.streamFromUpstream(
 	provider: LLMProvider,
 	quotaReservation: LLMQuotaReservation,
 ): Flow<String> = flow {
-	val functionTools = toolService.definitions()
-	val upstreamBody = LLMAdapterRegistry.forProtocol(LLMProtocol.CHAT_COMPLETIONS).adapt(
-		LLMAdapterRequest(
-			chat = JsonParser.parseString(request.body).asJsonObject,
-			functionTools = functionTools,
-			reasoningEffort = request.reasoningEffort,
-			webSearch = !toolService.usesRemoteSearch(),
-		)
-	).toString()
-	var upstreamAccepted = false
+	val upstreamBody = adaptUpstreamRequest(request, LLMProtocol.CHAT_COMPLETIONS).toString()
 	var latestUsage: LLMServices.Usage? = null
 	var lastProgressKey: String? = null
 	suspend fun emitProgress(phase: String, label: String) {
@@ -97,7 +88,6 @@ internal fun LLMServices.streamFromUpstream(
 				emit(errorJson("upstream_error", errorBody.take(256)))
 				return@execute
 			}
-			upstreamAccepted = true
 
 			val assistantContent = StringBuilder()
 			if (response.contentType()?.match(ContentType.Text.EventStream) != true) {
@@ -170,19 +160,9 @@ internal fun LLMServices.streamFromResponses(
 	provider: LLMProvider,
 	quotaReservation: LLMQuotaReservation,
 ): Flow<String> = flow {
-	val functionTools = toolService.definitions()
-	val upstreamBody = LLMAdapterRegistry.forProtocol(LLMProtocol.RESPONSES).adapt(
-		LLMAdapterRequest(
-			chat = JsonParser.parseString(request.body).asJsonObject,
-			functionTools = functionTools,
-			reasoningEffort = request.reasoningEffort,
-			stream = true,
-			webSearch = !toolService.usesRemoteSearch(),
-		)
-	)
+	val upstreamBody = adaptUpstreamRequest(request, LLMProtocol.RESPONSES, stream = true)
 	val assistantContent = StringBuilder()
 	var totalUsage: LLMServices.Usage? = null
-	var upstreamAccepted = false
 	var lastProgressKey: String? = null
 	suspend fun emitProgress(phase: String, label: String) {
 		val key = "$phase:$label"
@@ -209,7 +189,6 @@ internal fun LLMServices.streamFromResponses(
 					upstreamError = response.bodyAsText()
 					return@execute
 				}
-				upstreamAccepted = true
 
 				val channel = response.bodyAsChannel()
 				while (!channel.isClosedForRead) {

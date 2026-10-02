@@ -2,7 +2,6 @@ package org.qo.services.llmServices
 
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.firstOrNull
-import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import org.qo.utils.AuthTokens
 import org.springframework.http.HttpHeaders
@@ -13,8 +12,6 @@ import org.springframework.http.codec.ServerSentEvent
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.util.PatternMatchUtils
 import org.springframework.web.bind.annotation.PathVariable
-import org.springframework.web.bind.annotation.DeleteMapping
-import org.springframework.web.bind.annotation.PatchMapping
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.RequestBody

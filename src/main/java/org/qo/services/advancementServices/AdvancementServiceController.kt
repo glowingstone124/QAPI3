@@ -35,37 +35,25 @@ class AdvancementServiceController(
 		@RequestHeader("Token") token: String,
 	): ResponseEntity<String> {
 		if (nodes.getServerFromToken(token) != 1) {
-			return ri.GeneralHttpHeader(JsonObject().apply {
-				addProperty("error", "invalid provider")
-				addProperty("result", false)
-			}.toString())
+			return response("invalid provider")
 		}
 		val eventBody = gson.fromJson(data, AdvancementEventBody::class.java)
 		val advancementEnumeration = AdvancementsEnum.fromId(eventBody.advancement)
-			?: return ri.GeneralHttpHeader(JsonObject().apply {
-				addProperty("error", "invalid advancement")
-				addProperty("result", false)
-			}.toString())
+			?: return response("invalid advancement")
 
 		return when (advancementServiceImpl.addAdvancementCompletion(advancementEnumeration, eventBody.player)) {
-			AdvancementServiceImpl.AddAdvancementResult.SUCCESS -> ri.GeneralHttpHeader(JsonObject().apply {
-				addProperty("error", "")
-				addProperty("result", true)
-			}.toString())
-			AdvancementServiceImpl.AddAdvancementResult.FAILED -> ri.GeneralHttpHeader(JsonObject().apply {
-				addProperty("error", "failed")
-				addProperty("result", false)
-			}.toString())
-			AdvancementServiceImpl.AddAdvancementResult.INVALID_PLAYER -> ri.GeneralHttpHeader(JsonObject().apply {
-				addProperty("error", "player invalid")
-				addProperty("result", false)
-			}.toString())
-			AdvancementServiceImpl.AddAdvancementResult.ALREADY_EXISTS -> ri.GeneralHttpHeader(JsonObject().apply {
-				addProperty("error", "already achieved advancement")
-				addProperty("result", false)
-			}.toString())
+			AdvancementServiceImpl.AddAdvancementResult.SUCCESS -> response("", true)
+			AdvancementServiceImpl.AddAdvancementResult.FAILED -> response("failed")
+			AdvancementServiceImpl.AddAdvancementResult.INVALID_PLAYER -> response("player invalid")
+			AdvancementServiceImpl.AddAdvancementResult.ALREADY_EXISTS -> response("already achieved advancement")
 		}
 	}
+
+	private fun response(error: String, result: Boolean = false): ResponseEntity<String> =
+		ri.GeneralHttpHeader(JsonObject().apply {
+			addProperty("error", error)
+			addProperty("result", result)
+		}.toString())
 
 	@GetMapping("/all")
 	suspend fun getAllAdvancements(): ResponseEntity<String> =

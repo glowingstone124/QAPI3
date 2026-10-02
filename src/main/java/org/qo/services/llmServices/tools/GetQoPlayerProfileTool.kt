@@ -27,10 +27,7 @@ class GetQoPlayerProfileTool(
     )
 
     override suspend fun execute(args: JsonObject, context: LLMToolContext): String {
-        val username = args.get("username")
-            ?.takeIf { !it.isJsonNull }
-            ?.asString
-            ?.trim()
+        val username = args.stringArgument("username")
             ?.takeIf { it.matches(MINECRAFT_USERNAME) }
             ?: return ToolSupport.errorResult("invalid_username", "请输入有效的 Minecraft 用户名")
 

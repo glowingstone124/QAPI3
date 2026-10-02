@@ -1,9 +1,8 @@
 package org.qo.services.llmServices
 
 import io.r2dbc.spi.Row
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import org.qo.datas.ReactiveDatabase
+import org.qo.db.repository.SchemaInitializer
 import org.springframework.stereotype.Repository
 import java.time.Instant
 
@@ -44,26 +43,18 @@ data class ResetCardRedemption(
 class SqlAccountSettingsRepository(
     private val db: ReactiveDatabase,
 ) : AccountSettingsRepository {
-    private val schemaLock = Mutex()
+    private val schemaInitializer = SchemaInitializer()
 
-    @Volatile
-    private var ready = false
-
-    override suspend fun schema() {
-        if (ready) return
-        schemaLock.withLock {
-            if (ready) return
-            for (sql in SCHEMA) db.execute(sql)
-            val hasExpiry = db.one(
-                """
-                SELECT COUNT(*) AS n FROM information_schema.columns
-                WHERE (table_schema=DATABASE() OR table_catalog=DATABASE())
-                  AND LOWER(table_name)='ai_reset_grant' AND LOWER(column_name)='expires_at'
-                """.trimIndent(),
-            ) { number(it, "n") }!! > 0
-            if (!hasExpiry) db.execute("ALTER TABLE ai_reset_grant ADD COLUMN expires_at BIGINT NULL")
-            ready = true
-        }
+    override suspend fun schema() = schemaInitializer.ensure {
+        for (sql in SCHEMA) db.execute(sql)
+        val hasExpiry = db.one(
+            """
+            SELECT COUNT(*) AS n FROM information_schema.columns
+            WHERE (table_schema=DATABASE() OR table_catalog=DATABASE())
+              AND LOWER(table_name)='ai_reset_grant' AND LOWER(column_name)='expires_at'
+            """.trimIndent(),
+        ) { number(it, "n") }!! > 0
+        if (!hasExpiry) db.execute("ALTER TABLE ai_reset_grant ADD COLUMN expires_at BIGINT NULL")
     }
 
     override suspend fun accountTargetExists(userId: Long): Boolean {

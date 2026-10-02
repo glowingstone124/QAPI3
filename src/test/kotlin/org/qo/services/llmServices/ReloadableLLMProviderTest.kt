@@ -1,5 +1,6 @@
 package org.qo.services.llmServices
 
+import com.google.gson.JsonParser
 import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Files
 import java.nio.file.Path
@@ -36,6 +37,42 @@ class ReloadableLLMProviderTest {
 			Thread.sleep(100)
 
 			assertEquals("first", providers.current().name)
+		}
+	}
+
+	@Test
+	fun `invalid configuration keeps the provider and a later valid update reloads`() {
+		val file = tempDir.resolve("providers.json")
+		Files.writeString(file, config("first"))
+		ReloadableLLMProvider(file, reloadDelayMs = 10, pollIntervalMs = 25).use { providers ->
+			providers.start()
+			Files.writeString(file, "{ invalid json")
+			Thread.sleep(100)
+			assertEquals("first", providers.current().name)
+
+			Files.writeString(file, config("second"))
+			awaitProvider(providers, "second")
+		}
+		Files.writeString(file, "{ invalid json")
+		assertFailsWith<IllegalStateException> { ReloadableLLMProvider(file) }
+	}
+
+	@Test
+	fun `polling reloads a token file outside the watched directory`() {
+		val file = tempDir.resolve("providers.json")
+		val tokenFile = Files.createDirectory(tempDir.resolve("tokens")).resolve("api-token")
+		Files.writeString(tokenFile, "first-token")
+		val configured = JsonParser.parseString(config("first")).asJsonObject
+		configured.getAsJsonObject("providers").getAsJsonObject("first").apply {
+			remove("token")
+			addProperty("tokenFile", tokenFile.toString())
+		}
+		Files.writeString(file, configured.toString())
+		ReloadableLLMProvider(file, reloadDelayMs = 10, pollIntervalMs = 25).use { providers ->
+			providers.start()
+			assertEquals("first-token", providers.current().apiToken)
+			Files.writeString(tokenFile, "rotated-token")
+			awaitProvider(providers, "first", "rotated-token")
 		}
 	}
 
@@ -171,11 +208,14 @@ class ReloadableLLMProviderTest {
 		}
 		""".trimIndent()
 
-	private fun awaitProvider(providers: ReloadableLLMProvider, expected: String) {
+	private fun awaitProvider(providers: ReloadableLLMProvider, expected: String, expectedToken: String? = null) {
 		val deadline = System.nanoTime() + 2_000_000_000L
-		while (System.nanoTime() < deadline && providers.current().name != expected) {
+		while (System.nanoTime() < deadline && providers.current().let {
+			it.name != expected || (expectedToken != null && it.apiToken != expectedToken)
+		}) {
 			Thread.sleep(20)
 		}
 		assertEquals(expected, providers.current().name)
+		if (expectedToken != null) assertEquals(expectedToken, providers.current().apiToken)
 	}
 }

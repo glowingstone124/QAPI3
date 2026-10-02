@@ -153,51 +153,34 @@ class AuthorityNeededServicesController(
 		@RequestHeader("token", required = false) token: String?,
 		@RequestHeader(HttpHeaders.AUTHORIZATION, required = false) authorization: String?,
 		@RequestParam ip: String
-	): ResponseEntity<String> {
-		val resolvedToken = resolveLoginToken(token, authorization) ?: return missingTokenResponse()
-		val (username, errorCode) = login.validate(resolvedToken)
-		if (authorityNeededServicesImpl.doPrecheck(username, errorCode) != null || username == null) {
-			return ri.GeneralHttpHeader(Return(1, authorityNeededServicesImpl.getErrorMessage(1)).serialized())
-		}
-		return when (ipWhitelistServices.joinWhitelist(ip, resolvedToken)) {
-			WhitelistReasons.SUCCESS -> ri.GeneralHttpHeader(Return(0, "ok").serialized())
-			WhitelistReasons.TOKEN_INVALID -> ri.GeneralHttpHeader(
-				Return(
-					1,
-					authorityNeededServicesImpl.getErrorMessage(1) + "(else)"
-				).serialized()
-			)
-
-			WhitelistReasons.IP_WHITELIST_FULL -> ri.GeneralHttpHeader(Return(2, "Too many ips").serialized())
-			WhitelistReasons.IP_NOT_FOUND -> ri.GeneralHttpHeader(Return(3, "IP not whitelisted").serialized())
-			WhitelistReasons.INVALID_IP -> ri.GeneralHttpHeader(Return(4, "Invalid IP address").serialized())
-		}
-	}
+	): ResponseEntity<String> = updateWhitelist(token, authorization, ip, ipWhitelistServices::joinWhitelist)
 
 	@DeleteMapping("/ip/remove")
 	suspend fun removeFromIpWhitelist(
 		@RequestHeader("token", required = false) token: String?,
 		@RequestHeader(HttpHeaders.AUTHORIZATION, required = false) authorization: String?,
 		@RequestParam ip: String
+	): ResponseEntity<String> = updateWhitelist(token, authorization, ip, ipWhitelistServices::leaveWhitelist)
+
+	private suspend fun updateWhitelist(
+		token: String?,
+		authorization: String?,
+		ip: String,
+		operation: suspend (String, String) -> WhitelistReasons,
 	): ResponseEntity<String> {
 		val resolvedToken = resolveLoginToken(token, authorization) ?: return missingTokenResponse()
 		val (username, errorCode) = login.validate(resolvedToken)
 		if (authorityNeededServicesImpl.doPrecheck(username, errorCode) != null || username == null) {
 			return ri.GeneralHttpHeader(Return(1, authorityNeededServicesImpl.getErrorMessage(1)).serialized())
 		}
-		return when (ipWhitelistServices.leaveWhitelist(ip, resolvedToken)) {
-			WhitelistReasons.SUCCESS -> ri.GeneralHttpHeader(Return(0, "ok").serialized())
-			WhitelistReasons.TOKEN_INVALID -> ri.GeneralHttpHeader(
-				Return(
-					1,
-					authorityNeededServicesImpl.getErrorMessage(1) + "(else)"
-				).serialized()
-			)
-
-			WhitelistReasons.IP_WHITELIST_FULL -> ri.GeneralHttpHeader(Return(2, "Too many ips").serialized())
-			WhitelistReasons.IP_NOT_FOUND -> ri.GeneralHttpHeader(Return(3, "IP not whitelisted").serialized())
-			WhitelistReasons.INVALID_IP -> ri.GeneralHttpHeader(Return(4, "Invalid IP address").serialized())
+		val result = when (operation(ip, resolvedToken)) {
+			WhitelistReasons.SUCCESS -> Return(0, "ok")
+			WhitelistReasons.TOKEN_INVALID -> Return(1, authorityNeededServicesImpl.getErrorMessage(1) + "(else)")
+			WhitelistReasons.IP_WHITELIST_FULL -> Return(2, "Too many ips")
+			WhitelistReasons.IP_NOT_FOUND -> Return(3, "IP not whitelisted")
+			WhitelistReasons.INVALID_IP -> Return(4, "Invalid IP address")
 		}
+		return ri.GeneralHttpHeader(result.serialized())
 	}
 
 	@GetMapping("/fortune")

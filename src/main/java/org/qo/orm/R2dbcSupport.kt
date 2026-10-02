@@ -10,11 +10,6 @@ internal fun unsupportedSyncApi(api: String): Nothing =
 	throw UnsupportedOperationException("$api requires a suspend/R2DBC caller")
 
 internal fun intValue(value: Any?): Int? = when (value) {
-	null -> null
-	is Int -> value
-	is Long -> value.toInt()
-	is Short -> value.toInt()
-	is Byte -> value.toInt()
 	is Number -> value.toInt()
 	is String -> value.toIntOrNull()
 	is Boolean -> if (value) 1 else 0
@@ -22,11 +17,6 @@ internal fun intValue(value: Any?): Int? = when (value) {
 }
 
 internal fun longValue(value: Any?): Long? = when (value) {
-	null -> null
-	is Long -> value
-	is Int -> value.toLong()
-	is Short -> value.toLong()
-	is Byte -> value.toLong()
 	is Number -> value.toLong()
 	is String -> value.toLongOrNull()
 	is Boolean -> if (value) 1L else 0L
@@ -34,7 +24,6 @@ internal fun longValue(value: Any?): Long? = when (value) {
 }
 
 internal fun booleanValue(value: Any?): Boolean? = when (value) {
-	null -> null
 	is Boolean -> value
 	is Number -> value.toInt() != 0
 	is String -> when (value.lowercase()) {

@@ -1,7 +1,6 @@
 package org.qo.db.repository
 
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
+import io.r2dbc.spi.Row
 import org.qo.datas.ReactiveDatabase
 import org.qo.services.llmServices.KotshiConversation
 import org.qo.services.llmServices.KotshiMessage
@@ -12,42 +11,35 @@ import java.util.UUID
 class KotshiConversationDbRepository(
 	private val database: ReactiveDatabase,
 ) {
-	private val schemaMutex = Mutex()
-	@Volatile
-	private var schemaReady = false
+	private val schema = SchemaInitializer()
 
-	suspend fun ensureSchema() {
-		if (schemaReady) return
-		schemaMutex.withLock {
-			if (schemaReady) return
-			database.execute(
-				"""
-				CREATE TABLE IF NOT EXISTS kotshi_conversations (
-					id VARCHAR(64) PRIMARY KEY,
-					uid BIGINT NOT NULL,
-					title VARCHAR(255) NOT NULL,
-					model VARCHAR(64) NOT NULL DEFAULT 'fast',
-					created_at BIGINT NOT NULL,
-					updated_at BIGINT NOT NULL,
-					INDEX idx_kotshi_conv_uid_updated (uid, updated_at DESC)
-				)
-				""".trimIndent()
+	suspend fun ensureSchema() = schema.ensure {
+		database.execute(
+			"""
+			CREATE TABLE IF NOT EXISTS kotshi_conversations (
+				id VARCHAR(64) PRIMARY KEY,
+				uid BIGINT NOT NULL,
+				title VARCHAR(255) NOT NULL,
+				model VARCHAR(64) NOT NULL DEFAULT 'fast',
+				created_at BIGINT NOT NULL,
+				updated_at BIGINT NOT NULL,
+				INDEX idx_kotshi_conv_uid_updated (uid, updated_at DESC)
 			)
-			database.execute(
-				"""
-				CREATE TABLE IF NOT EXISTS kotshi_messages (
-					id BIGINT AUTO_INCREMENT PRIMARY KEY,
-					conversation_id VARCHAR(64) NOT NULL,
-					uid BIGINT NOT NULL,
-					role VARCHAR(32) NOT NULL,
-					content MEDIUMTEXT NOT NULL,
-					created_at BIGINT NOT NULL,
-					INDEX idx_kotshi_msg_conv_created (conversation_id, created_at ASC)
-				)
-				""".trimIndent()
+			""".trimIndent()
+		)
+		database.execute(
+			"""
+			CREATE TABLE IF NOT EXISTS kotshi_messages (
+				id BIGINT AUTO_INCREMENT PRIMARY KEY,
+				conversation_id VARCHAR(64) NOT NULL,
+				uid BIGINT NOT NULL,
+				role VARCHAR(32) NOT NULL,
+				content MEDIUMTEXT NOT NULL,
+				created_at BIGINT NOT NULL,
+				INDEX idx_kotshi_msg_conv_created (conversation_id, created_at ASC)
 			)
-			schemaReady = true
-		}
+			""".trimIndent()
+		)
 	}
 
 	suspend fun listConversations(uid: Long): List<KotshiConversation> {
@@ -61,14 +53,7 @@ class KotshiConversationDbRepository(
 			""".trimIndent(),
 			listOf(uid),
 		) { row ->
-			KotshiConversation(
-				id = row.get("id", String::class.java) ?: "",
-				uid = (row.get("uid", Number::class.java)?.toLong()) ?: uid,
-				title = row.get("title", String::class.java) ?: "新对话",
-				model = row.get("model", String::class.java) ?: "fast",
-				createdAt = (row.get("created_at", Number::class.java)?.toLong()) ?: 0L,
-				updatedAt = (row.get("updated_at", Number::class.java)?.toLong()) ?: 0L,
-			)
+			toConversation(row, uid)
 		}
 	}
 
@@ -83,14 +68,7 @@ class KotshiConversationDbRepository(
 			""".trimIndent(),
 			listOf(uid, conversationId),
 		) { row ->
-			KotshiConversation(
-				id = row.get("id", String::class.java) ?: "",
-				uid = (row.get("uid", Number::class.java)?.toLong()) ?: uid,
-				title = row.get("title", String::class.java) ?: "新对话",
-				model = row.get("model", String::class.java) ?: "fast",
-				createdAt = (row.get("created_at", Number::class.java)?.toLong()) ?: 0L,
-				updatedAt = (row.get("updated_at", Number::class.java)?.toLong()) ?: 0L,
-			)
+			toConversation(row, uid)
 		}
 	}
 
@@ -216,4 +194,13 @@ class KotshiConversationDbRepository(
 			createdAt = now,
 		)
 	}
+
+	private fun toConversation(row: Row, fallbackUid: Long): KotshiConversation = KotshiConversation(
+		id = row.get("id", String::class.java).orEmpty(),
+		uid = row.get("uid", Number::class.java)?.toLong() ?: fallbackUid,
+		title = row.get("title", String::class.java) ?: "新对话",
+		model = row.get("model", String::class.java) ?: "fast",
+		createdAt = row.get("created_at", Number::class.java)?.toLong() ?: 0L,
+		updatedAt = row.get("updated_at", Number::class.java)?.toLong() ?: 0L,
+	)
 }

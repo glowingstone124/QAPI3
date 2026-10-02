@@ -1,11 +1,6 @@
 package org.qo.services.llmServices
 
 import jakarta.annotation.PreDestroy
-import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
-import kotlinx.coroutines.launch
 import org.qo.datas.ReactiveDatabase
 import org.springframework.boot.context.event.ApplicationReadyEvent
 import org.springframework.context.event.EventListener
@@ -25,56 +20,45 @@ interface LLMMemoryRepository {
 class R2dbcLLMMemoryRepository(
 	private val database: ReactiveDatabase,
 ) : LLMMemoryRepository {
-	private val initializationScope = CoroutineScope(SupervisorJob())
-	private val schemaReady = CompletableDeferred<Unit>()
+	private val schema = StartupSchemaInitializer("LLM memory table init failed")
 
 	@EventListener(ApplicationReadyEvent::class)
-	fun initializeSchema() {
-		initializationScope.launch {
-			try {
-				database.execute(
-					"""
-					CREATE TABLE IF NOT EXISTS llm_memories (
-						id VARCHAR(36) PRIMARY KEY,
-						group_id BIGINT NOT NULL,
-						subject VARCHAR(160) NOT NULL,
-						memory_key VARCHAR(80) NOT NULL,
-						fact TEXT NOT NULL,
-						category VARCHAR(40) NOT NULL,
-						source_uid VARCHAR(128) NULL,
-						source_name VARCHAR(160) NULL,
-						created_at BIGINT NOT NULL,
-						updated_at BIGINT NOT NULL,
-						expires_at BIGINT NULL,
-						UNIQUE KEY uk_llm_memory_identity (group_id, subject, memory_key),
-						INDEX idx_llm_memory_group_updated (group_id, updated_at),
-						INDEX idx_llm_memory_expires (expires_at)
-					)
-					""".trimIndent()
-				)
-				database.execute(
-					"""
-					CREATE TABLE IF NOT EXISTS llm_memory_migrations (
-						migration_key VARCHAR(128) PRIMARY KEY,
-						completed_at BIGINT NOT NULL
-					)
-					""".trimIndent()
-				)
-				schemaReady.complete(Unit)
-			} catch (error: Exception) {
-				schemaReady.completeExceptionally(error)
-				println("LLM memory table init failed: ${error.message}")
-			}
-		}
+	fun initializeSchema() = schema.start {
+		database.execute(
+			"""
+			CREATE TABLE IF NOT EXISTS llm_memories (
+				id VARCHAR(36) PRIMARY KEY,
+				group_id BIGINT NOT NULL,
+				subject VARCHAR(160) NOT NULL,
+				memory_key VARCHAR(80) NOT NULL,
+				fact TEXT NOT NULL,
+				category VARCHAR(40) NOT NULL,
+				source_uid VARCHAR(128) NULL,
+				source_name VARCHAR(160) NULL,
+				created_at BIGINT NOT NULL,
+				updated_at BIGINT NOT NULL,
+				expires_at BIGINT NULL,
+				UNIQUE KEY uk_llm_memory_identity (group_id, subject, memory_key),
+				INDEX idx_llm_memory_group_updated (group_id, updated_at),
+				INDEX idx_llm_memory_expires (expires_at)
+			)
+			""".trimIndent()
+		)
+		database.execute(
+			"""
+			CREATE TABLE IF NOT EXISTS llm_memory_migrations (
+				migration_key VARCHAR(128) PRIMARY KEY,
+				completed_at BIGINT NOT NULL
+			)
+			""".trimIndent()
+		)
 	}
 
 	@PreDestroy
-	fun shutdown() {
-		initializationScope.cancel()
-	}
+	fun shutdown() = schema.close()
 
 	override suspend fun findByGroup(groupId: Long): List<LLMMemoryRecord> {
-		schemaReady.await()
+		schema.await()
 		return database.all(
 			"""
 			SELECT id, group_id, subject, memory_key, fact, category, source_uid, source_name, created_at, updated_at, expires_at
@@ -88,7 +72,7 @@ class R2dbcLLMMemoryRepository(
 	}
 
 	override suspend fun findByIdentity(groupId: Long, subject: String, memoryKey: String): LLMMemoryRecord? {
-		schemaReady.await()
+		schema.await()
 		return database.one(
 			"""
 			SELECT id, group_id, subject, memory_key, fact, category, source_uid, source_name, created_at, updated_at, expires_at
@@ -102,7 +86,7 @@ class R2dbcLLMMemoryRepository(
 	}
 
 	override suspend fun insert(record: LLMMemoryRecord): Boolean {
-		schemaReady.await()
+		schema.await()
 		return database.execute(
 			"""
 			INSERT IGNORE INTO llm_memories
@@ -114,7 +98,7 @@ class R2dbcLLMMemoryRepository(
 	}
 
 	override suspend fun update(record: LLMMemoryRecord) {
-		schemaReady.await()
+		schema.await()
 		database.execute(
 			"""
 			UPDATE llm_memories
@@ -136,7 +120,7 @@ class R2dbcLLMMemoryRepository(
 
 	override suspend fun delete(groupId: Long, ids: List<String>) {
 		if (ids.isEmpty()) return
-		schemaReady.await()
+		schema.await()
 		ids.distinct().chunked(200).forEach { batch ->
 			if (batch.isEmpty()) return@forEach
 			database.execute(
@@ -147,7 +131,7 @@ class R2dbcLLMMemoryRepository(
 	}
 
 	override suspend fun isMigrationComplete(key: String): Boolean {
-		schemaReady.await()
+		schema.await()
 		return database.one(
 			"SELECT 1 FROM llm_memory_migrations WHERE migration_key = ?",
 			listOf(key),
@@ -155,7 +139,7 @@ class R2dbcLLMMemoryRepository(
 	}
 
 	override suspend fun markMigrationComplete(key: String) {
-		schemaReady.await()
+		schema.await()
 		database.execute(
 			"INSERT IGNORE INTO llm_memory_migrations(migration_key, completed_at) VALUES (?, ?)",
 			listOf(key, System.currentTimeMillis()),

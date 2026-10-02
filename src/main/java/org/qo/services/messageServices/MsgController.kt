@@ -27,15 +27,11 @@ class MsgController @Autowired constructor(
         val headers = HttpHeaders().apply {
             contentType = MediaType.APPLICATION_JSON
         }
-        return if (ua.isCLIToolRequest(request)) {
-	        ResponseEntity("failed", headers, HttpStatus.BAD_REQUEST)
-        } else {
-            if (nodes.validate_message(data)) {
-	            ResponseEntity("success", headers, HttpStatus.OK)
-            } else {
-	            ResponseEntity("failed", headers, HttpStatus.BAD_REQUEST)
-            }
-        }
+        val valid = !ua.isCLIToolRequest(request) && nodes.validate_message(data)
+        return ResponseEntity(
+            if (valid) "success" else "failed", headers,
+            if (valid) HttpStatus.OK else HttpStatus.BAD_REQUEST,
+        )
     }
 
     @GetMapping("/qo/msglist/download")

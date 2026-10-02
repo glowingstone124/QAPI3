@@ -42,18 +42,18 @@ class QueryMetroLinesTool(
 	)
 
 	override suspend fun execute(args: JsonObject, context: LLMToolContext): String {
-		val from = args.get("from")?.takeIf { !it.isJsonNull }?.asString?.trim().orEmpty()
-		val to = args.get("to")?.takeIf { !it.isJsonNull }?.asString?.trim().orEmpty()
+		val from = args.stringArgument("from").orEmpty()
+		val to = args.stringArgument("to").orEmpty()
 		val constraints = parseRouteConstraints(args)
 		if (from.isNotBlank() && to.isNotBlank()) {
 			return calculateTransportationRoute(from, to, constraints)
 		}
-		val query = args.get("query")?.takeIf { !it.isJsonNull }?.asString?.trim()
-			?: args.get("line")?.takeIf { !it.isJsonNull }?.asString?.trim()
-			?: args.get("name")?.takeIf { !it.isJsonNull }?.asString?.trim()
+		val query = args.stringArgument("query")
+			?: args.stringArgument("line")
+			?: args.stringArgument("name")
 			?: ""
-		val lineId = args.get("line_id")?.takeIf { !it.isJsonNull }?.asInt
-		val stationOnly = args.get("station_only")?.takeIf { !it.isJsonNull }?.asBoolean ?: false
+		val lineId = args.argument("line_id")?.asInt
+		val stationOnly = args.argument("station_only")?.asBoolean ?: false
 		queryTransportation(query, lineId)?.let { return it }
 
 		val root = JsonParser.parseString(metroService.getMetroJson()).asJsonObject
@@ -78,14 +78,13 @@ class QueryMetroLinesTool(
 					section.get("signal")?.let { add("signal", it) }
 				})
 			}
-		return ToolSupport.gson.toJson(JsonObject().apply {
-			addProperty("tool", id)
+		return ToolSupport.result(id) {
 			addProperty("query", query)
 			lineId?.let { addProperty("line_id", it) }
 			addProperty("station_only", stationOnly)
 			addProperty("returned", matches.size())
 			add("matches", matches)
-		})
+		}
 	}
 
 	private suspend fun calculateTransportationRoute(
@@ -95,51 +94,41 @@ class QueryMetroLinesTool(
 	): String {
 		val fromCandidates = findStations(from)
 		val toCandidates = findStations(to)
-		if (fromCandidates.isEmpty() || toCandidates.isEmpty()) {
-			return ToolSupport.gson.toJson(JsonObject().apply {
-				addProperty("tool", id)
-				addProperty("mode", "route")
-				addProperty("found", false)
-				addProperty("message", "起点或终点没有匹配到站点。")
-				add("constraints", constraintsToJson(constraints))
-				add("from_candidates", stationsToJson(fromCandidates))
-				add("to_candidates", stationsToJson(toCandidates))
-			})
-		}
-
 		val attempts = fromCandidates.take(3).flatMap { fromStation ->
 			toCandidates.take(3).map { toStation -> fromStation to toStation }
 		}
 		for ((fromStation, toStation) in attempts) {
 			val route = transportationService.calculateRoute(fromStation.ID, toStation.ID, constraints) ?: continue
-			return ToolSupport.gson.toJson(JsonObject().apply {
-				addProperty("tool", id)
+			return ToolSupport.result(id) {
 				addProperty("mode", "route")
 				addProperty("found", true)
 				add("constraints", constraintsToJson(constraints))
 				add("from", stationToJson(fromStation))
 				add("to", stationToJson(toStation))
 				add("route", ToolSupport.gson.toJsonTree(route))
-			})
+			}
 		}
 
-		return ToolSupport.gson.toJson(JsonObject().apply {
-			addProperty("tool", id)
+		return ToolSupport.result(id) {
 			addProperty("mode", "route")
 			addProperty("found", false)
-			addProperty("message", "站点存在，但没有计算到可用路线。")
+			addProperty("message", if (fromCandidates.isEmpty() || toCandidates.isEmpty()) {
+				"起点或终点没有匹配到站点。"
+			} else {
+				"站点存在，但没有计算到可用路线。"
+			})
 			add("constraints", constraintsToJson(constraints))
 			add("from_candidates", stationsToJson(fromCandidates))
 			add("to_candidates", stationsToJson(toCandidates))
-		})
+		}
 	}
 
 	private fun parseRouteConstraints(args: JsonObject): RouteConstraints {
 		val explicitDims = parseStringArray(args, "exclude_dims") + parseStringArray(args, "banned_dims")
 		val explicitTypes = parseStringArray(args, "exclude_types") + parseStringArray(args, "banned_types")
 		val avoid = listOf(
-			args.get("avoid")?.takeIf { !it.isJsonNull }?.asString,
-			args.get("preference")?.takeIf { !it.isJsonNull }?.asString,
+			args.argument("avoid")?.asString,
+			args.argument("preference")?.asString,
 		).filterNotNull().joinToString(" ")
 
 		val bannedDims = explicitDims.mapNotNull(::parseDimension).toMutableSet()
@@ -167,7 +156,7 @@ class QueryMetroLinesTool(
 	}
 
 	private fun parseStringArray(args: JsonObject, field: String): List<String> {
-		val value = args.get(field)?.takeIf { !it.isJsonNull } ?: return emptyList()
+		val value = args.argument(field) ?: return emptyList()
 		return when {
 			value.isJsonArray -> value.asJsonArray.mapNotNull { it.takeIf { item -> !item.isJsonNull }?.asString }
 			value.isJsonPrimitive -> value.asString.split(",").map { it.trim() }.filter { it.isNotBlank() }
@@ -228,8 +217,7 @@ class QueryMetroLinesTool(
 			else -> transportationService.listLines().take(maxMetroResults)
 		}
 		if (stations.isEmpty() && lines.isEmpty()) return@runCatching null
-		ToolSupport.gson.toJson(JsonObject().apply {
-			addProperty("tool", id)
+		ToolSupport.result(id) {
 			addProperty("mode", "search")
 			addProperty("query", query)
 			lineId?.let { addProperty("line_id", it) }
@@ -237,7 +225,7 @@ class QueryMetroLinesTool(
 			addProperty("line_returned", lines.size)
 			add("stations", stationsToJson(stations))
 			add("lines", ToolSupport.gson.toJsonTree(lines))
-		})
+		}
 	}.getOrNull()
 
 	private suspend fun findStations(query: String): List<Station> {

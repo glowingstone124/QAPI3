@@ -1,11 +1,6 @@
 package org.qo.services.llmServices
 
 import jakarta.annotation.PreDestroy
-import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
-import kotlinx.coroutines.launch
 import org.qo.datas.ReactiveDatabase
 import org.springframework.boot.context.event.ApplicationReadyEvent
 import org.springframework.context.event.EventListener
@@ -35,46 +30,35 @@ interface LLMChatHistoryRepository {
 class R2dbcLLMChatHistoryRepository(
 	private val database: ReactiveDatabase,
 ) : LLMChatHistoryRepository {
-	private val initializationScope = CoroutineScope(SupervisorJob())
-	private val schemaReady = CompletableDeferred<Unit>()
+	private val schema = StartupSchemaInitializer("LLM chat history table init failed")
 
 	@EventListener(ApplicationReadyEvent::class)
-	fun initializeSchema() {
-		initializationScope.launch {
-			try {
-				database.execute(
-					"""
-					CREATE TABLE IF NOT EXISTS llm_chat_history (
-						id BIGINT AUTO_INCREMENT PRIMARY KEY,
-						source_id VARCHAR(80) NOT NULL,
-						group_id BIGINT NOT NULL,
-						uid BIGINT NOT NULL,
-						name VARCHAR(160) NOT NULL,
-						content TEXT NOT NULL,
-						message_time BIGINT NOT NULL,
-						created_at BIGINT NOT NULL,
-						UNIQUE KEY uk_llm_chat_source (group_id, source_id),
-						INDEX idx_llm_chat_group_time (group_id, message_time),
-						INDEX idx_llm_chat_group_uid_time (group_id, uid, message_time)
-					)
-					""".trimIndent()
-				)
-				schemaReady.complete(Unit)
-			} catch (error: Exception) {
-				schemaReady.completeExceptionally(error)
-				println("LLM chat history table init failed: ${error.message}")
-			}
-		}
+	fun initializeSchema() = schema.start {
+		database.execute(
+			"""
+			CREATE TABLE IF NOT EXISTS llm_chat_history (
+				id BIGINT AUTO_INCREMENT PRIMARY KEY,
+				source_id VARCHAR(80) NOT NULL,
+				group_id BIGINT NOT NULL,
+				uid BIGINT NOT NULL,
+				name VARCHAR(160) NOT NULL,
+				content TEXT NOT NULL,
+				message_time BIGINT NOT NULL,
+				created_at BIGINT NOT NULL,
+				UNIQUE KEY uk_llm_chat_source (group_id, source_id),
+				INDEX idx_llm_chat_group_time (group_id, message_time),
+				INDEX idx_llm_chat_group_uid_time (group_id, uid, message_time)
+			)
+			""".trimIndent()
+		)
 	}
 
 	@PreDestroy
-	fun shutdown() {
-		initializationScope.cancel()
-	}
+	fun shutdown() = schema.close()
 
 	override suspend fun insert(records: List<LLMChatHistoryRecord>): Int {
 		if (records.isEmpty()) return 0
-		schemaReady.await()
+		schema.await()
 		return records.chunked(200).sumOf { batch ->
 			val placeholders = batch.joinToString(", ") { "(?, ?, ?, ?, ?, ?, ?)" }
 			database.execute(
@@ -106,7 +90,7 @@ class R2dbcLLMChatHistoryRepository(
 		toTime: Long?,
 		limit: Int,
 	): List<LLMChatHistoryRecord> {
-		schemaReady.await()
+		schema.await()
 		val clauses = mutableListOf("group_id = ?")
 		val bindings = mutableListOf<Any?>(groupId)
 		if (query.isNotBlank()) {
@@ -151,7 +135,7 @@ class R2dbcLLMChatHistoryRepository(
 	}
 
 	override suspend fun findGroupIds(limit: Int): List<Long> {
-		schemaReady.await()
+		schema.await()
 		return database.all(
 			"""
 			SELECT group_id
@@ -170,7 +154,7 @@ class R2dbcLLMChatHistoryRepository(
 		fromTime: Long,
 		limit: Int,
 	): List<LLMChatHistoryRecord> {
-		schemaReady.await()
+		schema.await()
 		val cursorClause = if (afterArchiveId > 0) "id > ?" else "message_time >= ?"
 		val cursorValue = if (afterArchiveId > 0) afterArchiveId else fromTime.coerceAtLeast(0)
 		return database.all(

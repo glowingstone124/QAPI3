@@ -45,15 +45,7 @@ class ReactiveDatabase(
 	private fun bind(
 		spec: DatabaseClient.GenericExecuteSpec,
 		bindings: List<Any?>,
-	): DatabaseClient.GenericExecuteSpec {
-		var bound = spec
-		bindings.forEachIndexed { index, value ->
-			bound = if (value == null) {
-				bound.bindNull(index, Any::class.java)
-			} else {
-				bound.bind(index, value)
-			}
-		}
-		return bound
+	): DatabaseClient.GenericExecuteSpec = bindings.foldIndexed(spec) { index, bound, value ->
+		if (value == null) bound.bindNull(index, Any::class.java) else bound.bind(index, value)
 	}
 }

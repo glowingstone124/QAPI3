@@ -31,7 +31,7 @@ class GetUserQuotaTool @Autowired constructor(
 
 	override suspend fun execute(args: JsonObject, context: LLMToolContext): String {
 		val currentUid = context.uid?.toLongOrNull()
-		val targetUid = args.get("target_uid")?.takeIf { !it.isJsonNull }?.asString?.trim()?.toLongOrNull() ?: currentUid
+		val targetUid = args.stringArgument("target_uid")?.toLongOrNull() ?: currentUid
 		if (targetUid == null || targetUid <= 0) {
 			return ToolSupport.errorResult("missing_uid", "缺少有效的用户 QQ 号")
 		}
@@ -45,8 +45,7 @@ class GetUserQuotaTool @Autowired constructor(
 		}
 		val view = decision.view
 
-		return ToolSupport.gson.toJson(JsonObject().apply {
-			addProperty("tool", id)
+		return ToolSupport.result(id) {
 			addProperty("uid", targetUid)
 			addProperty("has_qo_account", hasAccount)
 			addProperty("account_type", if (hasAccount) "QO绑定用户" else "游客")
@@ -60,6 +59,6 @@ class GetUserQuotaTool @Autowired constructor(
 				val (guestLimit, accountLimit) = dailyQuotaService.weeklyLimits()
 				addProperty("tip", "QQ 身份每周 $guestLimit Units。注册 QO 账户后同一身份提升至每周 $accountLimit Units，已用额度保留。")
 			}
-		})
+		}
 	}
 }

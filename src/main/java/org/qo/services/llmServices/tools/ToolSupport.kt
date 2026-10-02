@@ -3,10 +3,20 @@ package org.qo.services.llmServices.tools
 import com.google.gson.Gson
 import com.google.gson.GsonBuilder
 import com.google.gson.JsonArray
+import com.google.gson.JsonElement
 import com.google.gson.JsonObject
+
+internal fun JsonObject.argument(name: String): JsonElement? = get(name)?.takeUnless { it.isJsonNull }
+
+internal fun JsonObject.stringArgument(name: String): String? = argument(name)?.asString?.trim()
 
 internal object ToolSupport {
 	val gson: Gson = GsonBuilder().disableHtmlEscaping().create()
+
+	fun result(tool: String, build: JsonObject.() -> Unit): String = gson.toJson(JsonObject().apply {
+		addProperty("tool", tool)
+		build()
+	})
 
 	fun functionTool(
 		name: String,

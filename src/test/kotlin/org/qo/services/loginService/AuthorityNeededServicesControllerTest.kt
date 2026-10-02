@@ -2,6 +2,8 @@ package org.qo.services.loginService
 
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.ValueSource
 import org.mockito.Mockito
 import org.qo.TestApiApplication
 import org.qo.datas.Nodes
@@ -10,6 +12,7 @@ import org.qo.services.llmServices.KotshiAccountService
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.autoconfigure.web.reactive.AutoConfigureWebTestClient
 import org.springframework.boot.test.context.SpringBootTest
+import org.springframework.http.HttpMethod
 import org.springframework.http.MediaType
 import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.web.reactive.server.WebTestClient
@@ -130,5 +133,26 @@ class AuthorityNeededServicesControllerTest {
 			.expectStatus().isOk
 			.expectBody()
 			.jsonPath("$.code").isEqualTo(4)
+	}
+
+	@ParameterizedTest
+	@ValueSource(strings = ["add", "remove"])
+	fun whitelistOperations_requireValidLoginBeforeChangingIps(operation: String) = runBlocking {
+		val method = if (operation == "add") HttpMethod.GET else HttpMethod.DELETE
+		val uri = "/qo/authorization/ip/$operation?ip=example.com"
+		webTestClient.method(method).uri(uri).exchange()
+			.expectStatus().isOk.expectBody()
+			.jsonPath("$.code").isEqualTo(1)
+			.jsonPath("$.reason").isEqualTo("Missing token.")
+		Mockito.verifyNoInteractions(login)
+
+		Mockito.`when`(login.validate("expired-token")).thenReturn(null to 1)
+		Mockito.`when`(authorityNeededServices.doPrecheck(null, 1)).thenReturn("invalid")
+		Mockito.`when`(authorityNeededServices.getErrorMessage(1)).thenReturn("Invalid login")
+		webTestClient.method(method).uri(uri).header("Authorization", "Bearer expired-token").exchange()
+			.expectStatus().isOk.expectBody()
+			.jsonPath("$.code").isEqualTo(1)
+			.jsonPath("$.reason").isEqualTo("Invalid login")
+		Mockito.verifyNoInteractions(ipWhitelistServices)
 	}
 }

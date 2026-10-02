@@ -42,18 +42,9 @@ class AuthCentralController(
 				addProperty("redirectUrl", result.redirectUrl)
 				addProperty("expiresIn", result.expiresInSeconds)
 			}
-			TicketGrantResult.Unauthorized -> response(HttpStatus.UNAUTHORIZED) {
-				addProperty("result", false)
-				addProperty("message", "未提供有效凭据或当前会话已失效，请重新登录")
-			}
-			TicketGrantResult.MissingService -> response(HttpStatus.BAD_REQUEST) {
-				addProperty("result", false)
-				addProperty("message", "缺少 service 参数")
-			}
-			TicketGrantResult.UntrustedService -> response(HttpStatus.BAD_REQUEST) {
-				addProperty("result", false)
-				addProperty("message", "未受信任的重定向服务地址")
-			}
+			TicketGrantResult.Unauthorized -> grantFailure(HttpStatus.UNAUTHORIZED, "未提供有效凭据或当前会话已失效，请重新登录")
+			TicketGrantResult.MissingService -> grantFailure(HttpStatus.BAD_REQUEST, "缺少 service 参数")
+			TicketGrantResult.UntrustedService -> grantFailure(HttpStatus.BAD_REQUEST, "未受信任的重定向服务地址")
 		}
 	}
 
@@ -85,22 +76,21 @@ class AuthCentralController(
 				}
 				add("attributes", attributes)
 			}
-			ServiceValidateResult.MissingParameters -> response(HttpStatus.BAD_REQUEST) {
-				addProperty("success", false)
-				addProperty("code", "BAD_REQUEST")
-				addProperty("message", "缺少 ticket 或 service 参数")
-			}
-			ServiceValidateResult.InvalidTicket -> response(HttpStatus.UNAUTHORIZED) {
-				addProperty("success", false)
-				addProperty("code", "INVALID_TICKET")
-				addProperty("message", "票据无效、已过期或与目标服务不匹配")
-			}
-			ServiceValidateResult.AccountFrozen -> response(HttpStatus.FORBIDDEN) {
-				addProperty("success", false)
-				addProperty("code", "ACCOUNT_FROZEN")
-				addProperty("message", "绑定的 QO 账号已被冻结")
-			}
+			ServiceValidateResult.MissingParameters -> validationFailure(HttpStatus.BAD_REQUEST, "BAD_REQUEST", "缺少 ticket 或 service 参数")
+			ServiceValidateResult.InvalidTicket -> validationFailure(HttpStatus.UNAUTHORIZED, "INVALID_TICKET", "票据无效、已过期或与目标服务不匹配")
+			ServiceValidateResult.AccountFrozen -> validationFailure(HttpStatus.FORBIDDEN, "ACCOUNT_FROZEN", "绑定的 QO 账号已被冻结")
 		}
+	}
+
+	private fun grantFailure(status: HttpStatus, message: String): ResponseEntity<String> = response(status) {
+		addProperty("result", false)
+		addProperty("message", message)
+	}
+
+	private fun validationFailure(status: HttpStatus, code: String, message: String): ResponseEntity<String> = response(status) {
+		addProperty("success", false)
+		addProperty("code", code)
+		addProperty("message", message)
 	}
 
 	private fun response(status: HttpStatus, build: JsonObject.() -> Unit): ResponseEntity<String> =

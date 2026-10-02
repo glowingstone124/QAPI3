@@ -301,26 +301,16 @@ public class ApiApplication {
             statObj.addProperty("result", false);
             return Mono.just(new ResponseEntity<>(statObj.toString(), headers, HttpStatus.UNAUTHORIZED));
         }
-        switch (confirmation.task()) {
-            case 0:
-                return userProcess.validateMinecraftUser(confirmation.token(), confirmation.uid())
-                        .map(result -> {
-                            JsonObject statObj = new JsonObject();
-                            statObj.addProperty("result", result);
-                            return new ResponseEntity<>(statObj.toString(), headers, HttpStatus.OK);
-                        });
-            case 1:
-                return userProcess.validatePasswordUpdateRequest(confirmation.token(), confirmation.uid())
-                        .map(result -> {
-                            JsonObject passwordResult = new JsonObject();
-                            passwordResult.addProperty("result", result);
-                            return new ResponseEntity<>(passwordResult.toString(), headers, HttpStatus.OK);
-                        });
-            default:
-                JsonObject defaultResult = new JsonObject();
-                defaultResult.addProperty("result", false);
-                return Mono.just(new ResponseEntity<>(defaultResult.toString(), headers, HttpStatus.OK));
-        }
+        Mono<Boolean> verification = switch (confirmation.task()) {
+            case 0 -> userProcess.validateMinecraftUser(confirmation.token(), confirmation.uid());
+            case 1 -> userProcess.validatePasswordUpdateRequest(confirmation.token(), confirmation.uid());
+            default -> Mono.just(false);
+        };
+        return verification.map(result -> {
+            JsonObject response = new JsonObject();
+            response.addProperty("result", result);
+            return new ResponseEntity<>(response.toString(), headers, HttpStatus.OK);
+        });
     }
 
     public record ConfirmationRequest(String token, Long uid, int task) {}

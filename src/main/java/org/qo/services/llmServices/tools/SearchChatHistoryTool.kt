@@ -26,19 +26,18 @@ class SearchChatHistoryTool(
 	override suspend fun execute(args: JsonObject, context: LLMToolContext): String {
 		val groupId = context.groupId
 			?: return ToolSupport.errorResult("missing_group", "缺少群上下文，无法查询聊天历史")
-		val query = args.get("query")?.takeIf { !it.isJsonNull }?.asString?.trim().orEmpty()
-		val uid = args.get("uid")?.takeIf { !it.isJsonNull }?.asLong
-		val fromTime = normalizeTimestamp(args.get("from_time")?.takeIf { !it.isJsonNull }?.asLong)
-		val toTime = normalizeTimestamp(args.get("to_time")?.takeIf { !it.isJsonNull }?.asLong)
-		val limit = args.get("limit")?.takeIf { !it.isJsonNull }?.asInt ?: 12
+		val query = args.stringArgument("query").orEmpty()
+		val uid = args.argument("uid")?.asLong
+		val fromTime = normalizeTimestamp(args.argument("from_time")?.asLong)
+		val toTime = normalizeTimestamp(args.argument("to_time")?.asLong)
+		val limit = args.argument("limit")?.asInt ?: 12
 		val messages = chatHistoryService.search(groupId, query, uid, fromTime, toTime, limit)
 			.map { it.copy(content = it.content.take(1000)) }
-		return ToolSupport.gson.toJson(JsonObject().apply {
-			addProperty("tool", id)
+		return ToolSupport.result(id) {
 			addProperty("group_id", groupId)
 			addProperty("returned", messages.size)
 			add("messages", ToolSupport.gson.toJsonTree(messages))
-		})
+		}
 	}
 
 	private fun normalizeTimestamp(value: Long?): Long? =

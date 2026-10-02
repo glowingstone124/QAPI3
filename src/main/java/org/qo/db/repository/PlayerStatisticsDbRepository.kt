@@ -1,8 +1,5 @@
 package org.qo.db.repository
 
-import io.r2dbc.spi.Row
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import org.qo.datas.ReactiveDatabase
 import org.qo.services.playerStatistics.PlayerStatistics
 import org.qo.services.playerStatistics.PlayerStatisticsSnapshot
@@ -12,9 +9,7 @@ import org.springframework.stereotype.Repository
 class PlayerStatisticsDbRepository(
 	private val database: ReactiveDatabase,
 ) {
-	private val schemaMutex = Mutex()
-	@Volatile
-	private var schemaReady = false
+	private val schema = SchemaInitializer()
 
 	private val createTableSql = """
 		CREATE TABLE IF NOT EXISTS player_statistics (
@@ -39,13 +34,8 @@ class PlayerStatisticsDbRepository(
 			updated_at = GREATEST(updated_at, incoming.updated_at)
 	""".trimIndent()
 
-	suspend fun ensureTable() {
-		if (schemaReady) return
-		schemaMutex.withLock {
-			if (schemaReady) return
-			database.execute(createTableSql)
-			schemaReady = true
-		}
+	suspend fun ensureTable() = schema.ensure {
+		database.execute(createTableSql)
 	}
 
 	suspend fun userExists(username: String): Boolean =

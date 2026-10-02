@@ -33,18 +33,18 @@ class UpsertMemberProfileTool(
 		}
 		val currentUid = context.uid?.toLongOrNull()
 			?: return ToolSupport.errorResult("missing_uid", "缺少当前提问者 QQ uid")
-		val targetUid = args.get("qq_uid")?.takeIf { !it.isJsonNull }?.asString?.trim()?.toLongOrNull()
+		val targetUid = args.stringArgument("qq_uid")?.toLongOrNull()
 			?: return ToolSupport.errorResult("bad_arguments", "qq_uid 必须是有效 QQ 号")
 		if (targetUid != currentUid) {
 			return ToolSupport.errorResult("forbidden_target", "只能更新当前提问者本人的画像")
 		}
-		val fieldKey = args.get("field_key")?.takeIf { !it.isJsonNull }?.asString?.trim().orEmpty()
-		val value = args.get("value")?.takeIf { !it.isJsonNull }?.asString?.trim().orEmpty()
+		val fieldKey = args.stringArgument("field_key").orEmpty()
+		val value = args.stringArgument("value").orEmpty()
 		if (fieldKey.isBlank() || value.isBlank()) {
 			return ToolSupport.errorResult("bad_arguments", "field_key 和 value 不能为空")
 		}
 		val category = LLMGroupChatPolicy.EXPLICIT_USER_PROFILE_CATEGORY
-		val requestedScope = args.get("scope")?.takeIf { !it.isJsonNull }?.asString?.trim()?.lowercase()
+		val requestedScope = args.stringArgument("scope")?.lowercase()
 		if (fieldKey.equals("group_nickname", true) && requestedScope == "global") {
 			return ToolSupport.errorResult("bad_arguments", "group_nickname 必须使用 group 作用域")
 		}
@@ -63,14 +63,13 @@ class UpsertMemberProfileTool(
 			sourceUid = context.uid,
 			sourceName = context.name,
 		) ?: return ToolSupport.errorResult("bad_arguments", "画像字段无效")
-		return ToolSupport.gson.toJson(JsonObject().apply {
-			addProperty("tool", id)
+		return ToolSupport.result(id) {
 			addProperty("saved", true)
 			addProperty("created", mutation.created)
 			addProperty("changed", mutation.changed)
 			addProperty("qq_uid", targetUid)
 			addProperty("profile_id", mutation.profile.profileId)
 			add("field", ToolSupport.gson.toJsonTree(mutation.field))
-		})
+		}
 	}
 }

@@ -9,6 +9,8 @@ import org.qo.utils.UAUtil
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.autoconfigure.web.reactive.AutoConfigureWebTestClient
 import org.springframework.boot.test.context.SpringBootTest
+import org.springframework.http.server.reactive.ServerHttpRequest
+import org.springframework.mock.http.server.reactive.MockServerHttpRequest
 import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.web.reactive.server.WebTestClient
 
@@ -38,6 +40,16 @@ class MsgControllerTest {
 			.expectStatus().isOk
 			.expectBody(String::class.java)
 			.isEqualTo("success")
+	}
+
+	@Test
+	fun upload_rejectsCliRequestBeforeProcessingMessage() {
+		Mockito.`when`(ua.isCLIToolRequest(Mockito.any(ServerHttpRequest::class.java)
+			?: MockServerHttpRequest.get("/qo/msglist/upload").build())).thenReturn(true)
+		webTestClient.post().uri("/qo/msglist/upload").bodyValue("{}")
+			.exchange().expectStatus().isBadRequest
+			.expectBody(String::class.java).isEqualTo("failed")
+		Mockito.verifyNoInteractions(nodes)
 	}
 
 	@Test
