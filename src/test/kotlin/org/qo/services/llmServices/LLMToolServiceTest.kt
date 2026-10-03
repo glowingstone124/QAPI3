@@ -27,6 +27,7 @@ class LLMToolServiceTest {
 		"get_remain_balance",
 		"get_user_quota",
 		"set_msg_emoji_like",
+		"generate_image",
 	)
 
 	private val search = DuckDuckGoWebSearchTool()
@@ -68,6 +69,28 @@ class LLMToolServiceTest {
 			LLMToolContext(groupId = null, uid = "10001", name = "user", source = "web"), excluded,
 		)
 		assertEquals("tool_unavailable", JsonParser.parseString(result).asJsonObject.get("error").asString)
+	}
+
+	@Test
+	fun `generate_image is excluded from definitions for non-qq source`() = runBlocking {
+		val webNames = service.definitions(source = "web").map { it.asJsonObject.getAsJsonObject("function").get("name").asString }
+		assertEquals(false, "generate_image" in webNames)
+
+		val minecraftNames = service.definitions(source = "minecraft").map { it.asJsonObject.getAsJsonObject("function").get("name").asString }
+		assertEquals(false, "generate_image" in minecraftNames)
+
+		val qqNames = service.definitions(source = "qq").map { it.asJsonObject.getAsJsonObject("function").get("name").asString }
+		assertEquals(true, "generate_image" in qqNames)
+	}
+
+	@Test
+	fun `generate_image execution rejects non-qq users`() = runBlocking {
+		val result = service.execute(
+			"generate_image",
+			"""{"prompt":"a test image"}""",
+			LLMToolContext(groupId = 946085440L, uid = "10001", name = "user", source = "web"),
+		)
+		assertEquals("qq_only_tool", JsonParser.parseString(result).asJsonObject.get("error").asString)
 	}
 
 	private class StubTool(

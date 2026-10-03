@@ -20,10 +20,11 @@ internal fun LLMServices.adaptUpstreamRequest(
 	protocol: LLMProtocol,
 	stream: Boolean = false,
 	thinkingMode: String = "enabled",
+	source: String? = null,
 ): JsonObject = LLMAdapterRegistry.forProtocol(protocol).adapt(
 	LLMAdapterRequest(
 		chat = JsonParser.parseString(request.body).asJsonObject,
-		functionTools = toolService.definitions(),
+		functionTools = toolService.definitions(source = source) ?: JsonArray(),
 		reasoningEffort = request.reasoningEffort,
 		stream = stream,
 		webSearch = !toolService.usesRemoteSearch(),
@@ -49,7 +50,7 @@ internal suspend fun LLMServices.completeWithOptionalTools(
 		return completeWithResponsesApi(request, requester, source, provider)
 	}
 
-	val obj = adaptUpstreamRequest(request, LLMProtocol.CHAT_COMPLETIONS)
+	val obj = adaptUpstreamRequest(request, LLMProtocol.CHAT_COMPLETIONS, source = requester.source)
 
 	var latestStatus = 502
 	var latestBody = ""
@@ -93,7 +94,7 @@ internal suspend fun LLMServices.completeWithResponsesApi(
 	source: String,
 	provider: LLMProvider,
 ): Pair<Int, String> {
-	val body = adaptUpstreamRequest(request, LLMProtocol.RESPONSES)
+	val body = adaptUpstreamRequest(request, LLMProtocol.RESPONSES, source = requester.source)
 	var totalUsage: LLMServices.Usage? = null
 	repeat(maxToolRounds) { round ->
 		val response = postUpstream("$source/responses-round-${round + 1}", body.toString(), provider, provider.responsesUrl)

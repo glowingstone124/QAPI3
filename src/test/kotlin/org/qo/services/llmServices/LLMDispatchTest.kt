@@ -228,6 +228,7 @@ class LLMDispatchTest {
 			Mockito.`when`(service.webSearchRules(Mockito.anyBoolean())).thenCallRealMethod()
 			val tools = Mockito.mock(LLMToolService::class.java)
 			Mockito.`when`(tools.definitions()).thenReturn(JsonArray())
+			Mockito.`when`(tools.definitions(Mockito.anySet(), Mockito.nullable(String::class.java))).thenReturn(JsonArray())
 			Mockito.`when`(tools.usesRemoteSearch()).thenReturn(true)
 			Mockito.`when`(service.toolService).thenReturn(tools)
 			Mockito.`when`(service.maxToolRounds).thenReturn(1)

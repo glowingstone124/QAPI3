@@ -1,6 +1,15 @@
 {
   "defaultProvider": "deepseek",
   "adminUids": [],
+  "imageGeneration": {
+    "endpointUrl": "https://api.openai.com/v1/images/generations",
+    "tokenFile": "data/llm/openai.token",
+    "model": "gpt-image-2.5",
+    "size": "1024x1024",
+    "quality": "auto",
+    "creditsCost": 25,
+    "enabled": true
+  },
   "providers": {
     "deepseek": {
       "chatCompletionsUrl": "https://api.deepseek.com/v1/chat/completions",

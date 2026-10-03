@@ -222,6 +222,7 @@ internal fun LLMServices.toolProgress(name: String): Pair<String, String> {
 		"get_server_status" -> "query" to "正在查询服务器状态…"
 		"get_player_rankings" -> "query" to "正在查询排行榜…"
 		"query_metro_lines" -> "query" to "正在查询线路信息…"
+		"generate_image" -> "tool" to "正在生成图片…"
 		else -> {
 			val normalized = name.trim().lowercase()
 			if (normalized.contains("web") && normalized.contains("search")) {

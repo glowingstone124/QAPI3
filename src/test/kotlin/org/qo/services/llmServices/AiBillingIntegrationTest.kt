@@ -376,4 +376,37 @@ class AiBillingIntegrationTest {
         val encoded=AfdianSignature.PUBLIC_KEY.substringAfter("-----BEGIN PUBLIC KEY-----").substringBefore("-----END PUBLIC KEY-----").replace(Regex("\\s"),"")
         java.security.KeyFactory.getInstance("RSA").generatePublic(java.security.spec.X509EncodedKeySpec(Base64.getDecoder().decode(encoded)))
     }
+
+    @Test fun `deductCredits consumes credits transactionally and records in ledger with refund on rollback`() = runBlocking {
+        val uid = 778899L
+        db.execute("INSERT INTO ai_quota_account (user_id, paid_credits) VALUES (?, 30)", listOf(uid))
+
+        // Deduction of 25 credits succeeds
+        val res1 = store.deductCredits(uid, 25, "img:test:1", "image")
+        assertTrue(res1.success)
+        assertEquals(5, res1.remainingCredits)
+        assertEquals(5, store.balance(uid))
+
+        val ledgerRow = db.one("SELECT * FROM ai_credit_ledger WHERE user_id=? AND reference_id='img:test:1'", listOf(uid)) {
+            Triple((it.get("delta") as Number).toInt(), it.get("kind", String::class.java)!!, it.get("reference_id", String::class.java)!!)
+        }!!
+        assertEquals(-25, ledgerRow.first)
+        assertEquals("image", ledgerRow.second)
+
+        // Attempting to deduct 25 more credits fails due to insufficient balance (5 < 25)
+        val res2 = store.deductCredits(uid, 25, "img:test:2", "image")
+        assertFalse(res2.success)
+        assertEquals(5, res2.remainingCredits)
+        assertEquals(5, store.balance(uid))
+
+        // Refund the initial 25 credits
+        val refunded = store.refundCredits(uid, 25, "img:test:1", "refund")
+        assertTrue(refunded)
+        assertEquals(30, store.balance(uid))
+
+        val refundLedgerRow = db.one("SELECT * FROM ai_credit_ledger WHERE user_id=? AND kind='refund'", listOf(uid)) {
+            (it.get("delta") as Number).toInt()
+        }!!
+        assertEquals(25, refundLedgerRow)
+    }
 }

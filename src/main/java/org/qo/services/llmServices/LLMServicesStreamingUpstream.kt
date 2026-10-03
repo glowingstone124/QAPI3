@@ -25,7 +25,7 @@ internal fun LLMServices.streamFromUpstream(
 	provider: LLMProvider,
 	quotaReservation: LLMQuotaReservation,
 ): Flow<String> = flow {
-	val upstreamBody = adaptUpstreamRequest(request, LLMProtocol.CHAT_COMPLETIONS).toString()
+	val upstreamBody = adaptUpstreamRequest(request, LLMProtocol.CHAT_COMPLETIONS, source = requester.source).toString()
 	var latestUsage: LLMServices.Usage? = null
 	var lastProgressKey: String? = null
 	suspend fun emitProgress(phase: String, label: String) {
@@ -160,7 +160,7 @@ internal fun LLMServices.streamFromResponses(
 	provider: LLMProvider,
 	quotaReservation: LLMQuotaReservation,
 ): Flow<String> = flow {
-	val upstreamBody = adaptUpstreamRequest(request, LLMProtocol.RESPONSES, stream = true)
+	val upstreamBody = adaptUpstreamRequest(request, LLMProtocol.RESPONSES, stream = true, source = requester.source)
 	val assistantContent = StringBuilder()
 	var totalUsage: LLMServices.Usage? = null
 	var lastProgressKey: String? = null

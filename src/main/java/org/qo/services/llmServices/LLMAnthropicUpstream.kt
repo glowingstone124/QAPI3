@@ -151,6 +151,7 @@ internal suspend fun LLMServices.completeWithAnthropicApi(
 ): Pair<Int, String> {
 	val body = adaptUpstreamRequest(
 		request, LLMProtocol.ANTHROPIC, thinkingMode = provider.modelConfig(request.preset).thinkingMode,
+		source = requester.source,
 	)
 	val (status, text) = runAnthropicUpstream(
 		client, provider.endpoint(LLMProtocol.ANTHROPIC), provider.apiToken, body, maxToolRounds,
@@ -206,6 +207,7 @@ internal fun LLMServices.streamFromAnthropic(
 	try {
 		val body = adaptUpstreamRequest(
 			request, LLMProtocol.ANTHROPIC, stream = true, thinkingMode = provider.modelConfig(request.preset).thinkingMode,
+			source = requester.source,
 		)
 		val (status, text) = runAnthropicUpstream(
 			client, provider.endpoint(LLMProtocol.ANTHROPIC), provider.apiToken, body, maxToolRounds,

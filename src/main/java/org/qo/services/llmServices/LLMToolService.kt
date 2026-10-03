@@ -43,6 +43,7 @@ class LLMToolService(
 			"get_remain_balance",
 			"get_user_quota",
 			"set_msg_emoji_like",
+			"generate_image",
 		)
 		val byId = registeredTools.associateBy { it.id }
 		order.map { id -> byId[id] ?: error("Missing definition for tool: $id") }
@@ -51,10 +52,15 @@ class LLMToolService(
 	fun enabled(): Boolean = readBoolean("LLM_TOOLS_ENABLED", true)
 	fun usesRemoteSearch(): Boolean = true
 
-	fun definitions(excludedIds: Set<String> = emptySet()): JsonArray = JsonArray().apply {
-		if (enabled()) tools.filterNot { it.id in excludedIds }.forEach { add(it.definition.deepCopy()) }
-		if (search.id !in excludedIds) add(search.definition.deepCopy())
-		if (webFetch.id !in excludedIds) add(webFetch.definition.deepCopy())
+	fun definitions(excludedIds: Set<String> = emptySet(), source: String? = null): JsonArray = JsonArray().apply {
+		val effectiveExcluded = if (source != null && source != LLMSource.QQ.value) {
+			excludedIds + "generate_image"
+		} else {
+			excludedIds
+		}
+		if (enabled()) tools.filterNot { it.id in effectiveExcluded }.forEach { add(it.definition.deepCopy()) }
+		if (search.id !in effectiveExcluded) add(search.definition.deepCopy())
+		if (webFetch.id !in effectiveExcluded) add(webFetch.definition.deepCopy())
 	}
 
 	suspend fun execute(name: String, rawArguments: String?, context: LLMToolContext, excludedIds: Set<String> = emptySet()): String {
@@ -71,6 +77,11 @@ class LLMToolService(
 		if (name == webFetch.id) {
 			val result = webFetch.execute(parseArguments(rawArguments), context)
 			if (isFailure(result)) logFailure(name, rawArguments, context, result)
+			return result
+		}
+		if (name == "generate_image" && context.source != LLMSource.QQ.value) {
+			val result = errorResult("qq_only_tool", "图片生成工具当前仅对 QQ 用户开放")
+			logFailure(name, rawArguments, context, result)
 			return result
 		}
 		val isMinecraftRequest = context.source == LLMSource.MINECRAFT.value

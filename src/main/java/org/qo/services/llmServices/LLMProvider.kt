@@ -73,6 +73,18 @@ data class LLMCompactConfig(
 	val maxSummaryChars: Int = 8_000,
 )
 
+data class LLMImageGenerationConfig(
+	val endpointUrl: String = "https://api.openai.com/v1/images/generations",
+	val apiToken: String = "",
+	val model: String = "gpt-image-2.5",
+	val size: String = "1024x1024",
+	val quality: String = "auto",
+	val creditsCost: Int = 25,
+	val enabled: Boolean = true,
+	val qbotEndpoint: String? = null,
+	val qbotToken: String? = null,
+)
+
 data class LLMProvider(
 	val name: String,
 	val chatCompletionsUrl: String,
@@ -90,6 +102,7 @@ data class LLMProvider(
 	val adminUids: Set<Long> = emptySet(),
 	val routes: Map<String, LLMProvider> = emptyMap(),
 	val fallback: LLMProvider? = null,
+	val imageGeneration: LLMImageGenerationConfig? = null,
 ) {
 	fun forMode(mode: String): LLMProvider = when {
 		fallback != null && !models.containsKey(mode.lowercase(Locale.ROOT)) -> fallback.forMode(mode)
@@ -253,6 +266,7 @@ data class LLMProvider(
 					balanceStruct = BalanceStructParse.fromProvider(selectedName),
 				),
 				adminUids = readAdminUids(root),
+				imageGeneration = readImageGenerationConfig(configured, root),
 			)
 		}
 
@@ -380,6 +394,50 @@ data class LLMProvider(
 				val text = if (element.isJsonPrimitive) element.asString.trim() else ""
 				text.toLongOrNull() ?: throw IllegalArgumentException("adminUids entries must be QQ UID numbers")
 			}
+		}
+
+		private fun readImageGenerationConfig(configured: JsonObject?, root: JsonObject?): LLMImageGenerationConfig? {
+			val obj = configured?.getAsJsonObject("imageGeneration")
+				?: root?.getAsJsonObject("imageGeneration")
+				?: return null
+			val token = readTokenValue(obj, "token", "tokenFile")
+			val endpointUrl = obj.get("endpointUrl")?.asString?.trim()?.takeIf { it.isNotBlank() }
+				?: "https://api.openai.com/v1/images/generations"
+			val model = obj.get("model")?.asString?.trim()?.takeIf { it.isNotBlank() } ?: "gpt-image-2.5"
+			val size = obj.get("size")?.asString?.trim()?.takeIf { it.isNotBlank() } ?: "1024x1024"
+			val quality = obj.get("quality")?.asString?.trim()?.takeIf { it.isNotBlank() } ?: "auto"
+			val creditsCost = readInt(obj, "creditsCost", 25)
+			val enabled = readBoolean(obj, "enabled", true)
+			val qbotEndpoint = obj.get("qbotEndpoint")?.asString?.trim()?.takeIf { it.isNotBlank() }
+			val qbotToken = readTokenValue(obj, "qbotToken", "qbotTokenFile").takeIf { it.isNotBlank() }
+			return LLMImageGenerationConfig(
+				endpointUrl = endpointUrl,
+				apiToken = token,
+				model = model,
+				size = size,
+				quality = quality,
+				creditsCost = creditsCost,
+				enabled = enabled,
+				qbotEndpoint = qbotEndpoint,
+				qbotToken = qbotToken,
+			)
+		}
+
+		private fun readTokenValue(
+			configured: JsonObject,
+			tokenKey: String = "token",
+			tokenFileKey: String = "tokenFile",
+		): String {
+			val direct = configured.get(tokenKey)?.asString?.takeIf { it.isNotBlank() }
+			if (direct != null) return direct
+			val path = configured.get(tokenFileKey)?.asString?.takeIf { it.isNotBlank() } ?: return ""
+			val expanded = if (path == "~") System.getProperty("user.home")
+				else if (path.startsWith("~/")) System.getProperty("user.home") + path.removePrefix("~") else path
+			val raw = runCatching { Files.readString(Path.of(expanded)).trim() }.getOrNull() ?: return ""
+			val token = if (raw.startsWith("{")) runCatching {
+				JsonParser.parseString(raw).asJsonObject.get("apiKey")?.asString
+			}.getOrNull() else raw
+			return token.orEmpty()
 		}
 
 		private const val DEFAULT_CONTEXT_WINDOW = 524_288

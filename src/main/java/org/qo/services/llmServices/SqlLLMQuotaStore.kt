@@ -51,6 +51,53 @@ class SqlLLMQuotaStore(private val db: ReactiveDatabase) : LLMQuotaStore {
 		} ?: 0
 	}
 
+	override suspend fun deductCredits(qqUid: Long, amount: Int, referenceId: String, kind: String): CreditDeductionResult {
+		require(amount > 0) { "Deduction amount must be positive" }
+		schema()
+		return db.inTransaction {
+			account(qqUid)
+			val paid = db.one("SELECT paid_credits FROM ai_quota_account WHERE user_id=? FOR UPDATE", listOf(qqUid)) {
+				number(it, "paid_credits").toInt()
+			} ?: 0
+			if (paid < amount) {
+				return@inTransaction CreditDeductionResult(
+					success = false,
+					remainingCredits = paid,
+					error = "账户剩余点数不足（当前点数：${paid} 点，本次生成图片需要：${amount} 点 Credits）。请充值点数后再试。"
+				)
+			}
+			val remaining = paid - amount
+			db.execute(
+				"UPDATE ai_quota_account SET paid_credits=? WHERE user_id=?",
+				listOf(remaining, qqUid)
+			)
+			val now = Instant.now().epochSecond
+			db.execute(
+				"INSERT INTO ai_credit_ledger (user_id, reference_id, delta, kind, created_at) VALUES (?, ?, ?, ?, ?)",
+				listOf(qqUid, referenceId, -amount, kind, now)
+			)
+			CreditDeductionResult(success = true, remainingCredits = remaining)
+		}
+	}
+
+	override suspend fun refundCredits(qqUid: Long, amount: Int, referenceId: String, kind: String): Boolean {
+		if (amount <= 0) return true
+		schema()
+		return db.inTransaction {
+			account(qqUid)
+			db.execute(
+				"UPDATE ai_quota_account SET paid_credits=paid_credits+? WHERE user_id=?",
+				listOf(amount, qqUid)
+			)
+			val now = Instant.now().epochSecond
+			db.execute(
+				"INSERT INTO ai_credit_ledger (user_id, reference_id, delta, kind, created_at) VALUES (?, ?, ?, ?, ?)",
+				listOf(qqUid, referenceId, amount, kind, now)
+			)
+			true
+		}
+	}
+
 	override suspend fun reserve(
 		quotaKey: String,
 		requestKey: String,

@@ -64,6 +64,12 @@ data class LLMQuotaStoreDecision(
 	val paidCredits: Int = 0,
 )
 
+data class CreditDeductionResult(
+	val success: Boolean,
+	val remainingCredits: Int,
+	val error: String? = null,
+)
+
 interface LLMQuotaStore {
 	suspend fun reserve(
 		quotaKey: String,
@@ -81,6 +87,9 @@ interface LLMQuotaStore {
 	suspend fun settleSubsidy(id: String, cost: java.math.BigDecimal?) {}
 	suspend fun retain(reservation: LLMQuotaReservation, usage: AiQuotaUsage?) {}
 	suspend fun balance(qqUid: Long): Int = 0
+	suspend fun deductCredits(qqUid: Long, amount: Int, referenceId: String, kind: String = "image"): CreditDeductionResult =
+		CreditDeductionResult(true, 0)
+	suspend fun refundCredits(qqUid: Long, amount: Int, referenceId: String, kind: String = "refund"): Boolean = true
 	suspend fun reserveUnits(
 		principal: LLMPrincipal, quotaKey: String, requestKey: String, limit: Int,
 		expiresAt: Long, units: Int, mode: String, provider: String, model: String, estimatedCost: java.math.BigDecimal
@@ -92,7 +101,7 @@ interface LLMQuotaStore {
 
 /** The historical class name is retained for injection compatibility; all windows are weekly. */
 @Service
-class LLMDailyQuotaService @Autowired constructor(
+open class LLMDailyQuotaService @Autowired constructor(
 	private val store: LLMQuotaStore,
 	@Value("\${qapi.llm.weekly-limit:120}") configuredDailyLimit: Int,
 	@Value("\${qapi.llm.guest-weekly-limit:80}") configuredGuestDailyLimit: Int = 80,
@@ -177,6 +186,10 @@ class LLMDailyQuotaService @Autowired constructor(
 		store.refundUsage(reservation, usage)
 
 	suspend fun refund(reservation: LLMQuotaReservation): Boolean = store.refund(reservation) != null
+	open suspend fun deductCredits(qqUid: Long, amount: Int, referenceId: String, kind: String = "image"): CreditDeductionResult =
+		store.deductCredits(qqUid, amount, referenceId, kind)
+	open suspend fun refundCredits(qqUid: Long, amount: Int, referenceId: String, kind: String = "refund"): Boolean =
+		store.refundCredits(qqUid, amount, referenceId, kind)
 	suspend fun reserveSubsidy(source: String, summary: LLMSummaryConfig, estimate: java.math.BigDecimal) =
 		store.reserveSubsidy(source, summary, estimate)
 
