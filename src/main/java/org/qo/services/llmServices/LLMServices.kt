@@ -85,11 +85,12 @@ class LLMServices(
 	fun modelPresetFromRequest(value: String): String? = value.trim().lowercase()
 		.takeIf { it in setOf("fast", "thinking") }
 
+	private val upstreamTimeoutMs = readLong("LLM_UPSTREAM_TIMEOUT_MS", 15 * 60 * 1000L).coerceAtLeast(120 * 1000L)
 	internal val client = HttpClient(CIO) {
 		install(HttpTimeout) {
-			requestTimeoutMillis = 120 * 1000
-			socketTimeoutMillis = 120 * 1000
-			connectTimeoutMillis = 10 * 1000
+			requestTimeoutMillis = upstreamTimeoutMs
+			socketTimeoutMillis = upstreamTimeoutMs
+			connectTimeoutMillis = readLong("LLM_CONNECT_TIMEOUT_MS", 30 * 1000L).coerceAtLeast(5 * 1000L)
 		}
 	}
 	internal val userORM = UserORM()

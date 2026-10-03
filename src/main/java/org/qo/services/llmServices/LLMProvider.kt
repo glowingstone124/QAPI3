@@ -83,6 +83,7 @@ data class LLMImageGenerationConfig(
 	val enabled: Boolean = true,
 	val qbotEndpoint: String? = null,
 	val qbotToken: String? = null,
+	val timeoutSeconds: Long = 15 * 60L,
 )
 
 data class LLMProvider(
@@ -381,6 +382,12 @@ data class LLMProvider(
 				?: throw IllegalArgumentException("$key must be an integer")
 		}
 
+		private fun readLong(configured: JsonObject?, key: String, defaultValue: Long): Long {
+			val configuredValue = configured?.get(key)?.takeIf { !it.isJsonNull } ?: return defaultValue
+			return configuredValue.asString.trim().toLongOrNull()
+				?: throw IllegalArgumentException("$key must be a long integer")
+		}
+
 		private fun readBoolean(configured: JsonObject?, key: String, defaultValue: Boolean): Boolean {
 			val configuredValue = configured?.get(key)?.takeIf { !it.isJsonNull } ?: return defaultValue
 			return configuredValue.asString.trim().lowercase(Locale.ROOT).toBooleanStrictOrNull()
@@ -410,6 +417,7 @@ data class LLMProvider(
 			val enabled = readBoolean(obj, "enabled", true)
 			val qbotEndpoint = obj.get("qbotEndpoint")?.asString?.trim()?.takeIf { it.isNotBlank() }
 			val qbotToken = readTokenValue(obj, "qbotToken", "qbotTokenFile").takeIf { it.isNotBlank() }
+			val timeoutSeconds = readLong(obj, "timeoutSeconds", 15 * 60L).coerceAtLeast(30L)
 			return LLMImageGenerationConfig(
 				endpointUrl = endpointUrl,
 				apiToken = token,
@@ -420,6 +428,7 @@ data class LLMProvider(
 				enabled = enabled,
 				qbotEndpoint = qbotEndpoint,
 				qbotToken = qbotToken,
+				timeoutSeconds = timeoutSeconds,
 			)
 		}
 

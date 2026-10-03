@@ -162,7 +162,7 @@ class GenerateImageTool @Autowired constructor(
 				httpClient.send(
 					HttpRequest.newBuilder()
 						.uri(URI.create(apiUrl))
-						.timeout(Duration.ofSeconds(60))
+						.timeout(Duration.ofSeconds(config.timeoutSeconds))
 						.header("Content-Type", "application/json; charset=UTF-8")
 						.header("Authorization", "Bearer ${config.apiToken}")
 						.POST(HttpRequest.BodyPublishers.ofString(requestJson, Charsets.UTF_8))
