@@ -19,15 +19,18 @@ import java.util.UUID
 
 @Component
 class GenerateImageTool @Autowired constructor(
-	private val providers: ReloadableLLMProvider? = null,
-	private val quotaService: LLMDailyQuotaService? = null,
-	private val httpClient: HttpClient = HttpClient.newBuilder()
-		.connectTimeout(Duration.ofSeconds(15))
-		.build(),
+	private val providers: ReloadableLLMProvider?,
+	private val quotaService: LLMDailyQuotaService?,
 ) : Tools {
+	internal var httpClient: HttpClient = HttpClient.newBuilder()
+		.connectTimeout(Duration.ofSeconds(15))
+		.build()
+
+	private var staticConfig: LLMImageGenerationConfig? = null
+
 	// Overload for testing with a standalone config
 	constructor(
-		config: LLMImageGenerationConfig,
+		config: LLMImageGenerationConfig?,
 		quotaService: LLMDailyQuotaService? = null,
 		httpClient: HttpClient = HttpClient.newBuilder()
 			.connectTimeout(Duration.ofSeconds(15))
@@ -35,19 +38,23 @@ class GenerateImageTool @Autowired constructor(
 	) : this(
 		providers = null,
 		quotaService = quotaService,
-		httpClient = httpClient,
 	) {
 		this.staticConfig = config
+		this.httpClient = httpClient
 	}
 
 	// Overload for testing with HttpClient only
 	constructor(httpClient: HttpClient) : this(
-		providers = null,
+		config = null,
 		quotaService = null,
 		httpClient = httpClient,
 	)
 
-	private var staticConfig: LLMImageGenerationConfig? = null
+	// Overload for testing parameterless
+	constructor() : this(
+		config = null,
+		quotaService = null,
+	)
 
 	fun resolveConfig(): LLMImageGenerationConfig? =
 		staticConfig ?: providers?.current()?.imageGeneration

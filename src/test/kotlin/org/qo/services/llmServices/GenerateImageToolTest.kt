@@ -301,6 +301,19 @@ class GenerateImageToolTest {
 		assertEquals(50, fakeQuota.currentCredits)
 	}
 
+	@Test
+	fun `spring can instantiate GenerateImageTool via autowiring without conflict`() {
+		val context = org.springframework.context.annotation.AnnotationConfigApplicationContext()
+		context.beanFactory.registerSingleton("reloadableLLMProvider", org.mockito.Mockito.mock(ReloadableLLMProvider::class.java))
+		context.beanFactory.registerSingleton("dailyQuotaService", org.mockito.Mockito.mock(LLMDailyQuotaService::class.java))
+		context.register(GenerateImageTool::class.java)
+		context.refresh()
+		val tool = context.getBean(GenerateImageTool::class.java)
+		assertNotNull(tool)
+		assertEquals("generate_image", tool.id)
+		context.close()
+	}
+
 	private class FakeQuotaService(
 		var currentCredits: Int = 100,
 	) : LLMDailyQuotaService(store = StubQuotaStore(), configuredDailyLimit = 120) {
