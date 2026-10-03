@@ -246,6 +246,7 @@ internal suspend fun LLMServices.completeWithCommandCodeApi(
 	val chat = JsonParser.parseString(request.body).asJsonObject
 	val tools = toolService.definitions(COMMANDCODE_EXCLUDED_TOOLS, source = requester.source) ?: JsonArray()
 	var usage: LLMServices.Usage? = null
+	val intermediateMessages = mutableListOf<String>()
 	repeat(maxToolRounds) { round ->
 		val body = LLMAdapterRegistry.forProtocol(LLMProtocol.COMMANDCODE).adapt(
 			LLMAdapterRequest(chat, tools, request.reasoningEffort)
@@ -271,10 +272,32 @@ internal suspend fun LLMServices.completeWithCommandCodeApi(
 		)
 		usage = accumulateUsage(usage, parseUsage(response))
 		val calls = extractToolCalls(response)
-		if (calls.isEmpty()) return CommandCodeAttempt(
-			status,
-			sanitizeResponseBody(withUsage(response, usage), request.enableMarkdown)
-		)
+		if (calls.isEmpty()) {
+			val merged = mergeIntermediateMessages(response, intermediateMessages, request.botReplyMessages)
+			return CommandCodeAttempt(
+				status,
+				sanitizeResponseBody(withUsage(merged, usage), request.enableMarkdown)
+			)
+		}
+
+		val rawRoundText = extractAssistantContent(response)?.trim()?.takeIf { it.isNotBlank() }
+		val roundText = rawRoundText?.let { sanitizeAssistantText(it, request.enableMarkdown).trim() }?.takeIf { it.isNotBlank() }
+		if (roundText != null) {
+			val hasImageCall = calls.any { it.name == "generate_image" }
+			var sentRealtime = false
+			if (hasImageCall && requester.groupId != null) {
+				val imgCfg = providers.current().imageGeneration
+				val botEndpoint = imgCfg?.qbotEndpoint ?: System.getenv("QBOT_ENDPOINT")?.trim().orEmpty()
+				val botToken = imgCfg?.qbotToken ?: System.getenv("QBOT_TOKEN")?.trim().orEmpty()
+				if (botEndpoint.isNotBlank() && botToken.isNotBlank()) {
+					sentRealtime = sendBotTextMessage(botEndpoint, botToken, requester.groupId, roundText)
+				}
+			}
+			if (!sentRealtime) {
+				intermediateMessages.add(roundText)
+			}
+		}
+
 		appendAssistantToolCallMessage(chat.getAsJsonArray("messages"), response, calls)
 		val assistant = chat.getAsJsonArray("messages").last().asJsonObject
 		JsonParser.parseString(response).asJsonObject.getAsJsonArray("choices")[0].asJsonObject

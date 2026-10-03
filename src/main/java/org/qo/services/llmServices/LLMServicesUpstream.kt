@@ -55,6 +55,8 @@ internal suspend fun LLMServices.completeWithOptionalTools(
 	var latestStatus = 502
 	var latestBody = ""
 	var totalUsage: LLMServices.Usage? = null
+	val intermediateMessages = mutableListOf<String>()
+
 	repeat(maxToolRounds) { round ->
 		val body = obj.toString()
 		val response = postUpstream("$source/tool-round-${round + 1}", body, provider)
@@ -73,8 +75,28 @@ internal suspend fun LLMServices.completeWithOptionalTools(
 				)
 				return 502 to withUsage(errorJson("invalid_tool_call", "LLM 输出了无法解析的工具调用"), totalUsage)
 			}
-			return latestStatus to sanitizeResponseBody(withUsage(latestBody, totalUsage), request.enableMarkdown)
+			val mergedBody = mergeIntermediateMessages(latestBody, intermediateMessages, request.botReplyMessages)
+			return latestStatus to sanitizeResponseBody(withUsage(mergedBody, totalUsage), request.enableMarkdown)
 		}
+
+		val rawRoundText = extractAssistantContent(latestBody)?.trim()?.takeIf { it.isNotBlank() }
+		val roundText = rawRoundText?.let { sanitizeAssistantText(it, request.enableMarkdown).trim() }?.takeIf { it.isNotBlank() }
+		if (roundText != null) {
+			val hasImageCall = toolCalls.any { it.name == "generate_image" }
+			var sentRealtime = false
+			if (hasImageCall && requester.groupId != null) {
+				val imgCfg = providers.current().imageGeneration
+				val botEndpoint = imgCfg?.qbotEndpoint ?: System.getenv("QBOT_ENDPOINT")?.trim().orEmpty()
+				val botToken = imgCfg?.qbotToken ?: System.getenv("QBOT_TOKEN")?.trim().orEmpty()
+				if (botEndpoint.isNotBlank() && botToken.isNotBlank()) {
+					sentRealtime = sendBotTextMessage(botEndpoint, botToken, requester.groupId, roundText)
+				}
+			}
+			if (!sentRealtime) {
+				intermediateMessages.add(roundText)
+			}
+		}
+
 		appendAssistantToolCallMessage(obj.getAsJsonArray("messages"), latestBody, toolCalls)
 		for (call in toolCalls) {
 			obj.getAsJsonArray("messages").add(JsonObject().apply {
@@ -96,6 +118,8 @@ internal suspend fun LLMServices.completeWithResponsesApi(
 ): Pair<Int, String> {
 	val body = adaptUpstreamRequest(request, LLMProtocol.RESPONSES, source = requester.source)
 	var totalUsage: LLMServices.Usage? = null
+	val intermediateMessages = mutableListOf<String>()
+
 	repeat(maxToolRounds) { round ->
 		val response = postUpstream("$source/responses-round-${round + 1}", body.toString(), provider, provider.responsesUrl)
 		val responseText = response.bodyAsText()
@@ -112,10 +136,29 @@ internal suspend fun LLMServices.completeWithResponsesApi(
 		}
 		val functionCalls = LLMResponsesAdapter.functionCalls(responseText)
 		if (functionCalls.isEmpty()) {
+			val completionBody = LLMResponsesAdapter.toChatCompletion(responseText)
+			val mergedBody = mergeIntermediateMessages(completionBody, intermediateMessages, request.botReplyMessages)
 			return response.status.value to sanitizeResponseBody(
-				withUsage(LLMResponsesAdapter.toChatCompletion(responseText),totalUsage),
+				withUsage(mergedBody, totalUsage),
 				request.enableMarkdown,
 			)
+		}
+		val rawRoundText = LLMResponsesAdapter.extractText(responseRoot).trim().takeIf { it.isNotBlank() }
+		val roundText = rawRoundText?.let { sanitizeAssistantText(it, request.enableMarkdown).trim() }?.takeIf { it.isNotBlank() }
+		if (roundText != null) {
+			val hasImageCall = functionCalls.any { it.name == "generate_image" }
+			var sentRealtime = false
+			if (hasImageCall && requester.groupId != null) {
+				val imgCfg = providers.current().imageGeneration
+				val botEndpoint = imgCfg?.qbotEndpoint ?: System.getenv("QBOT_ENDPOINT")?.trim().orEmpty()
+				val botToken = imgCfg?.qbotToken ?: System.getenv("QBOT_TOKEN")?.trim().orEmpty()
+				if (botEndpoint.isNotBlank() && botToken.isNotBlank()) {
+					sentRealtime = sendBotTextMessage(botEndpoint, botToken, requester.groupId, roundText)
+				}
+			}
+			if (!sentRealtime) {
+				intermediateMessages.add(roundText)
+			}
 		}
 		val outputs = linkedMapOf<String, String>()
 		for (call in functionCalls) {
@@ -228,3 +271,56 @@ internal fun LLMServices.normalizeUpstreamError(body: String): String = runCatch
 	if (root.has("error")) root.toString()
 	else errorJson("upstream_error", body.take(256))
 }.getOrElse { errorJson("upstream_error", body.take(256)) }
+
+internal suspend fun LLMServices.sendBotTextMessage(
+	botEndpoint: String,
+	botToken: String,
+	groupId: Long,
+	text: String,
+): Boolean {
+	if (botEndpoint.isBlank() || botToken.isBlank() || text.isBlank()) return false
+	return try {
+		val payload = JsonObject().apply {
+			addProperty("group_id", groupId)
+			addProperty("text", text)
+			add("message", JsonArray().apply {
+				add(JsonObject().apply {
+					addProperty("type", "text")
+					add("data", JsonObject().apply {
+						addProperty("text", text)
+					})
+				})
+			})
+		}.toString()
+		val response = client.post("${botEndpoint.removeSuffix("/")}/action/send_message") {
+			header(HttpHeaders.Authorization, botToken)
+			contentType(ContentType.Application.Json)
+			setBody(payload)
+		}
+		response.status.isSuccess()
+	} catch (ex: Exception) {
+		println("[LLM] failed to send intermediate bot text message: ${ex.message}")
+		false
+	}
+}
+
+internal fun mergeIntermediateMessages(
+	responseBody: String,
+	intermediateMessages: List<String>,
+	useBreakMarker: Boolean,
+): String {
+	if (intermediateMessages.isEmpty()) return responseBody
+	return runCatching {
+		val root = JsonParser.parseString(responseBody).asJsonObject
+		val choices = root.getAsJsonArray("choices") ?: return responseBody
+		if (choices.size() == 0) return responseBody
+		val message = choices[0].asJsonObject.getAsJsonObject("message") ?: return responseBody
+		val finalContent = message.get("content")?.takeIf { !it.isJsonNull }?.asString.orEmpty().trim()
+		val delimiter = if (useBreakMarker) "\n${LLMBotReplyFormat.BREAK}\n" else "\n\n"
+		val combined = (intermediateMessages + listOfNotNull(finalContent.takeIf { it.isNotEmpty() }))
+			.joinToString(delimiter)
+		message.addProperty("content", combined)
+		root.toString()
+	}.getOrDefault(responseBody)
+}
+

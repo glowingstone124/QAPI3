@@ -260,7 +260,7 @@ internal object LLMResponsesAdapter : LLMAdapter {
         }.toString()
     }
 
-    private fun extractText(response: JsonObject): String {
+    internal fun extractText(response: JsonObject): String {
         val parts = mutableListOf<String>()
         response.getAsJsonArray("output")?.forEach { item ->
             val message = item.takeIf { it.isJsonObject }?.asJsonObject ?: return@forEach

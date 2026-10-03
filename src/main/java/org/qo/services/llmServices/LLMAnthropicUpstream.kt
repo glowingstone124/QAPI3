@@ -25,6 +25,7 @@ internal suspend fun runAnthropicUpstream(
 	onUpdate: suspend (AnthropicStreamUpdate) -> Unit = {},
 	onAccepted: () -> Unit = {},
 	onRequest: (String) -> Unit = {},
+	onIntermediateText: (suspend (String, List<ResponseFunctionCall>) -> Unit)? = null,
 ): Pair<Int, String> {
 	val totalUsage = JsonObject()
 	fun failure(body: String): String = if (!totalUsage.has("qapi_api_calls")) body else runCatching {
@@ -109,6 +110,10 @@ internal suspend fun runAnthropicUpstream(
 		require(!stopReason.isNullOrBlank()) { "Anthropic upstream returned no stop reason" }
 		val calls = LLMAnthropicAdapter.functionCalls(result)
 		if (calls.isNotEmpty()) {
+			val roundText = LLMAnthropicAdapter.text(result).trim().takeIf { it.isNotBlank() }
+			if (roundText != null) {
+				onIntermediateText?.invoke(roundText, calls)
+			}
 			if (toolRounds++ >= maxToolRounds) return 502 to failure(
 				anthropicError(
 					"tool_round_limit",
@@ -153,6 +158,7 @@ internal suspend fun LLMServices.completeWithAnthropicApi(
 		request, LLMProtocol.ANTHROPIC, thinkingMode = provider.modelConfig(request.preset).thinkingMode,
 		source = requester.source,
 	)
+	val intermediateMessages = mutableListOf<String>()
 	val (status, text) = runAnthropicUpstream(
 		client, provider.endpoint(LLMProtocol.ANTHROPIC), provider.apiToken, body, maxToolRounds,
 		executeTool = { call ->
@@ -162,6 +168,24 @@ internal suspend fun LLMServices.completeWithAnthropicApi(
 				requester.toolContext(request.currentUserText)
 			)
 		},
+		onIntermediateText = { rawRoundText, calls ->
+			val roundText = sanitizeAssistantText(rawRoundText, request.enableMarkdown).trim().takeIf { it.isNotBlank() }
+			if (roundText != null) {
+				val hasImageCall = calls.any { it.name == "generate_image" }
+				var sentRealtime = false
+				if (hasImageCall && requester.groupId != null) {
+					val imgCfg = providers.current().imageGeneration
+					val botEndpoint = imgCfg?.qbotEndpoint ?: System.getenv("QBOT_ENDPOINT")?.trim().orEmpty()
+					val botToken = imgCfg?.qbotToken ?: System.getenv("QBOT_TOKEN")?.trim().orEmpty()
+					if (botEndpoint.isNotBlank() && botToken.isNotBlank()) {
+						sentRealtime = sendBotTextMessage(botEndpoint, botToken, requester.groupId, roundText)
+					}
+				}
+				if (!sentRealtime) {
+					intermediateMessages.add(roundText)
+				}
+			}
+		},
 		onRequest = { outgoing ->
 			logUpstreamRequest(source, outgoing, provider, "anthropic"); debugPrompt(
 			source,
@@ -169,7 +193,8 @@ internal suspend fun LLMServices.completeWithAnthropicApi(
 		)
 		},
 	)
-	return status to if (status in 200..299) sanitizeResponseBody(text, request.enableMarkdown) else text
+	val merged = mergeIntermediateMessages(text, intermediateMessages, request.botReplyMessages)
+	return status to if (status in 200..299) sanitizeResponseBody(merged, request.enableMarkdown) else merged
 }
 
 internal fun LLMServices.streamFromAnthropic(

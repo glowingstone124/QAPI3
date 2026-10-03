@@ -71,6 +71,31 @@ class LLMBotReplyFormatTest {
         assertTrue(LLMBotReplyFormat.systemRules.contains("优先保持完整"))
     }
 
+    @Test
+    fun `horizontal rules and alternate break markers produce message bubbles`() {
+        assertEquals(listOf("你好呀", "今天天气真好！"), LLMBotReplyFormat.split("你好呀\n---\n今天天气真好！"))
+        assertEquals(listOf("你好呀", "今天天气真好！"), LLMBotReplyFormat.split("你好呀\n***\n今天天气真好！"))
+        assertEquals(listOf("你好呀", "今天天气真好！"), LLMBotReplyFormat.split("你好呀\n___\n今天天气真好！"))
+        assertEquals(listOf("你好呀", "今天天气真好！"), LLMBotReplyFormat.split("你好呀\n<<<BREAK>>>\n今天天气真好！"))
+        assertEquals(listOf("你好呀", "今天天气真好！"), LLMBotReplyFormat.split("你好呀\n[BREAK]\n今天天气真好！"))
+        assertEquals(listOf("你好呀", "今天天气真好！"), LLMBotReplyFormat.split("你好呀\n**<<<QBOT_MESSAGE_BREAK>>>**\n今天天气真好！"))
+    }
+
+    @Test
+    fun `mergeIntermediateMessages combines intermediate tool text with final response`() {
+        val finalBody = response("这是最终回答")
+        val mergedWithBreak = mergeIntermediateMessages(finalBody, listOf("好呀，稍等我一下~"), useBreakMarker = true)
+        val formatted = LLMBotReplyFormat.formatResponse(mergedWithBreak)
+        val message = JsonParser.parseString(formatted).asJsonObject.getAsJsonArray("choices")[0].asJsonObject.getAsJsonObject("message")
+        assertEquals("好呀，稍等我一下~\n\n这是最终回答", message.get("content").asString)
+        assertEquals(listOf("好呀，稍等我一下~", "这是最终回答"), message.getAsJsonArray("qq_messages").map { it.asString })
+
+        val mergedWithoutBreak = mergeIntermediateMessages(finalBody, listOf("好呀，稍等我一下~"), useBreakMarker = false)
+        val messageNoBreak = JsonParser.parseString(mergedWithoutBreak).asJsonObject.getAsJsonArray("choices")[0].asJsonObject.getAsJsonObject("message")
+        assertEquals("好呀，稍等我一下~\n\n这是最终回答", messageNoBreak.get("content").asString)
+        assertFalse(messageNoBreak.has("qq_messages"))
+    }
+
     private fun response(content: String): String = JsonObject().apply {
         add("choices", JsonParser.parseString("""[{"message":{"role":"assistant"},"finish_reason":"stop"}]"""))
         getAsJsonArray("choices")[0].asJsonObject.getAsJsonObject("message").addProperty("content", content)
