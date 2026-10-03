@@ -4,6 +4,8 @@ import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.qo.orm.UserORM
+import org.qo.services.llmServices.CreditDeductionResult
 import org.qo.services.llmServices.LLMDailyQuotaService
 import org.qo.services.llmServices.LLMImageGenerationConfig
 import org.qo.services.llmServices.LLMToolContext
@@ -25,6 +27,8 @@ class GenerateImageTool @Autowired constructor(
 	internal var httpClient: HttpClient = HttpClient.newBuilder()
 		.connectTimeout(Duration.ofSeconds(15))
 		.build()
+
+	internal var userORM: UserORM = UserORM()
 
 	private var staticConfig: LLMImageGenerationConfig? = null
 
@@ -65,7 +69,7 @@ class GenerateImageTool @Autowired constructor(
 		name = id,
 		description = """
 			使用 OpenAI 最新 GPT-Image-2.5 模型生成图片。
-			单次调用图片消耗用户 25 点 Credits。当前仅对 QQ 用户开放。
+			单次调用图片消耗 25 点额度（优先扣除每周免费额度，不足部分扣除 Paid Credits）。当前仅对 QQ 用户开放。
 			当用户要求画图、作画、绘制插图、设计视觉图片或需要图像展示时自主调用该工具。
 			prompt 参数应当详细描述画面内容，包括画面主体、风格类型（如写实、插画、二次元、赛博朋克等）、色彩基调、光影效果、构图视角等。如用户输入的是中文或简短需求，请将其扩展为生动详细的高质量提示词以达到最佳生成效果。
 		""".trimIndent(),
@@ -111,20 +115,29 @@ class GenerateImageTool @Autowired constructor(
 
 		val cost = config.creditsCost
 		val referenceId = "img:${context.groupId ?: "p"}:$qqUid:${UUID.randomUUID().toString().take(12)}"
-		if (quotaService != null && cost > 0) {
-			val deduction = quotaService.deductCredits(qqUid, cost, referenceId, "image")
-			if (!deduction.success) {
+		val deduction: CreditDeductionResult? = if (quotaService != null && cost > 0) {
+			val hasAccount = runCatching { userORM.readAsync(qqUid) }.getOrNull() != null
+			val res = quotaService.deductQuota(qqUid, cost, referenceId, hasAccount = hasAccount)
+			if (!res.success) {
 				return ToolSupport.errorResult(
 					"insufficient_credits",
-					deduction.error ?: "账户剩余点数不足（当前点数：${deduction.remainingCredits} 点，本次生成图片需要：${cost} 点 Credits）。请先充值点数。"
+					res.error ?: "账户剩余额度不足（本次生成图片需要：${cost} 点）。请充值点数或等待下周免费额度重置。"
 				)
 			}
+			res
+		} else {
+			null
 		}
 
 		suspend fun refundOnError() {
-			if (cost > 0) {
+			if (cost > 0 && deduction != null) {
 				runCatching {
-					quotaService?.refundCredits(qqUid, cost, referenceId, "refund")
+					quotaService?.refundQuota(
+						qqUid = qqUid,
+						weeklyAmount = deduction.weeklyDeducted,
+						paidAmount = deduction.paidDeducted,
+						referenceId = referenceId,
+					)
 				}
 			}
 		}
@@ -222,6 +235,11 @@ class GenerateImageTool @Autowired constructor(
 					addProperty("prompt", prompt)
 					revisedPrompt?.let { addProperty("revised_prompt", it) }
 					addProperty("credits_consumed", cost)
+					if (deduction != null) {
+						addProperty("weekly_units_deducted", deduction.weeklyDeducted)
+						addProperty("paid_credits_deducted", deduction.paidDeducted)
+						addProperty("remaining_credits", deduction.remainingCredits)
+					}
 				}
 			}
 		}
@@ -232,6 +250,11 @@ class GenerateImageTool @Autowired constructor(
 			addProperty("prompt", prompt)
 			revisedPrompt?.let { addProperty("revised_prompt", it) }
 			addProperty("credits_consumed", cost)
+			if (deduction != null) {
+				addProperty("weekly_units_deducted", deduction.weeklyDeducted)
+				addProperty("paid_credits_deducted", deduction.paidDeducted)
+				addProperty("remaining_credits", deduction.remainingCredits)
+			}
 			if (!imageUrl.isNullOrBlank()) {
 				addProperty("image_url", imageUrl)
 			}

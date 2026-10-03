@@ -409,4 +409,52 @@ class AiBillingIntegrationTest {
         }!!
         assertEquals(25, refundLedgerRow)
     }
+
+    @Test fun `deductQuota prioritizes weekly units and falls back to paid credits with split refund`() = runBlocking {
+        val uid = 889900L
+        val period = service.period(now).toString()
+        val limit = 90
+        db.execute("INSERT INTO ai_weekly_usage (user_id, period, used) VALUES (?, ?, 80)", listOf(uid, period))
+        db.execute("INSERT INTO ai_quota_account (user_id, paid_credits) VALUES (?, 20)", listOf(uid))
+
+        // Deduct 25: 10 from weekly units, 15 from paid credits
+        val res = store.deductQuota(uid, period, limit, 25, "img:test:split", "image")
+        assertTrue(res.success)
+        assertEquals(10, res.weeklyDeducted)
+        assertEquals(15, res.paidDeducted)
+        assertEquals(5, res.remainingCredits)
+
+        val used = db.one("SELECT used FROM ai_weekly_usage WHERE user_id=? AND period=?", listOf(uid, period)) {
+            (it.get("used") as Number).toInt()
+        }!!
+        assertEquals(90, used)
+        assertEquals(5, store.balance(uid))
+
+        val ledgerRow = db.one("SELECT delta FROM ai_credit_ledger WHERE user_id=? AND reference_id='img:test:split'", listOf(uid)) {
+            (it.get("delta") as Number).toInt()
+        }!!
+        assertEquals(-15, ledgerRow)
+
+        // Another deduction of 25: 0 weekly units left, only 5 paid credits left -> fails
+        val failRes = store.deductQuota(uid, period, limit, 25, "img:test:fail", "image")
+        assertFalse(failRes.success)
+        assertEquals(0, failRes.weeklyDeducted)
+        assertEquals(0, failRes.paidDeducted)
+        assertEquals(5, failRes.remainingCredits)
+
+        // Refund the split deduction
+        val refunded = store.refundQuota(uid, period, res.weeklyDeducted, res.paidDeducted, "img:test:split", "refund")
+        assertTrue(refunded)
+
+        val restoredUsed = db.one("SELECT used FROM ai_weekly_usage WHERE user_id=? AND period=?", listOf(uid, period)) {
+            (it.get("used") as Number).toInt()
+        }!!
+        assertEquals(80, restoredUsed)
+        assertEquals(20, store.balance(uid))
+
+        val refundLedgerRow = db.one("SELECT delta FROM ai_credit_ledger WHERE user_id=? AND kind='refund'", listOf(uid)) {
+            (it.get("delta") as Number).toInt()
+        }!!
+        assertEquals(15, refundLedgerRow)
+    }
 }

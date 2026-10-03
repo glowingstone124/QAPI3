@@ -51,7 +51,14 @@ class SqlLLMQuotaStore(private val db: ReactiveDatabase) : LLMQuotaStore {
 		} ?: 0
 	}
 
-	override suspend fun deductCredits(qqUid: Long, amount: Int, referenceId: String, kind: String): CreditDeductionResult {
+	override suspend fun deductQuota(
+		qqUid: Long,
+		period: String,
+		limit: Int,
+		amount: Int,
+		referenceId: String,
+		kind: String,
+	): CreditDeductionResult {
 		require(amount > 0) { "Deduction amount must be positive" }
 		schema()
 		return db.inTransaction {
@@ -59,44 +66,94 @@ class SqlLLMQuotaStore(private val db: ReactiveDatabase) : LLMQuotaStore {
 			val paid = db.one("SELECT paid_credits FROM ai_quota_account WHERE user_id=? FOR UPDATE", listOf(qqUid)) {
 				number(it, "paid_credits").toInt()
 			} ?: 0
-			if (paid < amount) {
+
+			val (used, availableWeekly) = if (limit > 0 && period.isNotBlank() && period != "all") {
+				week(qqUid, period)
+				val u = db.one("SELECT used FROM ai_weekly_usage WHERE user_id=? AND period=? FOR UPDATE", listOf(qqUid, period)) {
+					number(it, "used").toInt()
+				} ?: 0
+				u to maxOf(0, limit - u)
+			} else {
+				0 to 0
+			}
+
+			val weeklyDeduct = minOf(amount, availableWeekly)
+			val paidDeduct = amount - weeklyDeduct
+
+			if (paid < paidDeduct) {
 				return@inTransaction CreditDeductionResult(
 					success = false,
 					remainingCredits = paid,
-					error = "账户剩余点数不足（当前点数：${paid} 点，本次生成图片需要：${amount} 点 Credits）。请充值点数后再试。"
+					weeklyDeducted = 0,
+					paidDeducted = 0,
+					error = "账户剩余额度不足（剩余免费额度：${availableWeekly} 点，Paid Credits：${paid} 点，本次生成图片需要：${amount} 点）。请充值点数或等待下周免费额度重置。"
 				)
 			}
-			val remaining = paid - amount
-			db.execute(
-				"UPDATE ai_quota_account SET paid_credits=? WHERE user_id=?",
-				listOf(remaining, qqUid)
+
+			if (weeklyDeduct > 0) {
+				db.execute(
+					"UPDATE ai_weekly_usage SET used=used+? WHERE user_id=? AND period=?",
+					listOf(weeklyDeduct, qqUid, period)
+				)
+			}
+			if (paidDeduct > 0) {
+				db.execute(
+					"UPDATE ai_quota_account SET paid_credits=paid_credits-? WHERE user_id=?",
+					listOf(paidDeduct, qqUid)
+				)
+				val now = Instant.now().epochSecond
+				db.execute(
+					"INSERT INTO ai_credit_ledger (user_id, reference_id, delta, kind, created_at) VALUES (?, ?, ?, ?, ?)",
+					listOf(qqUid, referenceId, -paidDeduct, kind, now)
+				)
+			}
+			CreditDeductionResult(
+				success = true,
+				remainingCredits = paid - paidDeduct,
+				weeklyDeducted = weeklyDeduct,
+				paidDeducted = paidDeduct,
 			)
-			val now = Instant.now().epochSecond
-			db.execute(
-				"INSERT INTO ai_credit_ledger (user_id, reference_id, delta, kind, created_at) VALUES (?, ?, ?, ?, ?)",
-				listOf(qqUid, referenceId, -amount, kind, now)
-			)
-			CreditDeductionResult(success = true, remainingCredits = remaining)
 		}
 	}
 
-	override suspend fun refundCredits(qqUid: Long, amount: Int, referenceId: String, kind: String): Boolean {
-		if (amount <= 0) return true
+	override suspend fun refundQuota(
+		qqUid: Long,
+		period: String,
+		weeklyAmount: Int,
+		paidAmount: Int,
+		referenceId: String,
+		kind: String,
+	): Boolean {
+		if (weeklyAmount <= 0 && paidAmount <= 0) return true
 		schema()
 		return db.inTransaction {
 			account(qqUid)
-			db.execute(
-				"UPDATE ai_quota_account SET paid_credits=paid_credits+? WHERE user_id=?",
-				listOf(amount, qqUid)
-			)
-			val now = Instant.now().epochSecond
-			db.execute(
-				"INSERT INTO ai_credit_ledger (user_id, reference_id, delta, kind, created_at) VALUES (?, ?, ?, ?, ?)",
-				listOf(qqUid, referenceId, amount, kind, now)
-			)
+			if (weeklyAmount > 0 && period.isNotBlank() && period != "all") {
+				db.execute(
+					"UPDATE ai_weekly_usage SET used=GREATEST(0, used-?) WHERE user_id=? AND period=?",
+					listOf(weeklyAmount, qqUid, period)
+				)
+			}
+			if (paidAmount > 0) {
+				db.execute(
+					"UPDATE ai_quota_account SET paid_credits=paid_credits+? WHERE user_id=?",
+					listOf(paidAmount, qqUid)
+				)
+				val now = Instant.now().epochSecond
+				db.execute(
+					"INSERT INTO ai_credit_ledger (user_id, reference_id, delta, kind, created_at) VALUES (?, ?, ?, ?, ?)",
+					listOf(qqUid, referenceId, paidAmount, kind, now)
+				)
+			}
 			true
 		}
 	}
+
+	override suspend fun deductCredits(qqUid: Long, amount: Int, referenceId: String, kind: String): CreditDeductionResult =
+		deductQuota(qqUid, "all", 0, amount, referenceId, kind)
+
+	override suspend fun refundCredits(qqUid: Long, amount: Int, referenceId: String, kind: String): Boolean =
+		refundQuota(qqUid, "all", 0, amount, referenceId, kind)
 
 	override suspend fun reserve(
 		quotaKey: String,

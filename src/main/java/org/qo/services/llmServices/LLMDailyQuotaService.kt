@@ -67,6 +67,8 @@ data class LLMQuotaStoreDecision(
 data class CreditDeductionResult(
 	val success: Boolean,
 	val remainingCredits: Int,
+	val weeklyDeducted: Int = 0,
+	val paidDeducted: Int = 0,
 	val error: String? = null,
 )
 
@@ -88,8 +90,25 @@ interface LLMQuotaStore {
 	suspend fun retain(reservation: LLMQuotaReservation, usage: AiQuotaUsage?) {}
 	suspend fun balance(qqUid: Long): Int = 0
 	suspend fun deductCredits(qqUid: Long, amount: Int, referenceId: String, kind: String = "image"): CreditDeductionResult =
-		CreditDeductionResult(true, 0)
-	suspend fun refundCredits(qqUid: Long, amount: Int, referenceId: String, kind: String = "refund"): Boolean = true
+		deductQuota(qqUid, "all", 0, amount, referenceId, kind)
+	suspend fun refundCredits(qqUid: Long, amount: Int, referenceId: String, kind: String = "refund"): Boolean =
+		refundQuota(qqUid, "all", 0, amount, referenceId, kind)
+	suspend fun deductQuota(
+		qqUid: Long,
+		period: String,
+		limit: Int,
+		amount: Int,
+		referenceId: String,
+		kind: String = "image"
+	): CreditDeductionResult = CreditDeductionResult(true, 0, 0, 0)
+	suspend fun refundQuota(
+		qqUid: Long,
+		period: String,
+		weeklyAmount: Int,
+		paidAmount: Int,
+		referenceId: String,
+		kind: String = "refund"
+	): Boolean = true
 	suspend fun reserveUnits(
 		principal: LLMPrincipal, quotaKey: String, requestKey: String, limit: Int,
 		expiresAt: Long, units: Int, mode: String, provider: String, model: String, estimatedCost: java.math.BigDecimal
@@ -187,9 +206,30 @@ open class LLMDailyQuotaService @Autowired constructor(
 
 	suspend fun refund(reservation: LLMQuotaReservation): Boolean = store.refund(reservation) != null
 	open suspend fun deductCredits(qqUid: Long, amount: Int, referenceId: String, kind: String = "image"): CreditDeductionResult =
-		store.deductCredits(qqUid, amount, referenceId, kind)
+		deductQuota(qqUid, amount, referenceId)
 	open suspend fun refundCredits(qqUid: Long, amount: Int, referenceId: String, kind: String = "refund"): Boolean =
-		store.refundCredits(qqUid, amount, referenceId, kind)
+		refundQuota(qqUid, 0, amount, referenceId)
+	open suspend fun deductQuota(
+		qqUid: Long,
+		amount: Int,
+		referenceId: String,
+		hasAccount: Boolean = true,
+		now: Instant = Instant.now(),
+	): CreditDeductionResult {
+		val limit = effectiveLimit(hasAccount, now)
+		val p = period(now).toString()
+		return store.deductQuota(qqUid, p, limit, amount, referenceId, "image")
+	}
+	open suspend fun refundQuota(
+		qqUid: Long,
+		weeklyAmount: Int,
+		paidAmount: Int,
+		referenceId: String,
+		now: Instant = Instant.now(),
+	): Boolean {
+		val p = period(now).toString()
+		return store.refundQuota(qqUid, p, weeklyAmount, paidAmount, referenceId, "refund")
+	}
 	suspend fun reserveSubsidy(source: String, summary: LLMSummaryConfig, estimate: java.math.BigDecimal) =
 		store.reserveSubsidy(source, summary, estimate)
 

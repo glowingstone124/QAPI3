@@ -302,6 +302,101 @@ class GenerateImageToolTest {
 	}
 
 	@Test
+	fun `successful image generation prioritizes free weekly quota over paid credits`() = runBlocking {
+		val httpClient = HttpClient.newBuilder()
+			.connectTimeout(Duration.ofSeconds(5))
+			.build()
+
+		val config = LLMImageGenerationConfig(
+			endpointUrl = "http://127.0.0.1:$serverPort/v1/images/generations",
+			apiToken = "test-sk-key-12345",
+			model = "gpt-image-2.5",
+			creditsCost = 25,
+			enabled = true,
+		)
+		// 50 weekly units available, 0 paid credits
+		val fakeQuota = FakeQuotaService(availableWeeklyUnits = 50, currentCredits = 0)
+		val tool = GenerateImageTool(config = config, quotaService = fakeQuota, httpClient = httpClient)
+
+		val args = JsonObject().apply {
+			addProperty("prompt", "画一只可爱的宇航员小猫，唯美插画风格")
+		}
+		val context = LLMToolContext(groupId = null, uid = "10001", name = "tester", source = "qq")
+		val result = tool.execute(args, context)
+		val resultObj = JsonParser.parseString(result).asJsonObject
+
+		assertEquals("success", resultObj.get("status").asString)
+		assertEquals(25, resultObj.get("credits_consumed").asInt)
+		assertEquals(25, resultObj.get("weekly_units_deducted").asInt)
+		assertEquals(0, resultObj.get("paid_credits_deducted").asInt)
+		assertEquals(25, fakeQuota.availableWeeklyUnits)
+		assertEquals(0, fakeQuota.currentCredits)
+	}
+
+	@Test
+	fun `split deduction consumes remaining free quota first and paid credits second`() = runBlocking {
+		val httpClient = HttpClient.newBuilder()
+			.connectTimeout(Duration.ofSeconds(5))
+			.build()
+
+		val config = LLMImageGenerationConfig(
+			endpointUrl = "http://127.0.0.1:$serverPort/v1/images/generations",
+			apiToken = "test-sk-key-12345",
+			model = "gpt-image-2.5",
+			creditsCost = 25,
+			enabled = true,
+		)
+		// 10 weekly units available, 30 paid credits
+		val fakeQuota = FakeQuotaService(availableWeeklyUnits = 10, currentCredits = 30)
+		val tool = GenerateImageTool(config = config, quotaService = fakeQuota, httpClient = httpClient)
+
+		val args = JsonObject().apply {
+			addProperty("prompt", "画一只可爱的宇航员小猫，唯美插画风格")
+		}
+		val context = LLMToolContext(groupId = null, uid = "10001", name = "tester", source = "qq")
+		val result = tool.execute(args, context)
+		val resultObj = JsonParser.parseString(result).asJsonObject
+
+		assertEquals("success", resultObj.get("status").asString)
+		assertEquals(25, resultObj.get("credits_consumed").asInt)
+		assertEquals(10, resultObj.get("weekly_units_deducted").asInt)
+		assertEquals(15, resultObj.get("paid_credits_deducted").asInt)
+		assertEquals(0, fakeQuota.availableWeeklyUnits)
+		assertEquals(15, fakeQuota.currentCredits)
+	}
+
+	@Test
+	fun `split deduction refunds both weekly units and paid credits on error`() = runBlocking {
+		val httpClient = HttpClient.newBuilder()
+			.connectTimeout(Duration.ofSeconds(5))
+			.build()
+
+		val config = LLMImageGenerationConfig(
+			endpointUrl = "http://127.0.0.1:$serverPort/v1/images/generations",
+			apiToken = "test-sk-key-12345",
+			model = "gpt-image-2.5",
+			creditsCost = 25,
+			enabled = true,
+		)
+		// 10 weekly units available, 30 paid credits
+		val fakeQuota = FakeQuotaService(availableWeeklyUnits = 10, currentCredits = 30)
+		val tool = GenerateImageTool(config = config, quotaService = fakeQuota, httpClient = httpClient)
+
+		val args = JsonObject().apply {
+			addProperty("prompt", "trigger_error")
+		}
+		val context = LLMToolContext(groupId = null, uid = "10001", name = "tester", source = "qq")
+		val result = tool.execute(args, context)
+		val resultObj = JsonParser.parseString(result).asJsonObject
+
+		assertEquals("generation_failed", resultObj.get("error").asString)
+		assertEquals(10, fakeQuota.availableWeeklyUnits)
+		assertEquals(30, fakeQuota.currentCredits)
+		assertEquals(10, fakeQuota.refundedWeeklyAmount)
+		assertEquals(15, fakeQuota.refundedPaidAmount)
+	}
+
+	@Test
 	fun `spring can instantiate GenerateImageTool via autowiring without conflict`() {
 		val context = org.springframework.context.annotation.AnnotationConfigApplicationContext()
 		context.beanFactory.registerSingleton("reloadableLLMProvider", org.mockito.Mockito.mock(ReloadableLLMProvider::class.java))
@@ -315,27 +410,58 @@ class GenerateImageToolTest {
 	}
 
 	private class FakeQuotaService(
+		var availableWeeklyUnits: Int = 0,
 		var currentCredits: Int = 100,
 	) : LLMDailyQuotaService(store = StubQuotaStore(), configuredDailyLimit = 120) {
-		var deductedAmount: Int = 0
-		var refundedAmount: Int = 0
+		var deductedWeeklyAmount: Int = 0
+		var deductedPaidAmount: Int = 0
+		var refundedWeeklyAmount: Int = 0
+		var refundedPaidAmount: Int = 0
 
-		override suspend fun deductCredits(qqUid: Long, amount: Int, referenceId: String, kind: String): CreditDeductionResult {
-			if (currentCredits < amount) {
+		val deductedAmount: Int get() = deductedWeeklyAmount + deductedPaidAmount
+		val refundedAmount: Int get() = refundedWeeklyAmount + refundedPaidAmount
+
+		override suspend fun deductQuota(
+			qqUid: Long,
+			amount: Int,
+			referenceId: String,
+			hasAccount: Boolean,
+			now: java.time.Instant,
+		): CreditDeductionResult {
+			val weeklyDeduct = minOf(amount, availableWeeklyUnits)
+			val paidDeduct = amount - weeklyDeduct
+			if (currentCredits < paidDeduct) {
 				return CreditDeductionResult(
 					success = false,
 					remainingCredits = currentCredits,
-					error = "账户剩余点数不足（当前点数：${currentCredits} 点，本次生成图片需要：${amount} 点 Credits）。请充值点数后再试。"
+					weeklyDeducted = 0,
+					paidDeducted = 0,
+					error = "账户剩余额度不足（剩余免费额度：${availableWeeklyUnits} 点，Paid Credits：${currentCredits} 点，本次生成图片需要：${amount} 点）。请充值点数或等待下周免费额度重置。"
 				)
 			}
-			currentCredits -= amount
-			deductedAmount += amount
-			return CreditDeductionResult(success = true, remainingCredits = currentCredits)
+			availableWeeklyUnits -= weeklyDeduct
+			deductedWeeklyAmount += weeklyDeduct
+			currentCredits -= paidDeduct
+			deductedPaidAmount += paidDeduct
+			return CreditDeductionResult(
+				success = true,
+				remainingCredits = currentCredits,
+				weeklyDeducted = weeklyDeduct,
+				paidDeducted = paidDeduct,
+			)
 		}
 
-		override suspend fun refundCredits(qqUid: Long, amount: Int, referenceId: String, kind: String): Boolean {
-			currentCredits += amount
-			refundedAmount += amount
+		override suspend fun refundQuota(
+			qqUid: Long,
+			weeklyAmount: Int,
+			paidAmount: Int,
+			referenceId: String,
+			now: java.time.Instant,
+		): Boolean {
+			availableWeeklyUnits += weeklyAmount
+			refundedWeeklyAmount += weeklyAmount
+			currentCredits += paidAmount
+			refundedPaidAmount += paidAmount
 			return true
 		}
 	}
