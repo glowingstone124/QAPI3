@@ -1,16 +1,5 @@
 package org.qo.services.llmServices
 
-import com.google.gson.JsonParser
-import io.ktor.client.HttpClient
-import io.ktor.client.engine.cio.CIO
-import io.ktor.client.plugins.HttpTimeout
-import io.ktor.client.request.header
-import io.ktor.client.request.post
-import io.ktor.client.request.setBody
-import io.ktor.client.statement.bodyAsText
-import io.ktor.http.ContentType
-import io.ktor.http.HttpHeaders
-import io.ktor.http.contentType
 import jakarta.annotation.PostConstruct
 import jakarta.annotation.PreDestroy
 import kotlinx.coroutines.CompletableDeferred
@@ -25,12 +14,10 @@ import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.Locale
-import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.io.path.extension
 import kotlin.io.path.isRegularFile
 import kotlin.math.min
-import kotlin.math.sqrt
 
 @Service
 class RAGService() {
@@ -40,27 +27,18 @@ class RAGService() {
 		val topK: Int,
 		val maxContextChars: Int,
 		val chunkSize: Int,
-		val embeddingMinScore: Double,
 		val keywordMinScore: Double,
-		val embeddingEnabled: Boolean,
-		val embeddingUrl: String,
-		val embeddingModel: String,
-		val embeddingToken: String,
 	)
 
 	private var config = defaultConfig()
-	private var client = defaultClient()
 	private val initializationScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 	private val initialLoadStarted = AtomicBoolean(false)
 	private val initialLoad = CompletableDeferred<Unit>()
-	private val embeddingCache = ConcurrentHashMap<String, List<Double>>()
 	@Volatile
 	private var chunks: List<RAGChunk> = emptyList()
 
-	internal constructor(config: Config, client: HttpClient = defaultClient()) : this() {
+	internal constructor(config: Config) : this() {
 		this.config = config
-		this.client.close()
-		this.client = client
 	}
 
 	@PostConstruct
@@ -71,7 +49,6 @@ class RAGService() {
 	@PreDestroy
 	fun shutdown() {
 		initializationScope.cancel()
-		client.close()
 	}
 
 	suspend fun buildContext(question: String, groupId: Long? = null): String? {
@@ -110,7 +87,7 @@ class RAGService() {
 		chunks = if (!config.enabled || !Files.isDirectory(config.knowledgeDir)) {
 			emptyList()
 		} else {
-			val loaded = withContext(Dispatchers.IO) {
+			withContext(Dispatchers.IO) {
 				Files.walk(config.knowledgeDir).use { stream ->
 					stream
 						.filter { it.isRegularFile() }
@@ -120,42 +97,15 @@ class RAGService() {
 						.toList()
 				}
 			}
-			if (config.embeddingEnabled && config.embeddingToken.isNotBlank()) {
-				loaded.map { chunk ->
-					chunk.copy(embedding = embeddingFor(chunk.content))
-				}
-			} else {
-				loaded
-			}
 		}
 		if (!initialLoad.isCompleted) {
 			initialLoad.complete(Unit)
 		}
-		val embedded = chunks.count { it.embedding != null }
-		println("RAG loaded ${chunks.size} chunk(s) from ${config.knowledgeDir}; embedded=$embedded")
+		println("RAG loaded ${chunks.size} chunk(s) from ${config.knowledgeDir}")
 	}
 
-	private suspend fun search(question: String, groupId: Long?): List<RAGMatch> {
+	private fun search(question: String, groupId: Long?): List<RAGMatch> {
 		val scopedChunks = chunks.filter { it.groupId == null || it.groupId == groupId }
-		val queryEmbedding = if (config.embeddingEnabled && config.embeddingToken.isNotBlank()) {
-			embeddingFor(question)
-		} else {
-			null
-		}
-		if (queryEmbedding != null && scopedChunks.any { it.embedding != null }) {
-			val vectorMatches = scopedChunks.asSequence()
-				.mapNotNull { chunk ->
-					val embedding = chunk.embedding ?: return@mapNotNull null
-					val score = cosine(queryEmbedding, embedding)
-					if (score >= config.embeddingMinScore) RAGMatch(chunk, score, "embedding") else null
-				}
-				.sortedByDescending { it.score }
-				.take(config.topK)
-				.toList()
-			if (vectorMatches.isNotEmpty()) {
-				return vectorMatches
-			}
-		}
 		return keywordSearch(question, scopedChunks)
 	}
 
@@ -172,34 +122,6 @@ class RAGService() {
 			.sortedByDescending { it.score }
 			.take(config.topK)
 			.toList()
-	}
-
-	private suspend fun embeddingFor(input: String): List<Double>? {
-		val text = input.trim()
-		if (text.isBlank()) {
-			return null
-		}
-		embeddingCache[text]?.let { return it }
-		return withContext(Dispatchers.IO) {
-			runCatching {
-				val response = client.post(config.embeddingUrl) {
-					header(HttpHeaders.Authorization, "Bearer ${config.embeddingToken}")
-					contentType(ContentType.Application.Json)
-					setBody("""{"model":${quote(config.embeddingModel)},"input":${quote(text)}}""")
-				}
-				val body = response.bodyAsText()
-				val embedding = JsonParser.parseString(body)
-					.asJsonObject
-					.getAsJsonArray("data")[0]
-					.asJsonObject
-					.getAsJsonArray("embedding")
-					.map { it.asDouble }
-				embeddingCache[text] = embedding
-				embedding
-			}.onFailure {
-				println("RAG embedding failed: ${it.message}; fallback to keyword search")
-			}.getOrNull()
-		}
 	}
 
 	private fun splitFile(path: Path): List<RAGChunk> {
@@ -245,16 +167,23 @@ class RAGService() {
 	}
 
 	private fun keywordScore(chunk: RAGChunk, queryTokens: Set<String>, question: String): Double {
-		val haystack = (chunk.title + "\n" + chunk.content).lowercase(Locale.ROOT)
+		val titleLower = chunk.title.lowercase(Locale.ROOT)
+		val contentLower = chunk.content.lowercase(Locale.ROOT)
 		var score = 0.0
 		queryTokens.forEach { token ->
-			if (haystack.contains(token)) {
+			if (titleLower.contains(token)) {
+				score += if (token.length >= 3) 4.0 else 2.0
+			} else if (contentLower.contains(token)) {
 				score += if (token.length >= 3) 2.0 else 1.0
 			}
 		}
 		val normalizedQuestion = question.trim().lowercase(Locale.ROOT)
-		if (normalizedQuestion.length >= 4 && haystack.contains(normalizedQuestion)) {
-			score += 8.0
+		if (normalizedQuestion.length >= 4) {
+			if (titleLower.contains(normalizedQuestion)) {
+				score += 12.0
+			} else if (contentLower.contains(normalizedQuestion)) {
+				score += 8.0
+			}
 		}
 		return score
 	}
@@ -265,28 +194,14 @@ class RAGService() {
 			.split(Regex("[^\\p{L}\\p{N}_]+"))
 			.map { it.trim() }
 			.filter { it.length >= 2 }
-		val cjkBigrams = normalized
+		val cjkChars = normalized
 			.filter { Character.UnicodeScript.of(it.code) in cjkScripts }
-			.windowed(2)
-		return (asciiTokens + cjkBigrams).toSet()
-	}
-
-	private fun cosine(left: List<Double>, right: List<Double>): Double {
-		if (left.size != right.size || left.isEmpty()) {
-			return 0.0
+		val cjkTokens = if (cjkChars.length == 1) {
+			listOf(cjkChars)
+		} else {
+			cjkChars.windowed(2)
 		}
-		var dot = 0.0
-		var leftNorm = 0.0
-		var rightNorm = 0.0
-		for (i in left.indices) {
-			dot += left[i] * right[i]
-			leftNorm += left[i] * left[i]
-			rightNorm += right[i] * right[i]
-		}
-		if (leftNorm == 0.0 || rightNorm == 0.0) {
-			return 0.0
-		}
-		return dot / (sqrt(leftNorm) * sqrt(rightNorm))
+		return (asciiTokens + cjkTokens).toSet()
 	}
 
 	private fun findTitle(text: String): String? {
@@ -297,11 +212,6 @@ class RAGService() {
 			?.trim()
 			?.takeIf { it.isNotBlank() }
 	}
-
-	private fun quote(value: String): String = com.google.gson.JsonObject()
-		.apply { addProperty("value", value) }
-		.get("value")
-		.toString()
 
 	private fun readInt(name: String, defaultValue: Int): Int =
 		System.getenv(name)?.trim()?.toIntOrNull() ?: defaultValue
@@ -339,7 +249,6 @@ class RAGService() {
 		val title: String,
 		val content: String,
 		val groupId: Long? = null,
-		val embedding: List<Double>? = null,
 	)
 
 	private data class RAGMatch(
@@ -349,14 +258,6 @@ class RAGService() {
 	)
 
 	private companion object {
-		private fun defaultClient(): HttpClient = HttpClient(CIO) {
-			install(HttpTimeout) {
-				requestTimeoutMillis = 60_000
-				socketTimeoutMillis = 60_000
-				connectTimeoutMillis = 10_000
-			}
-		}
-
 		private fun groupIdForSource(source: String): Long? {
 			val normalized = source.replace('\\', '/')
 			val parts = normalized.split('/')
@@ -383,17 +284,6 @@ class RAGService() {
 		topK = readInt("RAG_TOP_K", 5).coerceIn(1, 12),
 		maxContextChars = readInt("RAG_MAX_CONTEXT_CHARS", 4000).coerceAtLeast(500),
 		chunkSize = readInt("RAG_CHUNK_SIZE", 900).coerceAtLeast(200),
-		embeddingMinScore = readDouble("RAG_EMBEDDING_MIN_SCORE", 0.2),
 		keywordMinScore = readDouble("RAG_KEYWORD_MIN_SCORE", 2.0),
-		embeddingEnabled = readBoolean("RAG_EMBEDDING_ENABLED", true),
-		embeddingUrl = System.getenv("RAG_EMBEDDING_API_URL")
-			?: System.getenv("LLM_EMBEDDING_API_URL")
-			?: "https://api.openai.com/v1/embeddings",
-		embeddingModel = System.getenv("RAG_EMBEDDING_MODEL")
-			?: System.getenv("LLM_EMBEDDING_MODEL")
-			?: "text-embedding-3-small",
-		embeddingToken = System.getenv("RAG_EMBEDDING_API_TOKEN")
-			?: System.getenv("LLM_API_TOKEN")
-			?: runCatching { Files.readString(Path.of("LLMAPITOKEN")).trim() }.getOrDefault(""),
 	)
 }
