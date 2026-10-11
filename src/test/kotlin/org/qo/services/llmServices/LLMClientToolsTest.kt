@@ -16,6 +16,30 @@ import kotlinx.coroutines.delay
 import kotlin.test.*
 
 class LLMClientToolsTest {
+    /** Optional cross-repository contract gate using Kotshi's actual exported schemas. */
+    @Test fun `current Kotshi schemas and native construction history pass the client relay`() {
+        val schemaPath = System.getenv("KOTSHI_BUILDER_SCHEMA")
+        org.junit.jupiter.api.Assumptions.assumeTrue(schemaPath != null, "Set KOTSHI_BUILDER_SCHEMA to JSON exported from Kotshi tools.mjs")
+        val definitions = JsonParser.parseString(java.io.File(schemaPath!!).readText()).asJsonArray
+        val request = obj("""{"model":"contract-model","tool_execution":"client","tool_choice":"auto","messages":[
+          {"role":"user","content":"[Kotshi Builder 工作区上下文] build a facade"},
+          {"role":"assistant","tool_calls":[{"id":"pattern","type":"function","function":{"name":"compose_pattern","arguments":"{\"revision\":0}"}}]},
+          {"role":"tool","tool_call_id":"pattern","content":"{\"ok\":true,\"revision\":1}"}
+        ]}""")
+        request.add("tools", definitions)
+        assertEquals(definitions, extractClientTools(request, "web"))
+        assertFalse(request.has("tool_execution"))
+        val names = definitions.map { it.asJsonObject.getAsJsonObject("function").get("name").asString }
+        assertTrue(names.containsAll(listOf("compose_pattern", "build_roof", "verify_stage", "query_blocks", "save_blueprint", "list_blueprints", "place_blueprint")))
+        for (protocol in listOf(LLMProtocol.CHAT_COMPLETIONS, LLMProtocol.RESPONSES, LLMProtocol.ANTHROPIC, LLMProtocol.COMMANDCODE)) {
+            val adapted = LLMAdapterRegistry.forProtocol(protocol).adapt(LLMAdapterRequest(
+                chat = clientToolStepChat(request), functionTools = definitions, reasoningEffort = LLMReasoningEffort.NONE, webSearch = false,
+            ))
+            assertTrue(adapted.toString().contains("compose_pattern"), "${protocol.wireValue} must preserve the construction schema")
+            assertTrue(adapted.toString().contains("build_roof"), "${protocol.wireValue} must preserve the roof schema")
+        }
+    }
+
     @Test fun `arbitrary client tool definitions are relayed without a server allowlist`() {
         val request = obj("""{"tool_execution":"client","messages":[{"role":"user","content":"plan"}]}""")
         request.add("tools", JsonArray().apply {
