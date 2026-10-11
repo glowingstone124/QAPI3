@@ -175,7 +175,13 @@ internal fun LLMServices.streamFromResponses(
 	try {
 		repeat(maxToolRounds) { round ->
 			var terminalResponse: JsonObject? = null
+			var terminalEventBody: String? = null
+			var upstreamStatus: Int? = null
 			var upstreamError: String? = null
+			fun logFailure(responseBody: String) = LLMErrorLog.recordResponse(
+				"$source/responses-stream", responseBody, provider.name, requester, request.model,
+				round + 1, upstreamStatus, requestId,
+			)
 			client.preparePost(provider.responsesUrl) {
 				val body = upstreamBody.toString()
 				logUpstreamRequest("$source/responses-round-${round + 1}", body, provider, "responses")
@@ -185,8 +191,10 @@ internal fun LLMServices.streamFromResponses(
 				debugPrompt(source, body)
 				setBody(body)
 			}.execute { response ->
+				upstreamStatus = response.status.value
 				if (!response.status.isSuccess()) {
 					upstreamError = response.bodyAsText()
+					logFailure(upstreamError!!)
 					return@execute
 				}
 
@@ -199,6 +207,7 @@ internal fun LLMServices.streamFromResponses(
 					val event = runCatching { JsonParser.parseString(data).asJsonObject }.getOrNull() ?: continue
 					when (event.get("type")?.asString) {
 						"error" -> {
+							logFailure(data)
 							upstreamError = errorJson("upstream_error", event.get("message")?.asString ?: "Responses API 请求失败")
 							break
 						}
@@ -225,6 +234,7 @@ internal fun LLMServices.streamFromResponses(
 
 						"response.completed", "response.incomplete", "response.failed" -> {
 							terminalResponse = event.getAsJsonObject("response")
+							terminalEventBody = data
 						}
 					}
 				}
@@ -244,9 +254,10 @@ internal fun LLMServices.streamFromResponses(
 				emit(errorJson("upstream_error", "Responses API 流提前结束"))
 				return@flow
 			}
-			if (completed.get("status")?.asString in setOf("failed", "incomplete")) {
+			if (completed.get("error")?.isJsonNull == false || completed.get("status")?.asString in setOf("failed", "incomplete")) {
+				logFailure(terminalEventBody ?: completed.toString())
 				refundUsage(quotaReservation, accumulateUsage(totalUsage, parseUsage(completed.toString())), request, provider, requester.conversationId)
-				val message = completed.getAsJsonObject("error")?.get("message")?.asString
+				val message = completed.get("error")?.takeIf { it.isJsonObject }?.asJsonObject?.get("message")?.asString
 					?: "Responses API 请求失败"
 				updateAccessRecord(requestId, "failed", errorMessage = message.take(512), groupName = requester.groupName ?: requester.groupId?.let { "group:$it" }, qqUid = requester.uid)
 				emit(errorJson("upstream_error", message))

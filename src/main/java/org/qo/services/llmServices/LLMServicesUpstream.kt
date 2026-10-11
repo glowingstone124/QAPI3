@@ -121,17 +121,28 @@ internal suspend fun LLMServices.completeWithResponsesApi(
 	val intermediateMessages = mutableListOf<String>()
 
 	repeat(maxToolRounds) { round ->
-		val response = postUpstream("$source/responses-round-${round + 1}", body.toString(), provider, provider.responsesUrl)
+		val roundSource = "$source/responses-round-${round + 1}"
+		val response = postUpstream(roundSource, body.toString(), provider, provider.responsesUrl)
 		val responseText = response.bodyAsText()
+		fun logFailure() = LLMErrorLog.recordResponse(
+			roundSource, responseText, provider.name, requester, request.model, round + 1, response.status.value,
+		)
 		if (debugPrompt) {
 			println("[LLM] responses result source=$source round=${round + 1} ${LLMResponsesAdapter.outputSummary(responseText)}")
 		}
 		if (!response.status.isSuccess()) {
+			logFailure()
 			return response.status.value to withUsage(responseText,totalUsage)
 		}
 		totalUsage = accumulateUsage(totalUsage, parseUsage(responseText))
-		val responseRoot = JsonParser.parseString(responseText).asJsonObject
-		if (responseRoot.has("error") || responseRoot.get("status")?.asString in setOf("failed", "incomplete")) {
+		val responseRoot = try {
+			JsonParser.parseString(responseText).asJsonObject
+		} catch (error: Exception) {
+			logFailure()
+			throw error
+		}
+		if (responseRoot.get("error")?.isJsonNull == false || responseRoot.get("status")?.asString in setOf("failed", "incomplete")) {
+			logFailure()
 			return 502 to withUsage(errorJson("upstream_error", "Responses API 未成功完成请求"), totalUsage)
 		}
 		val functionCalls = LLMResponsesAdapter.functionCalls(responseText)

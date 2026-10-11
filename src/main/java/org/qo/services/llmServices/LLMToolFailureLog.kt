@@ -1,11 +1,8 @@
 package org.qo.services.llmServices
 
 import com.google.gson.GsonBuilder
-import com.google.gson.JsonArray
-import com.google.gson.JsonElement
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
-import com.google.gson.JsonPrimitive
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
@@ -78,18 +75,17 @@ internal class LLMToolFailureLog(
 			}
 			val entry = buildString {
 				appendLine("===== LLM TOOL FAILURE [$time] =====")
-				appendLine(gson.toJson(redactJson(metadata)))
+				appendLine(gson.toJson(LLMLogRedaction.redactJson(metadata)))
 				for ((label, body) in details) {
 					appendLine("--- $label ---")
-					val json = if (label == "assistant_content") null else runCatching { JsonParser.parseString(body) }.getOrNull()
-					val formatted = if (json == null) redactText(body) else gson.toJson(redactJson(json))
+					val formatted = LLMLogRedaction.formatBody(body, parseJson = label != "assistant_content")
 					formatted.lineSequence().forEach { append("  ").appendLine(it) }
 				}
 				appendLine("===== END LLM TOOL FAILURE =====")
 				appendLine()
 			}
 			// Keep console output compact; the file contains the complete diagnostic sections.
-			println("[LLMTool] failure ${redactJson(metadata)} log=$path")
+			println("[LLMTool] failure ${LLMLogRedaction.redactJson(metadata)} log=$path")
 			synchronized(lock) {
 				path.parent?.let { Files.createDirectories(it) }
 				Files.writeString(path, entry, StandardCharsets.UTF_8, CREATE, APPEND)
@@ -99,28 +95,8 @@ internal class LLMToolFailureLog(
 		}
 	}
 
-	private fun redactJson(value: JsonElement): JsonElement = when {
-		value.isJsonObject -> value.asJsonObject.deepCopy().apply {
-			for ((key, child) in entrySet().toList()) {
-				add(key, if (key.lowercase() in sensitiveKeys) JsonPrimitive("<redacted>") else redactJson(child))
-			}
-		}
-		value.isJsonArray -> JsonArray().apply { value.asJsonArray.forEach { add(redactJson(it)) } }
-		value.isJsonPrimitive && value.asJsonPrimitive.isString -> JsonPrimitive(redactText(value.asString))
-		else -> value
-	}
-
-	private fun redactText(value: String): String = value
-		.replace(bearerPattern, "Bearer <redacted>")
-		.replace(dataPattern, "data:<redacted>")
-		.replace(secretPattern) { "${it.groupValues[1]}\"<redacted>\"" }
-
 	private companion object {
 		val lock = Any()
 		val gson = GsonBuilder().disableHtmlEscaping().serializeNulls().setPrettyPrinting().create()
-		val sensitiveKeys = setOf("authorization", "api_key", "apikey", "api_token", "apitoken", "access_token", "token", "password", "cookie", "set-cookie")
-		val bearerPattern = Regex("""(?i)\bBearer\s+[a-zA-Z0-9._~+/=-]+""")
-		val dataPattern = Regex("""data:[a-zA-Z0-9.+/-]+;base64,[a-zA-Z0-9+/=_-]+""")
-		val secretPattern = Regex("""(?i)("(?:authorization|api_key|apikey|api_token|apitoken|access_token|token|password|cookie|set-cookie)"\s*:\s*)"(?:\\.|[^"\\])*"""")
 	}
 }
