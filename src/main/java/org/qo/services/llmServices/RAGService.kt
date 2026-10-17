@@ -1,7 +1,19 @@
 package org.qo.services.llmServices
 
+import com.google.gson.JsonObject
+import com.google.gson.JsonParser
+import io.ktor.client.HttpClient
+import io.ktor.client.engine.cio.CIO
+import io.ktor.client.plugins.HttpTimeout
+import io.ktor.client.request.post
+import io.ktor.client.request.setBody
+import io.ktor.client.statement.bodyAsText
+import io.ktor.http.ContentType
+import io.ktor.http.contentType
+import io.ktor.http.isSuccess
 import jakarta.annotation.PostConstruct
 import jakarta.annotation.PreDestroy
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -28,6 +40,8 @@ class RAGService() {
 		val maxContextChars: Int,
 		val chunkSize: Int,
 		val keywordMinScore: Double,
+		val enableMnemos: Boolean = false,
+		val mnemosEndpoint: String = "http://127.0.0.1:8089",
 	)
 
 	private var config = defaultConfig()
@@ -36,9 +50,16 @@ class RAGService() {
 	private val initialLoad = CompletableDeferred<Unit>()
 	@Volatile
 	private var chunks: List<RAGChunk> = emptyList()
+	private var httpClient: HttpClient = defaultHttpClient()
+	private var ownsHttpClient: Boolean = true
 
 	internal constructor(config: Config) : this() {
 		this.config = config
+	}
+
+	internal constructor(config: Config, httpClient: HttpClient) : this(config) {
+		this.httpClient = httpClient
+		this.ownsHttpClient = false
 	}
 
 	@PostConstruct
@@ -49,6 +70,9 @@ class RAGService() {
 	@PreDestroy
 	fun shutdown() {
 		initializationScope.cancel()
+		if (ownsHttpClient) {
+			runCatching { httpClient.close() }
+		}
 	}
 
 	suspend fun buildContext(question: String, groupId: Long? = null): String? {
@@ -56,7 +80,15 @@ class RAGService() {
 			return null
 		}
 		awaitInitialLoad()
-		val matches = search(question, groupId)
+		val matches = if (config.enableMnemos) {
+			searchMnemos(question, groupId)
+		} else {
+			search(question, groupId)
+		}
+		return formatContext(matches)
+	}
+
+	private fun formatContext(matches: List<RAGMatch>): String? {
 		if (matches.isEmpty()) {
 			return null
 		}
@@ -82,8 +114,89 @@ class RAGService() {
 		return sb.toString()
 	}
 
+	private suspend fun searchMnemos(question: String, groupId: Long?): List<RAGMatch> {
+		val endpoint = "${config.mnemosEndpoint.trimEnd('/')}/v1/search"
+		val requestJson = JsonObject().apply {
+			addProperty("query", question)
+			if (groupId != null) {
+				addProperty("group_id", groupId)
+			}
+			addProperty("top_k", config.topK)
+		}
+
+		val response = runCatching {
+			httpClient.post(endpoint) {
+				contentType(ContentType.Application.Json)
+				setBody(requestJson.toString())
+			}
+		}.getOrElse { error ->
+			if (error is CancellationException) throw error
+			println("[RAG] Mnemos search request failed: ${error.message}")
+			return emptyList()
+		}
+
+		if (!response.status.isSuccess()) {
+			println("[RAG] Mnemos returned HTTP ${response.status.value}")
+			return emptyList()
+		}
+
+		val bodyText = runCatching { response.bodyAsText() }.getOrDefault("")
+		val root = runCatching { JsonParser.parseString(bodyText).asJsonObject }.getOrNull()
+			?: return emptyList()
+
+		if (root.get("status")?.asString != "ok") {
+			val errorMsg = root.getAsJsonObject("payload")?.get("message")?.asString ?: "Unknown error"
+			println("[RAG] Mnemos returned error: $errorMsg")
+			return emptyList()
+		}
+
+		val payload = root.getAsJsonObject("payload") ?: return emptyList()
+		val matchesArray = payload.getAsJsonArray("matches") ?: return emptyList()
+		val result = mutableListOf<RAGMatch>()
+		for (element in matchesArray) {
+			val item = element.takeIf { it.isJsonObject }?.asJsonObject ?: continue
+			val id = item.get("id")?.takeIf { it.isJsonPrimitive }?.asString.orEmpty()
+			val source = item.get("source")?.takeIf { it.isJsonPrimitive }?.asString.orEmpty()
+			val title = item.get("title")?.takeIf { it.isJsonPrimitive }?.asString.orEmpty()
+			val content = item.get("content")?.takeIf { it.isJsonPrimitive }?.asString.orEmpty()
+			val matchGroupId = item.get("group_id")?.takeIf { it.isJsonPrimitive && !it.isJsonNull }?.asLong
+			val score = item.get("score")?.takeIf { it.isJsonPrimitive }?.asDouble ?: 0.0
+
+			result.add(
+				RAGMatch(
+					chunk = RAGChunk(
+						id = id,
+						source = source,
+						title = title,
+						content = content,
+						groupId = matchGroupId,
+					),
+					score = score,
+					strategy = "mnemos",
+				)
+			)
+		}
+		return result
+	}
+
 	suspend fun reload() {
 		initialLoadStarted.set(true)
+		if (config.enableMnemos) {
+			println("RAG operating in Mnemos mode (endpoint: ${config.mnemosEndpoint})")
+			runCatching {
+				val endpoint = "${config.mnemosEndpoint.trimEnd('/')}/v1/reload"
+				val response = httpClient.post(endpoint)
+				println("RAG notified Mnemos reload: status=${response.status.value}")
+			}.onFailure {
+				if (it is CancellationException) throw it
+				println("RAG notify Mnemos reload failed: ${it.message}")
+			}
+			chunks = emptyList()
+			if (!initialLoad.isCompleted) {
+				initialLoad.complete(Unit)
+			}
+			return
+		}
 		chunks = if (!config.enabled || !Files.isDirectory(config.knowledgeDir)) {
 			emptyList()
 		} else {
@@ -213,15 +326,6 @@ class RAGService() {
 			?.takeIf { it.isNotBlank() }
 	}
 
-	private fun readInt(name: String, defaultValue: Int): Int =
-		System.getenv(name)?.trim()?.toIntOrNull() ?: defaultValue
-
-	private fun readDouble(name: String, defaultValue: Double): Double =
-		System.getenv(name)?.trim()?.toDoubleOrNull() ?: defaultValue
-
-	private fun readBoolean(name: String, defaultValue: Boolean): Boolean =
-		System.getenv(name)?.trim()?.lowercase(Locale.ROOT)?.toBooleanStrictOrNull() ?: defaultValue
-
 	private suspend fun awaitInitialLoad() {
 		ensureInitialLoadScheduled()
 		initialLoad.await()
@@ -258,6 +362,69 @@ class RAGService() {
 	)
 
 	private companion object {
+		private val dotEnvMap: Map<String, String> by lazy { loadDotEnv() }
+
+		private fun loadDotEnv(): Map<String, String> {
+			val candidates = listOf(
+				Path.of(".env"),
+				Path.of("QAPI3/.env"),
+				Path.of("../.env"),
+			)
+			val map = mutableMapOf<String, String>()
+			for (path in candidates) {
+				if (Files.isRegularFile(path)) {
+					runCatching {
+						Files.readAllLines(path, StandardCharsets.UTF_8).forEach { rawLine ->
+							val line = rawLine.trim()
+							if (line.isEmpty() || line.startsWith("#")) return@forEach
+							val separatorIndex = line.indexOf('=')
+							if (separatorIndex > 0) {
+								val key = line.substring(0, separatorIndex).trim()
+								var value = line.substring(separatorIndex + 1).trim()
+								if ((value.startsWith("\"") && value.endsWith("\"")) ||
+									(value.startsWith("'") && value.endsWith("'"))
+								) {
+									value = value.substring(1, value.length - 1)
+								}
+								map.putIfAbsent(key, value)
+							}
+						}
+					}
+					break
+				}
+			}
+			return map
+		}
+
+		private fun readEnv(name: String): String? =
+			System.getenv(name)?.trim()?.takeIf { it.isNotBlank() } ?: dotEnvMap[name]?.trim()?.takeIf { it.isNotBlank() }
+
+		private fun readString(name: String, defaultValue: String): String =
+			readEnv(name) ?: defaultValue
+
+		private fun readInt(name: String, defaultValue: Int): Int =
+			readEnv(name)?.toIntOrNull() ?: defaultValue
+
+		private fun readDouble(name: String, defaultValue: Double): Double =
+			readEnv(name)?.toDoubleOrNull() ?: defaultValue
+
+		private fun readBoolean(name: String, defaultValue: Boolean): Boolean {
+			val value = readEnv(name)?.lowercase(Locale.ROOT) ?: return defaultValue
+			return when (value) {
+				"true", "1", "yes", "on" -> true
+				"false", "0", "no", "off" -> false
+				else -> defaultValue
+			}
+		}
+
+		private fun defaultHttpClient(): HttpClient = HttpClient(CIO) {
+			install(HttpTimeout) {
+				requestTimeoutMillis = 3_000
+				connectTimeoutMillis = 1_000
+				socketTimeoutMillis = 3_000
+			}
+		}
+
 		private fun groupIdForSource(source: String): Long? {
 			val normalized = source.replace('\\', '/')
 			val parts = normalized.split('/')
@@ -280,10 +447,12 @@ class RAGService() {
 
 	private fun defaultConfig(): Config = Config(
 		enabled = readBoolean("RAG_ENABLED", true),
-		knowledgeDir = Path.of(System.getenv("RAG_KNOWLEDGE_DIR") ?: "data/llm/rag"),
+		knowledgeDir = Path.of(readString("RAG_KNOWLEDGE_DIR", "data/llm/rag")),
 		topK = readInt("RAG_TOP_K", 5).coerceIn(1, 12),
 		maxContextChars = readInt("RAG_MAX_CONTEXT_CHARS", 4000).coerceAtLeast(500),
 		chunkSize = readInt("RAG_CHUNK_SIZE", 900).coerceAtLeast(200),
 		keywordMinScore = readDouble("RAG_KEYWORD_MIN_SCORE", 2.0),
+		enableMnemos = readBoolean("ENABLE_MNEMOS", false) || readBoolean("MNEMOS_ENABLED", false),
+		mnemosEndpoint = readString("MNEMOS_ENDPOINT", readString("MNEMOS_URL", "http://127.0.0.1:8089")),
 	)
 }
