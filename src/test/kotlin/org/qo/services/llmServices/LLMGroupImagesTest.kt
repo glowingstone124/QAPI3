@@ -49,7 +49,7 @@ class LLMGroupImagesTest {
             assertEquals("data:image/png;base64,${index + 1}", parts[index * 2 + 2].asJsonObject.getAsJsonObject("image_url").get("url").asString)
         }
         assertFalse(turn.persistedUserContent.toString().contains("data:image/"))
-        assertTrue(turn.persistedUserContent.toString().contains("onebot:1"))
+        assertEquals("what is in those images?", turn.persistedUserContent.asString)
     }
 
     @Test

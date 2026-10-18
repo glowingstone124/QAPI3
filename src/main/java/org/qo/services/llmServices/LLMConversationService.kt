@@ -73,9 +73,15 @@ class LLMConversationService @Autowired constructor(
 			})
 		}
 		history.messages.forEach { message ->
+			val hydrated = imageStore.hydrateContent(message.content)
+			val content = if (message.role == "user") {
+				LLMPromptCacheLayout.stripEnvelope(hydrated)
+			} else {
+				hydrated
+			}
 			add(JsonObject().apply {
 				addProperty("role", message.role)
-				add("content", imageStore.hydrateContent(message.content))
+				add("content", content)
 			})
 		}
 	}
@@ -86,11 +92,12 @@ class LLMConversationService @Autowired constructor(
 		assistantMessage: String,
 		compact: LLMCompactConfig = LLMCompactConfig(),
 	) {
-		if (!hasContent(userContent) || assistantMessage.isBlank()) return
+		val cleanUserContent = LLMPromptCacheLayout.stripEnvelope(userContent)
+		if (!hasContent(cleanUserContent) || assistantMessage.isBlank()) return
 		lockFor(conversationKey).withLock {
 			val existing = loadConversation(conversationKey)
 			val now = System.currentTimeMillis()
-			val compactUserContent = imageStore.compactContent(userContent)
+			val compactUserContent = imageStore.compactContent(cleanUserContent)
 			val current = Conversation(
 				messages = ArrayDeque(existing?.messages.orEmpty()),
 				updatedAt = now,
@@ -203,7 +210,14 @@ class LLMConversationService @Autowired constructor(
 		val messages = ArrayDeque<HistoryMessage>()
 		root.getAsJsonArray("messages")?.forEach { item ->
 			val message = item.asJsonObject
-			messages.add(HistoryMessage(message.get("role").asString, message.get("content").deepCopy()))
+			val role = message.get("role").asString
+			val rawContent = message.get("content") ?: JsonPrimitive("")
+			val content = if (role == "user") {
+				LLMPromptCacheLayout.stripEnvelope(rawContent)
+			} else {
+				rawContent.deepCopy()
+			}
+			messages.add(HistoryMessage(role, content))
 		}
 		return Conversation(
 			messages = messages,

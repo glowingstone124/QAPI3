@@ -3,6 +3,7 @@ package org.qo.services.llmServices
 import com.google.gson.JsonArray
 import com.google.gson.JsonElement
 import com.google.gson.JsonObject
+import com.google.gson.JsonParser
 import com.google.gson.JsonPrimitive
 import com.google.gson.GsonBuilder
 
@@ -58,7 +59,7 @@ internal object LLMPromptCacheLayout {
 			if (index == latestUserIndex) {
 				val original = copy.get("content")?.deepCopy() ?: JsonPrimitive("")
 				val enrichedContent = attachEnvelope(original, context)
-				persistedUserContent = if (context.sender?.source == "web") original else enrichedContent.deepCopy()
+				persistedUserContent = stripEnvelope(original)
 				copy.add("content", enrichedContent)
 			}
 			outgoing.add(copy)
@@ -111,6 +112,53 @@ internal object LLMPromptCacheLayout {
 
 	private fun isTextPart(part: JsonElement): Boolean = part.isJsonObject &&
 		part.asJsonObject.get("type")?.asString in setOf("text", "input_text")
+
+	fun stripEnvelope(content: JsonElement): JsonElement = when {
+		content.isJsonPrimitive && content.asJsonPrimitive.isString -> {
+			stripEnvelopeText(content.asString)
+		}
+		content.isJsonArray -> {
+			val array = JsonArray()
+			content.asJsonArray.forEach { part ->
+				if (isTextPart(part)) {
+					val text = part.asJsonObject.get("text")?.takeIf { it.isJsonPrimitive }?.asString.orEmpty()
+					val stripped = stripEnvelopeText(text)
+					array.add(JsonObject().apply {
+						addProperty("type", part.asJsonObject.get("type")?.asString ?: "text")
+						if (stripped.isJsonPrimitive) {
+							addProperty("text", stripped.asString)
+						} else {
+							add("text", stripped)
+						}
+					})
+				} else {
+					array.add(part.deepCopy())
+				}
+			}
+			array
+		}
+		else -> content.deepCopy()
+	}
+
+	private fun stripEnvelopeText(text: String): JsonElement {
+		if (text.startsWith(ENVELOPE_HEADER) || text.contains("qapi.current_turn.v1")) {
+			val jsonCandidate = text.substringAfter('\n', text).trim()
+			val envelope = runCatching { JsonParser.parseString(jsonCandidate).asJsonObject }.getOrNull()
+			if (envelope != null && envelope.get("schema")?.asString == "qapi.current_turn.v1") {
+				val textParts = envelope.getAsJsonObject("current_message")
+					?.getAsJsonArray("text_parts")
+					?.mapNotNull { it.takeIf { p -> p.isJsonPrimitive }?.asString }
+				if (!textParts.isNullOrEmpty()) {
+					return JsonPrimitive(textParts.joinToString("\n"))
+				}
+			}
+		}
+		if (text.contains("以下是用户本轮的原始内容：\n")) {
+			val clean = text.substringAfter("以下是用户本轮的原始内容：\n").trim()
+			if (clean.isNotBlank()) return JsonPrimitive(clean)
+		}
+		return JsonPrimitive(text)
+	}
 
 	private fun strings(values: List<String>): JsonArray = JsonArray().apply {
 		values.forEach { add(it) }
