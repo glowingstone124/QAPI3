@@ -59,5 +59,7 @@ data/llm/*.token
 data/llm/llm-error.log
 data/llm/toolcall-failure.log
 data/llm/images/
+llm_empty_response.log
+api/llm_empty_response.log
 
 nodes.json

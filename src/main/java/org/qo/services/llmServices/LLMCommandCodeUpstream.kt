@@ -429,12 +429,26 @@ internal fun LLMServices.streamFromCommandCode(
 					groupName = requester.groupName,
 					qqUid = requester.uid
 				)
-				if (assistantText.isNotBlank()) recordConversationAnswer(
-					requester,
-					request.userContent,
-					assistantText.toString(),
-					provider
-				)
+				if (assistantText.isNotBlank()) {
+					recordConversationAnswer(
+						requester,
+						request.userContent,
+						assistantText.toString(),
+						provider
+					)
+				} else {
+					LLMEmptyResponseLog.record(
+						stage = "$source/commandcode-stream",
+						request = request,
+						requester = requester,
+						provider = provider.name,
+						model = request.model,
+						statusCode = 200,
+						rawResponse = response,
+						reason = "empty_commandcode_stream_content",
+						accessRecordId = requestId,
+					)
+				}
 				return@flow
 			}
 			appendAssistantToolCallMessage(chat.getAsJsonArray("messages"), response, calls)

@@ -162,6 +162,23 @@ private suspend fun LLMServices.completeAuthenticatedChat(
 			groupName = requester.groupName,
 			qqUid = requester.uid,
 		)
+		val assistantContent = extractAssistantContent(rawText)
+		val toolCalls = extractToolCalls(rawText)
+		val hasContent = !assistantContent.isNullOrBlank() || toolCalls.isNotEmpty()
+		if (!hasContent) {
+			LLMEmptyResponseLog.record(
+				stage = "$source/complete",
+				request = actualRequest,
+				requester = requester,
+				provider = actualProvider.name,
+				model = actualRequest.model,
+				statusCode = statusCode,
+				rawResponse = rawText,
+				reason = if (rawText.isBlank()) "blank_upstream_response" else if (!modelSucceeded) "upstream_error" else "empty_assistant_content",
+				accessRecordId = requestId,
+				clientRequestId = clientRequestId,
+			)
+		}
 		if (modelSucceeded) {
 			if (principal.source != LLMSource.WEB || request.clientTools == null || extractToolCalls(rawText).isEmpty()) {
 				recordConversation(requester, request.userContent, text, actualProvider)

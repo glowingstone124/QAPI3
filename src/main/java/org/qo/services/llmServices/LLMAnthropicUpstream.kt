@@ -276,12 +276,26 @@ internal fun LLMServices.streamFromAnthropic(
 			groupName = requester.groupName,
 			qqUid = requester.uid
 		)
-		if (assistant.isNotBlank()) recordConversationAnswer(
-			requester,
-			request.userContent,
-			assistant.toString(),
-			provider
-		)
+		if (assistant.isNotBlank()) {
+			recordConversationAnswer(
+				requester,
+				request.userContent,
+				assistant.toString(),
+				provider
+			)
+		} else {
+			LLMEmptyResponseLog.record(
+				stage = "$source/anthropic-stream",
+				request = request,
+				requester = requester,
+				provider = provider.name,
+				model = request.model,
+				statusCode = 200,
+				rawResponse = text,
+				reason = "empty_anthropic_stream_content",
+				accessRecordId = requestId,
+			)
+		}
 	} catch (e: kotlinx.coroutines.CancellationException) {
 		throw e
 	} catch (e: Exception) {

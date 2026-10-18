@@ -97,13 +97,28 @@ internal fun LLMServices.streamClientTools(
 		updateAccessRecord(requestId, "completed", usage, qqUid = requester.uid)
 		val message =
 			JsonParser.parseString(body).asJsonObject.getAsJsonArray("choices")[0].asJsonObject.getAsJsonObject("message")
-		if (!message.has("tool_calls")) extractAssistantContent(body)?.let {
-			recordConversationAnswer(
-				requester,
-				request.userContent,
-				it,
-				provider
-			)
+		if (!message.has("tool_calls")) {
+			val assistantContent = extractAssistantContent(body)
+			if (!assistantContent.isNullOrBlank()) {
+				recordConversationAnswer(
+					requester,
+					request.userContent,
+					assistantContent,
+					provider
+				)
+			} else {
+				LLMEmptyResponseLog.record(
+					stage = "client-tools/stream",
+					request = request,
+					requester = requester,
+					provider = provider.name,
+					model = request.model,
+					statusCode = 200,
+					rawResponse = body,
+					reason = "empty_client_tool_stream_content",
+					accessRecordId = requestId,
+				)
+			}
 		}
 	} catch (error: Exception) {
 		if (error is CancellationException) throw error

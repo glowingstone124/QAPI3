@@ -62,7 +62,21 @@ internal fun LLMServices.streamFromUpstream(
 			val settled = settleUsage(quotaReservation, latestUsage, request, provider, requester.conversationId)
 			emit(attachQuota("{}", settled))
 			updateAccessRecord(requestId, "completed", latestUsage, groupName = requester.groupName ?: requester.groupId?.let { "group:$it" }, qqUid = requester.uid)
-			if (converted.second.isNotBlank()) recordConversationAnswer(requester, request.userContent, converted.second, provider)
+			if (converted.second.isNotBlank()) {
+				recordConversationAnswer(requester, request.userContent, converted.second, provider)
+			} else {
+				LLMEmptyResponseLog.record(
+					stage = "$source/chat-stream-remote-search",
+					request = request,
+					requester = requester,
+					provider = provider.name,
+					model = request.model,
+					statusCode = status,
+					rawResponse = body,
+					reason = "empty_remote_search_content",
+					accessRecordId = requestId,
+				)
+			}
 		} catch (error: Exception) {
 			if (error is kotlinx.coroutines.CancellationException) throw error
 			LLMErrorLog.record("$source/chat-stream-completion", error, provider.name, requester, requestId)
@@ -141,6 +155,18 @@ internal fun LLMServices.streamFromUpstream(
 			updateAccessRecord(requestId, "completed", latestUsage, groupName = requester.groupName ?: requester.groupId?.let { "group:$it" }, qqUid = requester.uid)
 			if (assistantContent.isNotBlank()) {
 				recordConversationAnswer(requester, request.userContent, assistantContent.toString(), provider)
+			} else {
+				LLMEmptyResponseLog.record(
+					stage = "$source/chat-stream",
+					request = request,
+					requester = requester,
+					provider = provider.name,
+					model = request.model,
+					statusCode = 200,
+					rawResponse = "",
+					reason = "empty_stream_content",
+					accessRecordId = requestId,
+				)
 			}
 		}
 	} catch (e: Exception) {
@@ -284,6 +310,18 @@ internal fun LLMServices.streamFromResponses(
 				updateAccessRecord(requestId, "completed", usage, groupName = requester.groupName ?: requester.groupId?.let { "group:$it" }, qqUid = requester.uid)
 				if (assistantContent.isNotBlank()) {
 					recordConversationAnswer(requester, request.userContent, assistantContent.toString(), provider)
+				} else {
+					LLMEmptyResponseLog.record(
+						stage = "$source/responses-stream",
+						request = request,
+						requester = requester,
+						provider = provider.name,
+						model = request.model,
+						statusCode = 200,
+						rawResponse = terminalEventBody,
+						reason = "empty_responses_stream_content",
+						accessRecordId = requestId,
+					)
 				}
 				return@flow
 			}
