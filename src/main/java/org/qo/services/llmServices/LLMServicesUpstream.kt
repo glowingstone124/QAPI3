@@ -80,22 +80,10 @@ internal suspend fun LLMServices.completeWithOptionalTools(
 		}
 
 		val rawRoundText = extractAssistantContent(latestBody)?.trim()?.takeIf { it.isNotBlank() }
-		val roundText = rawRoundText?.let { sanitizeAssistantText(it, request.enableMarkdown).trim() }?.takeIf { it.isNotBlank() }
-		if (roundText != null) {
-			val hasImageCall = toolCalls.any { it.name == "generate_image" }
-			var sentRealtime = false
-			if (hasImageCall && requester.groupId != null) {
-				val imgCfg = providers.current().imageGeneration
-				val botEndpoint = imgCfg?.qbotEndpoint ?: System.getenv("QBOT_ENDPOINT")?.trim().orEmpty()
-				val botToken = imgCfg?.qbotToken ?: System.getenv("QBOT_TOKEN")?.trim().orEmpty()
-				if (botEndpoint.isNotBlank() && botToken.isNotBlank()) {
-					sentRealtime = sendBotTextMessage(botEndpoint, botToken, requester.groupId, roundText)
-				}
-			}
-			if (!sentRealtime) {
-				intermediateMessages.add(roundText)
-			}
-		}
+		recordIntermediateMessage(
+			rawRoundText, request.enableMarkdown, toolCalls.any { it.name == "generate_image" },
+			requester, intermediateMessages,
+		)
 
 		appendAssistantToolCallMessage(obj.getAsJsonArray("messages"), latestBody, toolCalls)
 		for (call in toolCalls) {
@@ -155,22 +143,10 @@ internal suspend fun LLMServices.completeWithResponsesApi(
 			)
 		}
 		val rawRoundText = LLMResponsesAdapter.extractText(responseRoot).trim().takeIf { it.isNotBlank() }
-		val roundText = rawRoundText?.let { sanitizeAssistantText(it, request.enableMarkdown).trim() }?.takeIf { it.isNotBlank() }
-		if (roundText != null) {
-			val hasImageCall = functionCalls.any { it.name == "generate_image" }
-			var sentRealtime = false
-			if (hasImageCall && requester.groupId != null) {
-				val imgCfg = providers.current().imageGeneration
-				val botEndpoint = imgCfg?.qbotEndpoint ?: System.getenv("QBOT_ENDPOINT")?.trim().orEmpty()
-				val botToken = imgCfg?.qbotToken ?: System.getenv("QBOT_TOKEN")?.trim().orEmpty()
-				if (botEndpoint.isNotBlank() && botToken.isNotBlank()) {
-					sentRealtime = sendBotTextMessage(botEndpoint, botToken, requester.groupId, roundText)
-				}
-			}
-			if (!sentRealtime) {
-				intermediateMessages.add(roundText)
-			}
-		}
+		recordIntermediateMessage(
+			rawRoundText, request.enableMarkdown, functionCalls.any { it.name == "generate_image" },
+			requester, intermediateMessages,
+		)
 		val outputs = linkedMapOf<String, String>()
 		for (call in functionCalls) {
 			outputs[call.callId] = toolService.execute(call.name, call.arguments, requester.toolContext(request.currentUserText))
@@ -282,6 +258,26 @@ internal fun LLMServices.normalizeUpstreamError(body: String): String = runCatch
 	if (root.has("error")) root.toString()
 	else errorJson("upstream_error", body.take(256))
 }.getOrElse { errorJson("upstream_error", body.take(256)) }
+
+internal suspend fun LLMServices.recordIntermediateMessage(
+	rawText: String?,
+	enableMarkdown: Boolean,
+	hasImageCall: Boolean,
+	requester: LLMServices.LLMRequester,
+	intermediateMessages: MutableList<String>,
+) {
+	val text = rawText?.let { sanitizeAssistantText(it, enableMarkdown).trim() }
+		?.takeIf { it.isNotBlank() } ?: return
+	if (hasImageCall && requester.groupId != null) {
+		val imageConfig = providers.current().imageGeneration
+		val botEndpoint = imageConfig?.qbotEndpoint ?: System.getenv("QBOT_ENDPOINT")?.trim().orEmpty()
+		val botToken = imageConfig?.qbotToken ?: System.getenv("QBOT_TOKEN")?.trim().orEmpty()
+		if (botEndpoint.isNotBlank() && botToken.isNotBlank() &&
+			sendBotTextMessage(botEndpoint, botToken, requester.groupId, text)
+		) return
+	}
+	intermediateMessages.add(text)
+}
 
 internal suspend fun LLMServices.sendBotTextMessage(
 	botEndpoint: String,

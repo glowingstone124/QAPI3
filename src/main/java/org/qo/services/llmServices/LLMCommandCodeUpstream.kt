@@ -281,22 +281,10 @@ internal suspend fun LLMServices.completeWithCommandCodeApi(
 		}
 
 		val rawRoundText = extractAssistantContent(response)?.trim()?.takeIf { it.isNotBlank() }
-		val roundText = rawRoundText?.let { sanitizeAssistantText(it, request.enableMarkdown).trim() }?.takeIf { it.isNotBlank() }
-		if (roundText != null) {
-			val hasImageCall = calls.any { it.name == "generate_image" }
-			var sentRealtime = false
-			if (hasImageCall && requester.groupId != null) {
-				val imgCfg = providers.current().imageGeneration
-				val botEndpoint = imgCfg?.qbotEndpoint ?: System.getenv("QBOT_ENDPOINT")?.trim().orEmpty()
-				val botToken = imgCfg?.qbotToken ?: System.getenv("QBOT_TOKEN")?.trim().orEmpty()
-				if (botEndpoint.isNotBlank() && botToken.isNotBlank()) {
-					sentRealtime = sendBotTextMessage(botEndpoint, botToken, requester.groupId, roundText)
-				}
-			}
-			if (!sentRealtime) {
-				intermediateMessages.add(roundText)
-			}
-		}
+		recordIntermediateMessage(
+			rawRoundText, request.enableMarkdown, calls.any { it.name == "generate_image" },
+			requester, intermediateMessages,
+		)
 
 		appendAssistantToolCallMessage(chat.getAsJsonArray("messages"), response, calls)
 		val assistant = chat.getAsJsonArray("messages").last().asJsonObject
