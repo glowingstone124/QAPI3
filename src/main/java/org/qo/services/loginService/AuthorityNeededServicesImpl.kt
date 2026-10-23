@@ -65,6 +65,11 @@ class AuthorityNeededServicesImpl @Autowired constructor(
 
 	suspend fun getAccountInfo(token: String): String {
 		val (accountName, errorCode) = login.validate(token)
+		val clientId = if (errorCode == 0) {
+			login.loginTokenORM.read(token)?.clientId ?: LoginClientId.GAME.id
+		} else {
+			LoginClientId.GAME.id
+		}
 		if (accountName?.startsWith(QqLoginService.GUEST_PREFIX) == true) {
 			val qq = accountName.removePrefix(QqLoginService.GUEST_PREFIX).toLongOrNull()
 				?: return JsonObject().apply {
@@ -79,6 +84,9 @@ class AuthorityNeededServicesImpl @Autowired constructor(
 					addProperty("playtime", 0)
 					addProperty("profile_id", "")
 					addProperty("account_type", "guest")
+					addProperty("clientId", clientId)
+					addProperty("score", 0)
+					addProperty("frozen", false)
 				}.toString()
 			}
 			return JsonObject().apply {
@@ -87,6 +95,9 @@ class AuthorityNeededServicesImpl @Autowired constructor(
 				addProperty("playtime", boundAccount.playtime)
 				addProperty("profile_id", boundAccount.profile_id)
 				addProperty("account_type", "qo")
+				addProperty("clientId", clientId)
+				addProperty("score", boundAccount.score)
+				addProperty("frozen", boundAccount.frozen)
 			}.toString()
 		}
 		val precheckResult = doPrecheck(accountName, errorCode)
@@ -100,6 +111,10 @@ class AuthorityNeededServicesImpl @Autowired constructor(
 			addProperty("playtime", userInfo.playtime)
 			addProperty("profile_id", userInfo.profile_id)
 			addProperty("invite_cnt", userInfo.invite)
+			addProperty("account_type", "qo")
+			addProperty("clientId", clientId)
+			addProperty("score", userInfo.score)
+			addProperty("frozen", userInfo.frozen)
 			add("statistics", playerStatisticsService.getPlayerStatistics(accountName!!).toJson())
 		}
 		val loginHistory = login.queryLoginHistoryAsync(username = accountName).convertToJsonArray()

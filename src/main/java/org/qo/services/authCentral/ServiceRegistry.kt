@@ -13,6 +13,8 @@ class ServiceRegistry(
 
 	init {
 		val defaults = listOf(
+			"https://qoriginal.vip/*",
+			"https://qoriginal.vip",
 			"https://app.qoriginal.vip/*",
 			"https://app.qoriginal.vip",
 			"https://ai.qoriginal.vip/*",

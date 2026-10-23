@@ -40,6 +40,7 @@ class Login {
 	)
 
 	companion object {
+		private const val loginTokenTtlMillis = 604_800_000L
 		private val loginHistoryCache = ConcurrentHashMap<String, CachedLoginHistory>()
 		private const val loginHistoryCacheTtlMs = 30_000L
 		private const val maxLoginHistoryCacheEntries = 10_000
@@ -91,18 +92,38 @@ class Login {
 
 	fun insertInto(loginToken: String, user: String): Unit = unsupportedSyncApi("Login.insertInto")
 
-	suspend fun insertIntoAsync(loginToken: String, user: String) {
+	suspend fun insertIntoAsync(
+		loginToken: String,
+		user: String,
+		clientId: LoginClientId = LoginClientId.GAME,
+	) {
 		loginTokenORM.create(
 			LoginToken(
 				loginToken,
 				user,
-				System.currentTimeMillis() + 604800000,
+				System.currentTimeMillis() + loginTokenTtlMillis,
+				clientId.id,
 			)
 		)
 	}
 
-	fun insertIntoReactive(loginToken: String, user: String): Mono<Void> =
-		mono { insertIntoAsync(loginToken, user) }.then()
+	suspend fun refreshToken(loginToken: String): LoginToken? {
+		val current = loginTokenORM.read(loginToken) ?: return null
+		val now = System.currentTimeMillis()
+		if (current.expires < now) {
+			loginTokenORM.delete(loginToken)
+			return null
+		}
+		return loginTokenORM.extendExpiry(loginToken, now + loginTokenTtlMillis, now)
+	}
+
+	suspend fun revokeToken(loginToken: String): Boolean = loginTokenORM.delete(loginToken)
+
+	fun insertIntoReactive(
+		loginToken: String,
+		user: String,
+		clientId: LoginClientId = LoginClientId.GAME,
+	): Mono<Void> = mono { insertIntoAsync(loginToken, user, clientId) }.then()
 
 	suspend fun validate(loginToken: String): Pair<String?, Int> {
 		val result = loginTokenORM.read(loginToken) ?: return Pair(null, 1)

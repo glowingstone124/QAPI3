@@ -8,6 +8,7 @@ import org.mockito.Mockito
 import org.qo.datas.Mapping.Users
 import org.qo.db.repository.UserDbRepository
 import org.qo.redis.Configuration
+import org.qo.orm.LoginToken
 import org.qo.services.loginService.Login
 import org.springframework.http.HttpStatus
 import kotlin.test.assertEquals
@@ -36,6 +37,7 @@ class AuthCentralTest {
 
 		assertTrue(registry.isAllowed("https://app.qoriginal.vip/login"))
 		assertTrue(registry.isAllowed("https://app.qoriginal.vip/callback"))
+		assertTrue(registry.isAllowed("https://qoriginal.vip/cas"))
 		assertTrue(registry.isAllowed("https://ai.qoriginal.vip/auth/callback"))
 		assertTrue(registry.isAllowed("https://kotshi.qoriginal.vip/callback"))
 		assertTrue(registry.isAllowed("http://localhost:5173/callback"))
@@ -133,12 +135,21 @@ class AuthCentralTest {
 		assertNotNull(match)
 		val ticket = match.groupValues[1]
 
+		val invalidClient = controller.serviceValidatePost(
+			ServiceValidateBody(ticket, "https://ai.qoriginal.vip/callback", "unknown-client"),
+		)
+		assertEquals(HttpStatus.BAD_REQUEST, invalidClient.statusCode)
+		assertTrue(invalidClient.body!!.contains("\"code\":\"INVALID_CLIENT_ID\""))
+
 		// 4. Validate ticket via POST
-		val validateResp = controller.serviceValidatePost(ServiceValidateBody(ticket, "https://ai.qoriginal.vip/callback"))
+		val validateResp = controller.serviceValidatePost(
+			ServiceValidateBody(ticket, "https://ai.qoriginal.vip/callback", "qmod"),
+		)
 		assertEquals(HttpStatus.OK, validateResp.statusCode)
 		assertTrue(validateResp.body!!.contains("\"success\":true"))
 		assertTrue(validateResp.body!!.contains("\"user\":\"Glowingstone\""))
 		assertTrue(validateResp.body!!.contains("\"token\":\"fresh-service-token-64\""))
+		assertTrue(validateResp.body!!.contains("\"clientId\":\"qmod\""))
 		assertTrue(validateResp.body!!.contains("\"accountType\":\"qo\""))
 
 		// 5. Re-validation must fail
@@ -153,6 +164,7 @@ class AuthCentralTest {
 		val validateGetResp = controller.serviceValidateGet(ticket2, "https://kotshi.qoriginal.vip/callback")
 		assertEquals(HttpStatus.OK, validateGetResp.statusCode)
 		assertTrue(validateGetResp.body!!.contains("\"success\":true"))
+		assertTrue(validateGetResp.body!!.contains("\"clientId\":\"game\""))
 	}
 
 	@Test
@@ -199,5 +211,109 @@ class AuthCentralTest {
 		assertTrue(validateResp.body!!.contains("\"accountType\":\"guest\""))
 		assertTrue(validateResp.body!!.contains("\"uid\":12345678"))
 		assertTrue(validateResp.body!!.contains("\"token\":\"guest-client-token\""))
+	}
+
+	@Test
+	fun `session refresh extends the token while preserving its client ID`() = runBlocking {
+		val login = Mockito.mock(Login::class.java)
+		val userDbRepository = Mockito.mock(UserDbRepository::class.java)
+		val service = AuthCentralService(login, ServiceRegistry(), SsoTicketStore(), userDbRepository)
+		val controller = AuthCentralController(service)
+		val token = "qmod-session-token"
+		val expiresAt = System.currentTimeMillis() + 604_800_000L
+
+		Mockito.`when`(login.validate(token)).thenReturn(Pair("Glowingstone", 0))
+		Mockito.`when`(login.refreshToken(token)).thenReturn(
+			LoginToken(token, "Glowingstone", expiresAt, "qmod"),
+		)
+		Mockito.`when`(userDbRepository.readAsync("Glowingstone")).thenReturn(
+			Users(
+				"Glowingstone",
+				1294915648L,
+				false,
+				3,
+				0,
+				false,
+				0,
+				false,
+				3,
+				"encrypted_pass",
+				"uuid_profile",
+				0,
+				10,
+				0L,
+				0L
+			)
+		)
+
+		val response = controller.refreshSession("Bearer $token", null)
+		assertEquals(HttpStatus.OK, response.statusCode)
+		assertTrue(response.body!!.contains("\"clientId\":\"qmod\""))
+		assertTrue(response.body!!.contains("\"token\":\"$token\""))
+		assertTrue(response.body!!.contains("\"expiresAt\":$expiresAt"))
+	}
+
+	@Test
+	fun `refresh rejects missing expired and concurrently revoked tokens`() = runBlocking {
+		val login = Mockito.mock(Login::class.java)
+		val users = Mockito.mock(UserDbRepository::class.java)
+		val controller = AuthCentralController(AuthCentralService(login, ServiceRegistry(), SsoTicketStore(), users))
+		assertEquals(HttpStatus.UNAUTHORIZED, controller.refreshSession(null, null).statusCode)
+		Mockito.`when`(login.validate("expired")).thenReturn(null to 3)
+		assertEquals(HttpStatus.UNAUTHORIZED, controller.refreshSession(null, "expired").statusCode)
+		Mockito.verify(login, Mockito.never()).refreshToken("expired")
+
+		Mockito.`when`(login.validate("revoked")).thenReturn("qq:12345678" to 0)
+		Mockito.`when`(login.refreshToken("revoked")).thenReturn(null)
+		assertEquals(HttpStatus.UNAUTHORIZED, controller.refreshSession(null, "revoked").statusCode)
+	}
+
+	@Test
+	fun `refresh rejects and revokes tokens for deleted accounts`(): Unit = runBlocking {
+		val login = Mockito.mock(Login::class.java)
+		val users = Mockito.mock(UserDbRepository::class.java)
+		val service = AuthCentralService(login, ServiceRegistry(), SsoTicketStore(), users)
+		Mockito.`when`(login.validate("deleted")).thenReturn("DeletedUser" to 0)
+		assertEquals(SessionRefreshResult.InvalidToken, service.refreshSession("deleted"))
+		Mockito.verify(login).revokeToken("deleted")
+		Mockito.verify(login, Mockito.never()).refreshToken("deleted")
+	}
+
+	@Test
+	fun `refresh rejects frozen QO accounts including previously issued QQ guest tokens`() = runBlocking {
+		val login = Mockito.mock(Login::class.java)
+		val users = Mockito.mock(UserDbRepository::class.java)
+		val service = AuthCentralService(login, ServiceRegistry(), SsoTicketStore(), users)
+		val frozen = Users("FrozenUser", 12345678L, true, 0, 0, false, 0, false, 0, "pw", "p", 0, 0, 0L, 0L)
+		Mockito.`when`(users.readAsync("FrozenUser")).thenReturn(frozen)
+		Mockito.`when`(users.readAsync(12345678L)).thenReturn(frozen)
+		for (name in listOf("FrozenUser", "qq:12345678")) {
+			val token = "frozen-$name"
+			Mockito.`when`(login.validate(token)).thenReturn(name to 0)
+			assertEquals(SessionRefreshResult.AccountFrozen, service.refreshSession(token))
+			Mockito.verify(login).revokeToken(token)
+			Mockito.verify(login, Mockito.never()).refreshToken(token)
+		}
+	}
+
+	@Test
+	fun `refresh resolves QQ guest profiles to their current bound account`() = runBlocking {
+		val login = Mockito.mock(Login::class.java)
+		val users = Mockito.mock(UserDbRepository::class.java)
+		val service = AuthCentralService(login, ServiceRegistry(), SsoTicketStore(), users)
+		val expires = System.currentTimeMillis() + 604_800_000L
+		Mockito.`when`(login.validate("guest")).thenReturn("qq:12345678" to 0)
+		Mockito.`when`(login.refreshToken("guest")).thenReturn(LoginToken("guest", "qq:12345678", expires, "qcommunity"))
+		val guest = service.refreshSession("guest") as SessionRefreshResult.Success
+		assertEquals("guest", guest.accountType)
+		assertEquals(12345678L, guest.uid)
+		Mockito.`when`(users.readAsync(12345678L)).thenReturn(
+			Users("BoundUser", 12345678L, false, 0, 0, false, 0, false, 0, "pw", "p", 0, 42, 0L, 0L),
+		)
+		val bound = service.refreshSession("guest") as SessionRefreshResult.Success
+		assertEquals("qo", bound.accountType)
+		assertEquals("BoundUser", bound.user)
+		assertEquals(42, bound.score)
+		assertEquals("qcommunity", bound.clientId)
 	}
 }

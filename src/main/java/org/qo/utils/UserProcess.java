@@ -10,6 +10,7 @@ import org.qo.orm.AffiliatedAccountORM;
 import org.qo.services.loginService.AffiliatedAccountServices;
 import org.qo.services.loginService.AvatarRelatedImpl;
 import org.qo.services.loginService.Login;
+import org.qo.services.loginService.LoginClientId;
 import org.qo.services.loginService.KotshiPrivacyService;
 import org.qo.datas.Mapping.*;
 import org.qo.services.loginService.PlayerCardCustomizationImpl;
@@ -356,7 +357,12 @@ public class UserProcess {
         }
     }
 
-    public Mono<Pair<Boolean, String>> performLogin(String username, String password, String ip, boolean web) {
+    public Mono<Pair<Boolean, String>> performLogin(
+            String username,
+            String password,
+            String ip,
+            boolean web,
+            LoginClientId clientId) {
         return reactiveStore.readUser(username)
                 .flatMap(user -> {
                     return passwordMatchesReactive(password, user.getPassword()).flatMap(matches -> {
@@ -367,7 +373,7 @@ public class UserProcess {
                         Mono<Boolean> passwordUpgrade = user.getPassword().startsWith("$SHA$")
                                 ? hashPassword(password).flatMap(hash -> reactiveStore.updatePassword(user.getUid(), hash))
                                 : Mono.just(true);
-                        return login.insertIntoReactive(token, username)
+                        return login.insertIntoReactive(token, username, clientId)
                                 .then(passwordUpgrade
                                         .doOnError(error -> Logger.log("failed to upgrade password for " + username + ": " + error.getMessage(), ERROR))
                                         .onErrorReturn(false))

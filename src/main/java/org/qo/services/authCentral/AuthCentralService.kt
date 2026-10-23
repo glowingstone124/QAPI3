@@ -1,6 +1,7 @@
 package org.qo.services.authCentral
 
 import org.qo.db.repository.UserDbRepository
+import org.qo.services.loginService.LoginClientId
 import org.qo.services.loginService.Login
 import org.springframework.stereotype.Service
 
@@ -16,13 +17,30 @@ sealed interface ServiceValidateResult {
 		val user: String,
 		val uid: Long?,
 		val token: String,
+		val clientId: String,
 		val accountType: String,
 		val score: Int,
 		val frozen: Boolean
 	) : ServiceValidateResult
 	data object MissingParameters : ServiceValidateResult
+	data object InvalidClientId : ServiceValidateResult
 	data object InvalidTicket : ServiceValidateResult
 	data object AccountFrozen : ServiceValidateResult
+}
+
+sealed interface SessionRefreshResult {
+	data class Success(
+		val user: String,
+		val uid: Long?,
+		val token: String,
+		val clientId: String,
+		val accountType: String,
+		val score: Int,
+		val frozen: Boolean,
+		val expiresAt: Long,
+	) : SessionRefreshResult
+	data object InvalidToken : SessionRefreshResult
+	data object AccountFrozen : SessionRefreshResult
 }
 
 @Service
@@ -48,12 +66,18 @@ class AuthCentralService(
 		return TicketGrantResult.Success(record.ticket, redirectUrl, SsoTicketStore.TICKET_TTL_SECONDS)
 	}
 
-	suspend fun validateTicket(ticket: String?, service: String?): ServiceValidateResult {
+	suspend fun validateTicket(
+		ticket: String?,
+		service: String?,
+		clientId: String? = null,
+	): ServiceValidateResult {
 		val cleanTicket = ticket?.trim().orEmpty()
 		val cleanService = service?.trim().orEmpty()
 		if (cleanTicket.isEmpty() || cleanService.isEmpty()) {
 			return ServiceValidateResult.MissingParameters
 		}
+		val loginClientId = LoginClientId.from(clientId)
+			?: return ServiceValidateResult.InvalidClientId
 
 		val record = ticketStore.validateAndConsume(cleanTicket, cleanService)
 			?: return ServiceValidateResult.InvalidTicket
@@ -64,7 +88,7 @@ class AuthCentralService(
 		}
 
 		val clientToken = login.generateToken(64)
-		login.insertIntoAsync(clientToken, record.username)
+		login.insertIntoAsync(clientToken, record.username, loginClientId)
 
 		val hasAccount = account != null
 		val accountType = if (hasAccount) "qo" else "guest"
@@ -80,9 +104,55 @@ class AuthCentralService(
 			user = record.username,
 			uid = uid,
 			token = clientToken,
+			clientId = loginClientId.id,
 			accountType = accountType,
 			score = account?.score ?: 0,
 			frozen = false
+		)
+	}
+
+	suspend fun refreshSession(token: String?): SessionRefreshResult {
+		val cleanToken = token?.trim().orEmpty()
+		if (cleanToken.isEmpty()) return SessionRefreshResult.InvalidToken
+		val (username, errorCode) = login.validate(cleanToken)
+		if (username.isNullOrBlank() || errorCode != 0) {
+			return SessionRefreshResult.InvalidToken
+		}
+
+		val guestUid = username.takeIf { it.startsWith("qq:") }
+			?.removePrefix("qq:")?.toLongOrNull()
+		val account = if (guestUid != null) {
+			userDbRepository.readAsync(guestUid)
+		} else {
+			userDbRepository.readAsync(username)
+		}
+		if (account == null && guestUid == null) {
+			login.revokeToken(cleanToken)
+			return SessionRefreshResult.InvalidToken
+		}
+		if (account?.frozen == true) {
+			login.revokeToken(cleanToken)
+			return SessionRefreshResult.AccountFrozen
+		}
+
+		val refreshedToken = login.refreshToken(cleanToken)
+			?: return SessionRefreshResult.InvalidToken
+		val accountType = if (account != null) "qo" else "guest"
+		val uid = if (account != null) {
+			account.uid
+		} else {
+			guestUid
+		}
+
+		return SessionRefreshResult.Success(
+			user = account?.username ?: username,
+			uid = uid,
+			token = refreshedToken.token,
+			clientId = refreshedToken.clientId,
+			accountType = accountType,
+			score = account?.score ?: 0,
+			frozen = false,
+			expiresAt = refreshedToken.expires,
 		)
 	}
 

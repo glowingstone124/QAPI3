@@ -53,7 +53,7 @@
 
 | 方法 | 路径 | 认证 | 请求 |
 |---|---|---|---|
-| `POST` | `/qo/game/login` | 公开 | JSON：`username`、`password`、可选 `ip`、`web`。 |
+| `POST` | `/qo/game/login` | 公开 | JSON：`username`、`password`、可选 `ip`、`web`、`clientId`。`clientId` 可为 `game` 或 `qcommunity`；省略时按 `game` 记录。 |
 | `POST` | `/qo/upload/registry` | 公开 | JSON：`name`、`uid`、`password`、`verificationMethod`、`verificationToken`。 |
 | `POST` | `/qo/upload/confirmation` | 节点令牌 | JSON：`token`、`uid`、`task`；`task=0` 注册，`task=1` 修改密码。 |
 | `POST` | `/qo/upload/password` | 公开 | JSON：`uid`、`password`。 |
@@ -63,18 +63,19 @@
 登录成功示例：
 
 ```json
-{"result":true,"token":"<login-token>"}
+{"result":true,"token":"<login-token>","clientId":"game"}
 ```
 
 ### SSO 单点登录 (Auth Central / CAS)
 
-QAPI3 提供基于 CAS 标准的单点登录服务，与部署在 QHub 的中央登录页（`https://app.qoriginal.vip/login`）协同工作。Minecraft 插件端继续沿用传统的 `/qo/game/login` 账号密码体系。
+QAPI3 提供基于 CAS 标准的单点登录服务，与中央登录页（`https://qoriginal.vip/login`）协同工作。QCommunity 保留 `/login` 门户，并通过 `/cas` 作为 CAS 客户端。Minecraft 插件端继续沿用传统的 `/qo/game/login` 账号密码体系。
 
 | 方法 | 路径 | 认证 | 说明 |
 |---|---|---|---|
 | `POST` | `/qo/auth/ticket/grant` | 用户令牌 | 传入目标服务地址 `service`，签发一次性 Service Ticket（`ST-xxx`，有效期 3 分钟）。 |
 | `POST` | `/qo/auth/serviceValidate` | 公开 | 客户端携带 `ticket` 与 `service` 换取专用的 QAPI 用户令牌与用户画像。 |
 | `GET` | `/qo/auth/serviceValidate?ticket=<st>&service=<url>` | 公开 | GET 风格的 CAS 票据验证接口。 |
+| `POST` | `/qo/auth/session/refresh` | 用户令牌 | 校验当前 token、滑动续期 7 天，并返回最新账号资料和 `clientId`。 |
 
 #### 1. 申请票据 (`POST /qo/auth/ticket/grant`)
 - Header: `Authorization: Bearer <user-token>`
@@ -95,7 +96,7 @@ QAPI3 提供基于 CAS 标准的单点登录服务，与部署在 QHub 的中央
 #### 2. 校验票据 (`POST /qo/auth/serviceValidate`)
 - Body:
 ```json
-{"ticket": "ST-xxxx", "service": "https://ai.qoriginal.vip/callback"}
+{"ticket": "ST-xxxx", "service": "https://ai.qoriginal.vip/callback", "clientId": "qmod"}
 ```
 - 响应成功 (200 OK):
 ```json
@@ -104,6 +105,7 @@ QAPI3 提供基于 CAS 标准的单点登录服务，与部署在 QHub 的中央
   "user": "Glowingstone",
   "uid": 1294915648,
   "token": "...",
+  "clientId": "qmod",
   "accountType": "qo",
   "attributes": {
     "score": 10,
@@ -112,11 +114,18 @@ QAPI3 提供基于 CAS 标准的单点登录服务，与部署在 QHub 的中央
 }
 ```
 
+`clientId` 记录签发 token 的客户端来源，当前支持 `game`、`qcommunity`、`qmod`。旧客户端未传时默认归类为 `game`；未知值返回 `INVALID_CLIENT_ID`。该标识用于来源区分，不作为授权凭据。
+
+#### 3. 刷新会话 (`POST /qo/auth/session/refresh`)
+- Header: `Authorization: Bearer <user-token>`，也兼容 `token` 请求头。
+- 无需请求体。成功响应结构与票据校验相同，额外返回毫秒时间戳 `expiresAt`；保留原 token 和 `clientId`，将有效期续至当前时间后 7 天。
+- 账号信息按当前绑定关系读取。过期、撤销或账号已删除的会话返回 `401 INVALID_TOKEN`；冻结账号（包括后来绑定到该账号的 QQ 游客会话）返回 `403 ACCOUNT_FROZEN` 并撤销该 token。
+
 ### 账户和卡片
 
 | 方法 | 路径 | 认证 | 参数/请求体 |
 |---|---|---|---|
-| `GET` | `/qo/authorization/account` | 用户令牌 | 返回当前账户信息。 |
+| `GET` | `/qo/authorization/account` | 用户令牌 | 返回当前账户信息和该 token 的 `clientId`，可用于启动时刷新本地账户缓存。 |
 | `GET` | `/qo/authorization/account/kotshi` | 用户令牌 | 返回 Kotshi 查询开关、共享额度、所有渠道的当日使用汇总和最近 20 条调用记录。 |
 | `PATCH` | `/qo/authorization/account/kotshi` | 用户令牌 | JSON：`{"kotshi_query_enabled":true|false}`；更新是否允许 Kotshi 按玩家名查询当前账户资料。 |
 | `POST` | `/qo/authorization/account/frozen?uid=<uid>` | 管理/内部 | 冻结账户。 |

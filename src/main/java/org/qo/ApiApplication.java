@@ -8,6 +8,7 @@ import org.qo.datas.DatabaseHealth;
 import org.qo.datas.Nodes;
 import org.qo.services.loginService.IPWhitelistServices;
 import org.qo.services.loginService.Login;
+import org.qo.services.loginService.LoginClientId;
 import org.qo.services.loginService.RecentLoginService;
 import org.qo.services.mmdb.Query;
 import org.qo.services.proxyRelatedServices.ProxyRelatedImpl;
@@ -422,7 +423,11 @@ public class ApiApplication {
         if (credentials.username() == null || credentials.password() == null || credentials.password().length() > 128) {
             return Mono.just(new ResponseEntity<>("{\"result\":false}", headers, HttpStatus.BAD_REQUEST));
         }
-        return userProcess.performLogin(credentials.username(), credentials.password(), credentials.ip(), Boolean.TRUE.equals(credentials.web()))
+        LoginClientId clientId = LoginClientId.from(credentials.clientId());
+        if (clientId == null || clientId == LoginClientId.QMOD) {
+            return Mono.just(new ResponseEntity<>("{\"result\":false,\"code\":\"INVALID_CLIENT_ID\"}", headers, HttpStatus.BAD_REQUEST));
+        }
+        return userProcess.performLogin(credentials.username(), credentials.password(), credentials.ip(), Boolean.TRUE.equals(credentials.web()), clientId)
                 .map(result -> {
                     if (result.getFirst() && !Boolean.TRUE.equals(credentials.web())) {
                         recentLoginService.recordSuccessfulLogin(credentials.username(), credentials.ip());
@@ -430,11 +435,12 @@ public class ApiApplication {
                     JsonObject retObj = new JsonObject();
                     retObj.addProperty("result", result.getFirst());
                     retObj.addProperty("token", result.getSecond());
+                    retObj.addProperty("clientId", clientId.getId());
                     return new ResponseEntity<>(retObj.toString(), headers, HttpStatus.OK);
                 });
     }
 
-    public record LoginRequest(String username, String password, String ip, Boolean web) {}
+    public record LoginRequest(String username, String password, String ip, Boolean web, String clientId) {}
 
     @PostMapping("/qo/upload/loginattempt")
     public Mono<Void> handleLoginAttemptLogging(@RequestBody String data, @RequestParam(name = "auth", required = true) String auth) throws Exception {

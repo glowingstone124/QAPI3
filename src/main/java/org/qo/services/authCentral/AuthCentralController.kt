@@ -20,7 +20,8 @@ data class TicketGrantBody(
 
 data class ServiceValidateBody(
 	val ticket: String? = null,
-	val service: String? = null
+	val service: String? = null,
+	val clientId: String? = null,
 )
 
 @RestController
@@ -48,19 +49,51 @@ class AuthCentralController(
 		}
 	}
 
+	@PostMapping("/session/refresh", produces = [MediaType.APPLICATION_JSON_VALUE])
+	suspend fun refreshSession(
+		@RequestHeader(HttpHeaders.AUTHORIZATION, required = false) authorization: String?,
+		@RequestHeader("token", required = false) tokenHeader: String?,
+	): ResponseEntity<String> {
+		val token = AuthTokens.resolve(tokenHeader, authorization)
+		return when (val result = authCentralService.refreshSession(token)) {
+			is SessionRefreshResult.Success -> response(HttpStatus.OK) {
+				addProperty("success", true)
+				addProperty("user", result.user)
+				if (result.uid != null) addProperty("uid", result.uid)
+				addProperty("token", result.token)
+				addProperty("clientId", result.clientId)
+				addProperty("accountType", result.accountType)
+				addProperty("expiresAt", result.expiresAt)
+				add("attributes", JsonObject().apply {
+					addProperty("score", result.score)
+					addProperty("frozen", result.frozen)
+				})
+			}
+			SessionRefreshResult.InvalidToken ->
+				validationFailure(HttpStatus.UNAUTHORIZED, "INVALID_TOKEN", "会话已失效，请重新登录")
+			SessionRefreshResult.AccountFrozen ->
+				validationFailure(HttpStatus.FORBIDDEN, "ACCOUNT_FROZEN", "绑定的 QO 账号已被冻结")
+		}
+	}
+
 	@PostMapping("/serviceValidate", produces = [MediaType.APPLICATION_JSON_VALUE])
 	suspend fun serviceValidatePost(
 		@RequestBody body: ServiceValidateBody
-	): ResponseEntity<String> = handleValidate(body.ticket, body.service)
+	): ResponseEntity<String> = handleValidate(body.ticket, body.service, body.clientId)
 
 	@GetMapping("/serviceValidate", produces = [MediaType.APPLICATION_JSON_VALUE])
 	suspend fun serviceValidateGet(
 		@RequestParam(required = false) ticket: String?,
-		@RequestParam(required = false) service: String?
-	): ResponseEntity<String> = handleValidate(ticket, service)
+		@RequestParam(required = false) service: String?,
+		@RequestParam(required = false) clientId: String? = null,
+	): ResponseEntity<String> = handleValidate(ticket, service, clientId)
 
-	private suspend fun handleValidate(ticket: String?, service: String?): ResponseEntity<String> {
-		return when (val result = authCentralService.validateTicket(ticket, service)) {
+	private suspend fun handleValidate(
+		ticket: String?,
+		service: String?,
+		clientId: String?,
+	): ResponseEntity<String> {
+		return when (val result = authCentralService.validateTicket(ticket, service, clientId)) {
 			is ServiceValidateResult.Success -> response(HttpStatus.OK) {
 				addProperty("success", true)
 				addProperty("user", result.user)
@@ -68,6 +101,7 @@ class AuthCentralController(
 					addProperty("uid", result.uid)
 				}
 				addProperty("token", result.token)
+				addProperty("clientId", result.clientId)
 				addProperty("accountType", result.accountType)
 
 				val attributes = JsonObject().apply {
@@ -77,6 +111,7 @@ class AuthCentralController(
 				add("attributes", attributes)
 			}
 			ServiceValidateResult.MissingParameters -> validationFailure(HttpStatus.BAD_REQUEST, "BAD_REQUEST", "缺少 ticket 或 service 参数")
+			ServiceValidateResult.InvalidClientId -> validationFailure(HttpStatus.BAD_REQUEST, "INVALID_CLIENT_ID", "clientId 必须是 game、qcommunity 或 qmod")
 			ServiceValidateResult.InvalidTicket -> validationFailure(HttpStatus.UNAUTHORIZED, "INVALID_TICKET", "票据无效、已过期或与目标服务不匹配")
 			ServiceValidateResult.AccountFrozen -> validationFailure(HttpStatus.FORBIDDEN, "ACCOUNT_FROZEN", "绑定的 QO 账号已被冻结")
 		}
