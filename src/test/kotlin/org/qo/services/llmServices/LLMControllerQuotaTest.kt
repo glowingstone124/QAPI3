@@ -274,4 +274,30 @@ class LLMControllerQuotaTest {
             .jsonPath("$.total_tokens").isEqualTo(1700)
             .jsonPath("$.request_count").isEqualTo(10)
     }
+
+    @Test
+    fun `rating endpoint delegates to llmServices`(): Unit = runBlocking {
+        Mockito.`when`(
+            llmServices.rateChatCandidates(
+                eq("bot-token"),
+                eq(946085440L),
+                anyString(),
+                eq("fast"),
+            )
+        ).thenReturn(
+            LLMNonStreamResult(200, """{"ratings":[{"id":"1","cost":10.0,"should_reply":true,"reason":"ok"}]}""")
+        )
+
+        webTestClient.post()
+            .uri("/qo/asking/v1/chat/rating?model=fast")
+            .header("Authorization", "Bearer bot-token")
+            .header("X-QQ-Group-ID", "946085440")
+            .contentType(MediaType.APPLICATION_JSON)
+            .bodyValue("""{"candidates":[{"id":"1","uid":123,"name":"A","text":"hello"}]}""")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.ratings[0].cost").isEqualTo(10.0)
+            .jsonPath("$.ratings[0].should_reply").isEqualTo(true)
+    }
 }

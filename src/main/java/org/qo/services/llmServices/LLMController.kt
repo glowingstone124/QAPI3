@@ -1,5 +1,6 @@
 package org.qo.services.llmServices
 
+import com.google.gson.JsonParser
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.flowOf
@@ -207,6 +208,34 @@ class LLMController(
 			LLMNonStreamResult(
 				400,
 				"""{"error":{"message":"${it.message ?: "请求格式错误"}","type":"bad_request","code":"bad_request"}}"""
+			)
+		}
+		return jsonResponse(result.body, HttpStatus.valueOf(result.status), result.quota)
+	}
+
+	@PostMapping("/v1/chat/rating", produces = [MediaType.APPLICATION_JSON_VALUE])
+	suspend fun rateChatCandidates(
+		@RequestHeader("token", required = false) token: String?,
+		@RequestHeader(HttpHeaders.AUTHORIZATION, required = false) authorization: String?,
+		@RequestHeader("X-QQ-Group-ID", required = false) headerGroupId: Long?,
+		@RequestParam(name = "model", required = false, defaultValue = "fast") model: String = "fast",
+		@RequestBody body: String,
+	): ResponseEntity<String> {
+		val requestToken = AuthTokens.resolve(token, authorization)
+			?: return jsonResponse(
+				llmServices.errorJson("invalid_token", "缺少或无效的令牌"),
+				HttpStatus.UNAUTHORIZED
+			)
+		val groupId = headerGroupId ?: runCatching {
+			JsonParser.parseString(body).takeIf { it.isJsonObject }?.asJsonObject?.get("group_id")?.takeIf { !it.isJsonNull }?.asLong
+		}.getOrNull() ?: 0L
+
+		val result = runCatching {
+			llmServices.rateChatCandidates(requestToken, groupId, body, model)
+		}.getOrElse {
+			LLMNonStreamResult(
+				400,
+				llmServices.errorJson("bad_request", it.message ?: "评级请求失败")
 			)
 		}
 		return jsonResponse(result.body, HttpStatus.valueOf(result.status), result.quota)

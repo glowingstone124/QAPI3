@@ -253,6 +253,13 @@ class LLMServices(
 		}.toString())
 	}
 
+	suspend fun rateChatCandidates(
+		token: String,
+		groupId: Long,
+		body: String,
+		model: String = "fast",
+	): LLMNonStreamResult = dispatchRateChatCandidates(token, groupId, body, model)
+
 	suspend fun completeMinecraftChat(
 		body: String,
 		token: String,
