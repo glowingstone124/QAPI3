@@ -329,3 +329,11 @@ of this status log. Full request-body logging remains separately controlled by `
 When integrating this project with GoCi, please notice there are some flags can be use.
 
 [SKIP CI]: when pushing a commit which description contains this, GoCi will automatically skip build this commit.
+
+## License
+
+Copyright (c) 2026 Quantum Original contributors.
+
+Unless otherwise noted, the original source code in this project is licensed under the **GNU Lesser General Public License v3.0 only** (`LGPL-3.0-only`). See [LICENSE](LICENSE) for the LGPL terms and [COPYING](COPYING) for the incorporated GNU GPL v3.0 terms.
+
+Third-party dependencies and separately licensed assets retain their respective licenses.

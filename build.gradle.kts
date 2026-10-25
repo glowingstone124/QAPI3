@@ -124,3 +124,9 @@ tasks.register("buildAndCopy") {
         println("复制了文件: ${jarFile.absolutePath} 到 ${destination.absolutePath}")
     }
 }
+
+tasks.withType<org.gradle.jvm.tasks.Jar>().configureEach {
+    from(listOf("LICENSE", "COPYING")) {
+        into("META-INF/licenses/QAPI3")
+    }
+}
