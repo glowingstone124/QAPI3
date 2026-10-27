@@ -91,7 +91,7 @@ internal suspend fun LLMServices.completeWithOptionalTools(
 				addProperty("role", "tool")
 				addProperty("tool_call_id", call.id)
 				addProperty("name", call.name)
-				addProperty("content", toolService.execute(call.name, call.arguments, requester.toolContext(request.currentUserText)))
+				addProperty("content", toolService.execute(call.name, call.arguments, requester.executingToolContext(request.currentUserText)))
 			})
 		}
 	}
@@ -149,7 +149,7 @@ internal suspend fun LLMServices.completeWithResponsesApi(
 		)
 		val outputs = linkedMapOf<String, String>()
 		for (call in functionCalls) {
-			outputs[call.callId] = toolService.execute(call.name, call.arguments, requester.toolContext(request.currentUserText))
+			outputs[call.callId] = toolService.execute(call.name, call.arguments, requester.executingToolContext(request.currentUserText))
 		}
 		LLMResponsesAdapter.appendToolOutputs(body, responseText, outputs)
 	}
@@ -269,6 +269,7 @@ internal suspend fun LLMServices.recordIntermediateMessage(
 	val text = rawText?.let { sanitizeAssistantText(it, enableMarkdown).trim() }
 		?.takeIf { it.isNotBlank() } ?: return
 	if (hasImageCall && requester.groupId != null) {
+		requester.attempt?.toolExecuted = true
 		val imageConfig = providers.current().imageGeneration
 		val botEndpoint = imageConfig?.qbotEndpoint ?: System.getenv("QBOT_ENDPOINT")?.trim().orEmpty()
 		val botToken = imageConfig?.qbotToken ?: System.getenv("QBOT_TOKEN")?.trim().orEmpty()

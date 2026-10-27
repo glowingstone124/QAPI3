@@ -189,6 +189,8 @@ internal fun LLMServices.commandCodeFallbackRequest(
 		?: throw IllegalArgumentException("Fallback provider has no '${request.preset}' model")
 	val body = JsonParser.parseString(request.body).asJsonObject.apply {
 		addProperty("model", model)
+		remove("thinking")
+		remove("reasoning_effort")
 		if (selected.protocol(request.preset) == LLMProtocol.CHAT_COMPLETIONS) {
 			addProperty("reasoning_effort", request.reasoningEffort.wireValue)
 			if (selected.name.contains("deepseek", ignoreCase = true)) add("thinking", JsonObject().apply {
@@ -210,31 +212,40 @@ internal suspend fun LLMServices.completeWithFallback(
 	source: String,
 	provider: LLMProvider,
 ): LLMCompletionOutcome {
-	val fallback = provider.fallback
-	if (request.clientTools != null || fallback == null || provider.protocol(request.preset) != LLMProtocol.COMMANDCODE) {
-		val (status, body) = completeWithOptionalTools(request, requester, source, provider)
-		return LLMCompletionOutcome(status, body, request, provider)
+	val candidates = (listOf(provider) + provider.fallbackProviders).distinctBy { it.name }
+	var last: LLMCompletionOutcome? = null
+	for ((index, candidate) in candidates.withIndex()) {
+		if (candidate.modelName(request.preset) == null || candidate.apiToken.isBlank()) continue
+		if (candidate.modelConfig(request.preset).pricing?.at(java.time.Instant.now()) == null) continue
+		val activeRequest = if (index == 0) request else commandCodeFallbackRequest(request, candidate)
+		val state = LLMAttemptState()
+		val activeRequester = requester.copy(activeProvider = candidate.name, activeModel = activeRequest.model, attempt = state)
+		val result = try {
+			completeWithOptionalTools(activeRequest, activeRequester, "$source/attempt-${index + 1}", candidate)
+		} catch (error: kotlinx.coroutines.CancellationException) {
+			throw error
+		} catch (error: Exception) {
+			if (state.toolExecuted || index == candidates.lastIndex) throw error
+			LLMErrorLog.record("$source/attempt-${index + 1}", error, candidate.name, requester)
+			println("[LLM] provider ${candidate.name} failed; trying next provider")
+			continue
+		}
+		val (status, body) = result
+		val empty = status in 200..299 && extractAssistantContent(body).isNullOrBlank() && extractToolCalls(body).isEmpty()
+		if (empty) LLMEmptyResponseLog.record(
+			stage = "$source/failover", request = activeRequest, requester = requester,
+			provider = candidate.name, model = activeRequest.model, statusCode = status,
+			rawResponse = body, reason = "empty_assistant_content",
+		)
+		val outcome = LLMCompletionOutcome(if (empty) 502 else status,
+			if (empty) withUsage(errorJson("empty_upstream_response", "LLM 上游未返回有效回复"), parseUsage(body)) else body,
+			activeRequest, candidate)
+		last = outcome
+		val retryable = empty || status == 408 || status == 429 || status in 500..599
+		if (!retryable || state.toolExecuted || index == candidates.lastIndex) return outcome
+		println("[LLM] provider ${candidate.name} returned $status; trying next provider")
 	}
-	val primary = try {
-		completeWithCommandCodeApi(request, requester, source, provider)
-	} catch (error: CommandCodeConnectionFailure) {
-		LLMErrorLog.record("$source/commandcode-primary", error, provider.name, requester)
-		println("[LLM] Command Code connection failed; trying ${fallback.name}: ${error.message}")
-		null
-	}
-	if (primary != null && !primary.allowFallback) {
-		return LLMCompletionOutcome(primary.status, primary.body, request, provider)
-	}
-	val fallbackProvider = fallback.forMode(request.preset)
-	val fallbackRequest = commandCodeFallbackRequest(request, fallback)
-	val (status, body) = try {
-		completeWithOptionalTools(fallbackRequest, requester, "$source/fallback", fallbackProvider)
-	} catch (error: Exception) {
-		if (error is kotlinx.coroutines.CancellationException) throw error
-		LLMErrorLog.record("$source/fallback", error, fallbackProvider.name, requester)
-		throw error
-	}
-	return LLMCompletionOutcome(status, body, fallbackRequest, fallbackProvider)
+	return last ?: LLMCompletionOutcome(503, errorJson("provider_unavailable", "没有可用的 LLM 提供商"), request, provider)
 }
 
 internal suspend fun LLMServices.completeWithCommandCodeApi(
@@ -300,7 +311,7 @@ internal suspend fun LLMServices.completeWithCommandCodeApi(
 					toolService.execute(
 						call.name,
 						call.arguments,
-						requester.toolContext(request.currentUserText),
+						requester.executingToolContext(request.currentUserText),
 						COMMANDCODE_EXCLUDED_TOOLS
 					)
 				)
@@ -455,7 +466,7 @@ internal fun LLMServices.streamFromCommandCode(
 						toolService.execute(
 							call.name,
 							call.arguments,
-							requester.toolContext(request.currentUserText),
+							requester.executingToolContext(request.currentUserText),
 							COMMANDCODE_EXCLUDED_TOOLS
 						)
 					)

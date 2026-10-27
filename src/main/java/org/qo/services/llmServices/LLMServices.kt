@@ -361,6 +361,9 @@ class LLMServices(
 		val minecraftRelated: MinecraftRelated? = null,
 		val conversationId: String? = null,
 		val model: String = "fast",
+		val activeProvider: String? = null,
+		val activeModel: String? = null,
+		val attempt: LLMAttemptState? = null,
 	) {
 		fun identityKey(): String = "qq:$uid"
 
@@ -372,7 +375,7 @@ class LLMServices(
 			}
 
 		fun toolContext(currentMessage: String? = null): LLMToolContext =
-			LLMToolContext(groupId, uid.toString(), name, currentMessage, messageId, source, conversationKey())
+			LLMToolContext(groupId, uid.toString(), name, currentMessage, messageId, source, conversationKey(), activeProvider, activeModel)
 	}
 
 	internal data class ToolCall(val id: String, val name: String, val arguments: String?)
@@ -399,3 +402,10 @@ data class LLMStreamResult(
 	val chunks: Flow<String>,
 	val quota: LLMQuotaView? = null,
 )
+
+internal class LLMAttemptState { var toolExecuted = false }
+
+internal fun LLMServices.LLMRequester.executingToolContext(message: String): LLMToolContext {
+	attempt?.toolExecuted = true
+	return toolContext(message)
+}

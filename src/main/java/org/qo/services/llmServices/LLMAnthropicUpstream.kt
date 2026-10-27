@@ -165,7 +165,7 @@ internal suspend fun LLMServices.completeWithAnthropicApi(
 			toolService.execute(
 				call.name,
 				call.arguments,
-				requester.toolContext(request.currentUserText)
+				requester.executingToolContext(request.currentUserText)
 			)
 		},
 		onIntermediateText = { rawRoundText, calls ->
@@ -227,7 +227,7 @@ internal fun LLMServices.streamFromAnthropic(
 			executeTool = { call ->
 				val (phase, label) = toolProgress(call.name)
 				progress(phase, label)
-				toolService.execute(call.name, call.arguments, requester.toolContext(request.currentUserText))
+				toolService.execute(call.name, call.arguments, requester.executingToolContext(request.currentUserText))
 			},
 			onUpdate = { update(it) },
 			onRequest = { outgoing ->

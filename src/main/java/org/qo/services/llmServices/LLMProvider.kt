@@ -11,6 +11,7 @@ enum class LLMProtocol(val wireValue: String, val endpointKey: String) {
 	CHAT_COMPLETIONS("chat-completions", "chatCompletionsUrl"),
 	RESPONSES("responses", "responsesUrl"),
 	ANTHROPIC("anthropic", "anthropicUrl"),
+	@Deprecated("Command Code is deprecated")
 	COMMANDCODE("commandcode", "commandCodeUrl");
 
 	companion object {
@@ -103,11 +104,12 @@ data class LLMProvider(
 	val adminUids: Set<Long> = emptySet(),
 	val routes: Map<String, LLMProvider> = emptyMap(),
 	val fallback: LLMProvider? = null,
+	val fallbackProviders: List<LLMProvider> = emptyList(),
 	val imageGeneration: LLMImageGenerationConfig? = null,
 ) {
 	fun forMode(mode: String): LLMProvider = when {
 		fallback != null && !models.containsKey(mode.lowercase(Locale.ROOT)) -> fallback.forMode(mode)
-		else -> routes[mode.lowercase(Locale.ROOT)] ?: this
+		else -> routes[mode.lowercase(Locale.ROOT)]?.copy(fallbackProviders = fallbackProviders) ?: this
 	}
 
 	val mainContextWindow: Int
@@ -157,35 +159,21 @@ data class LLMProvider(
 		fun fromConfig(configPath: Path, explicitlySelected: String? = null): LLMProvider {
 			val root = readConfig(configPath)
 			val selected = loadConfig(configPath, explicitlySelected, true, root)
-			if (!readBoolean(root, "enableCommandCode", false)) return selected
-			val command = root?.getAsJsonObject("providers")?.getAsJsonObject("commandcode")
-				?: throw IllegalArgumentException("enableCommandCode requires providers.commandcode")
-			val models = readCommandCodeModels(command)
-			models.keys.forEach { preset ->
-				require(selected.forMode(preset).models.containsKey(preset)) {
-					"commandcode model '$preset' has no model in the default provider for fallback"
+			if (root?.has("enableCommandCode") == true) {
+				println("[LLM] enableCommandCode is deprecated and ignored")
+			}
+			val rawFallbacks = root?.get("fallbackProviders")
+			if (rawFallbacks == null || rawFallbacks.isJsonNull) return selected
+			require(rawFallbacks.isJsonArray) { "fallbackProviders must be an array of provider names" }
+			val names = rawFallbacks.asJsonArray.map { item ->
+				require(item.isJsonPrimitive && item.asJsonPrimitive.isString && item.asString.isNotBlank()) {
+					"fallbackProviders entries must be provider names"
 				}
+				item.asString.trim()
 			}
-			val commandToken = readCommandCodeToken(command)
-			if (commandToken.isBlank()) {
-				println("[LLM] Command Code token is unavailable; using provider ${selected.name}")
-				return selected
-			}
-			return selected.copy(
-				name = "commandcode",
-				chatCompletionsUrl = "unavailable",
-				responsesUrl = "unavailable",
-				anthropicUrl = "unavailable",
-				commandCodeUrl = COMMANDCODE_URL,
-				apiToken = commandToken,
-				models = models,
-				fastModel = models["fast"]?.model ?: selected.fastModel,
-				thinkingModel = models["thinking"]?.model ?: selected.thinkingModel,
-				contextWindow = readContextWindow(command, "contextWindow", DEFAULT_CONTEXT_WINDOW),
-				balanceRelated = BalanceRelated(null, BalanceStructParse.NONE),
-				routes = emptyMap(),
-				fallback = selected,
-			)
+			require(names.distinct().size == names.size && selected.name !in names) { "Duplicate fallback provider" }
+			val fallbacks = names.map { loadConfig(configPath, it, false, root) }
+			return selected.copy(fallbackProviders = fallbacks)
 		}
 
 		private fun readCommandCodeModels(configured: JsonObject): Map<String, LLMModelConfig> {
@@ -204,18 +192,6 @@ data class LLMProvider(
 					?: throw IllegalArgumentException("commandcode model '$preset' requires pricing")
 				preset.lowercase(Locale.ROOT) to LLMModelConfig(model, LLMProtocol.COMMANDCODE, pricing = pricing)
 			}.also { require(it.size == raw.size()) { "Duplicate commandcode model presets" } }
-		}
-
-		private fun readCommandCodeToken(configured: JsonObject): String {
-			val path = configured.get("tokenFile")?.asString?.takeIf { it.isNotBlank() }
-				?: throw IllegalArgumentException("providers.commandcode.tokenFile is required")
-			val expanded = if (path == "~") System.getProperty("user.home")
-				else if (path.startsWith("~/")) System.getProperty("user.home") + path.removePrefix("~") else path
-			val raw = runCatching { Files.readString(Path.of(expanded)).trim() }.getOrNull() ?: return ""
-			val token = if (raw.startsWith("{")) runCatching {
-				JsonParser.parseString(raw).asJsonObject.get("apiKey")?.asString
-			}.getOrNull() else raw
-			return token.orEmpty()
 		}
 
 		private fun loadConfig(configPath: Path, explicitlySelected: String?, loadRoutes: Boolean, root: JsonObject? = readConfig(configPath)): LLMProvider {
@@ -450,7 +426,6 @@ data class LLMProvider(
 		}
 
 		private const val DEFAULT_CONTEXT_WINDOW = 524_288
-		private const val COMMANDCODE_URL = "https://api.commandcode.ai/alpha/generate"
 		private const val DEFAULT_COMPACT_TRIGGER_TURNS = 12
 		private const val DEFAULT_COMPACT_TRIGGER_PERCENT = 70
 		private const val DEFAULT_COMPACT_KEEP_TURNS = 4

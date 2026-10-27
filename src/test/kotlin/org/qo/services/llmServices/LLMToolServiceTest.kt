@@ -34,6 +34,16 @@ class LLMToolServiceTest {
 	private val service = LLMToolService(toolIds.map(::StubTool), search, RemoteWebFetchTool(search))
 
 	@Test
+	fun `current provider tool uses request context`() = runBlocking {
+		val names = service.definitions().map { it.asJsonObject.getAsJsonObject("function").get("name").asString }
+		assertEquals(true, "get_current_provider" in names)
+		val result = JsonParser.parseString(service.execute("get_current_provider", "{}",
+			LLMToolContext(null, "1", "user", provider = "backup", model = "backup-model"))).asJsonObject
+		assertEquals("backup", result.get("provider").asString)
+		assertEquals("backup-model", result.get("model").asString)
+	}
+
+	@Test
 	fun `minecraft requests can execute qo scoped tools without group mapping`(): Unit = runBlocking {
 		val result = service.execute(
 			"query_metro_lines",

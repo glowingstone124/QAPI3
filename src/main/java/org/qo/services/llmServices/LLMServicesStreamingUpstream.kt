@@ -333,7 +333,7 @@ internal fun LLMServices.streamFromResponses(
 				outputs[call.callId] = toolService.execute(
 					call.name,
 					call.arguments,
-					requester.toolContext(request.currentUserText),
+					requester.executingToolContext(request.currentUserText),
 				)
 			}
 			LLMResponsesAdapter.appendToolOutputs(upstreamBody, completedBody, outputs)

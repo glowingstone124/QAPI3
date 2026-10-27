@@ -5,6 +5,7 @@ import com.google.gson.GsonBuilder
 import com.google.gson.JsonArray
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
+import org.qo.services.llmServices.tools.ToolSupport
 import org.qo.services.llmServices.tools.Tools
 import org.qo.services.llmServices.tools.DuckDuckGoWebSearchTool
 import org.qo.services.llmServices.tools.RemoteWebFetchTool
@@ -58,6 +59,9 @@ class LLMToolService(
 		} else {
 			excludedIds
 		}
+		if (enabled() && "get_current_provider" !in effectiveExcluded) add(ToolSupport.functionTool(
+			"get_current_provider", "获取当前请求实际使用的提供商和模型，包括故障切换后的提供商。", emptyMap()
+		))
 		if (enabled()) tools.filterNot { it.id in effectiveExcluded }.forEach { add(it.definition.deepCopy()) }
 		if (search.id !in effectiveExcluded) add(search.definition.deepCopy())
 		if (webFetch.id !in effectiveExcluded) add(webFetch.definition.deepCopy())
@@ -68,6 +72,10 @@ class LLMToolService(
 			val result = errorResult("tool_unavailable", "该工具在当前模型渠道不可用")
 			logFailure(name, rawArguments, context, result)
 			return result
+		}
+		if (name == "get_current_provider" && enabled()) {
+			return if (context.provider == null) errorResult("provider_unavailable", "当前提供商不可用") else
+				ToolSupport.result(name) { addProperty("provider", context.provider); addProperty("model", context.model) }
 		}
 		if (name == search.id) {
 			val result = search.execute(parseArguments(rawArguments), context)
@@ -152,4 +160,6 @@ data class LLMToolContext(
 	val currentMessageId: Long? = null,
 	val source: String? = null,
 	val conversationKey: String? = null,
+	val provider: String? = null,
+	val model: String? = null,
 )

@@ -14,6 +14,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.flow.toList
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import org.mockito.Mockito
@@ -169,6 +170,78 @@ class LLMDispatchTest {
 		}
 	}
 
+	@Test
+	fun `fallback retries server errors and empty responses with the backup model`() = runBlocking {
+		for (empty in listOf(false, true)) fixture().use { f ->
+			val original = f.service.providers.current()
+			val backup = original.copy(name = "backup", chatCompletionsUrl = "https://backup.example/chat",
+				models = original.models.mapValues { (_, value) -> value.copy(model = "backup-model") }, fastModel = "backup-model")
+			f.configure(original.copy(fallbackProviders = listOf(backup)))
+			f.responseHandler = { number -> if (number == 1) {
+				if (empty) completion("") to HttpStatusCode.OK else "{}" to HttpStatusCode.ServiceUnavailable
+			} else completion("backup answer") to HttpStatusCode.OK }
+			val result = f.dispatch(LLMSource.QQ, body)
+			assertEquals(200, result.status)
+			assertEquals(2, f.requests)
+			assertEquals("backup answer", f.history().single()[2])
+			assertEquals(1, f.store.settlements.size)
+			assertEquals("backup", f.usedProviders.last())
+		}
+	}
+
+	@Test
+	fun `streaming failover buffers content until backup succeeds`() = runBlocking {
+		fixture().use { f ->
+			val original = f.service.providers.current()
+			val backup = original.copy(name = "backup", chatCompletionsUrl = "https://backup.example/chat")
+			f.configure(original.copy(fallbackProviders = listOf(backup)))
+			f.responseHandler = { number -> if (number == 1) "{}" to HttpStatusCode.ServiceUnavailable else completion("recovered") to HttpStatusCode.OK }
+			val result = f.service.dispatchStreamChat(body, "token", "fast", "stream-id")
+			val chunks = result.chunks.toList().joinToString("\n")
+			assertEquals(2, f.requests)
+			assertTrue(chunks.contains("recovered"))
+			assertEquals("recovered", f.history().single()[2])
+		}
+	}
+
+	@Test
+	fun `backup tool receives the actual backup identity after connection failure`() = runBlocking {
+		fixture().use { f ->
+			val original = f.service.providers.current()
+			val backup = original.copy(name = "backup", chatCompletionsUrl = "https://backup.example/chat", fastModel = "backup-model",
+				models = original.models.mapValues { (_, value) -> value.copy(model = "backup-model") })
+			f.configure(original.copy(fallbackProviders = listOf(backup)))
+			Mockito.`when`(f.service.maxToolRounds).thenReturn(2)
+			val call = """{"choices":[{"finish_reason":"tool_calls","message":{"role":"assistant","content":null,"tool_calls":[{"id":"c1","type":"function","function":{"name":"get_current_provider","arguments":"{}"}}]}}],"usage":{"prompt_tokens":10,"completion_tokens":5}}"""
+			f.responseHandler = { number -> when (number) {
+				1 -> throw java.io.IOException("connection failed")
+				2 -> call to HttpStatusCode.OK
+				else -> completion("answer") to HttpStatusCode.OK
+			} }
+			assertEquals(200, f.dispatch(LLMSource.QQ, body).status)
+			val invocation = Mockito.mockingDetails(f.service.toolService).invocations.first { it.method.name == "execute" }
+			val context = invocation.arguments[2] as LLMToolContext
+			assertEquals("backup", context.provider)
+			assertEquals("backup-model", context.model)
+		}
+	}
+
+	@Test
+	fun `failure after server tool execution does not retry`() = runBlocking {
+		fixture().use { f ->
+			val original = f.service.providers.current()
+			f.configure(original.copy(fallbackProviders = listOf(original.copy(name = "backup"))))
+			Mockito.`when`(f.service.maxToolRounds).thenReturn(2)
+			val toolCall = """{"choices":[{"finish_reason":"tool_calls","message":{"role":"assistant","content":null,"tool_calls":[{"id":"c1","type":"function","function":{"name":"get_current_provider","arguments":"{}"}}]}}],"usage":{"prompt_tokens":10,"completion_tokens":5}}"""
+			f.responseHandler = { number -> if (number == 1) toolCall to HttpStatusCode.OK else "{}" to HttpStatusCode.ServiceUnavailable }
+			val result = f.dispatch(LLMSource.QQ, body)
+			assertEquals(503, result.status)
+			assertEquals(2, f.requests)
+			val call = Mockito.mockingDetails(f.service.toolService).invocations.first { it.method.name == "execute" }
+			assertEquals("test", (call.arguments[2] as LLMToolContext).provider)
+		}
+	}
+
 	private fun completion(content: String = "answer"): String =
 		"""{"model":"private-model","choices":[{"finish_reason":"stop","message":{"role":"assistant","content":${JsonPrimitive(content)}}}],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}"""
 
@@ -193,10 +266,14 @@ class LLMDispatchTest {
 		val store = AccountingStore()
 		val conversations = Mockito.mock(LLMConversationService::class.java)
 		var requests = 0
+		var responseHandler: (Int) -> Pair<String, HttpStatusCode> = { response to status }
+		val usedProviders = mutableListOf<String>()
 		private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
-		private val client = HttpClient(MockEngine {
+		private val client = HttpClient(MockEngine { request ->
 			requests++
-			respond(response, status)
+			usedProviders.add(if (request.url.host == "backup.example") "backup" else "test")
+			val (body, code) = responseHandler(requests)
+			respond(body, code)
 		})
 
 		suspend fun configure(provider: LLMProvider) {

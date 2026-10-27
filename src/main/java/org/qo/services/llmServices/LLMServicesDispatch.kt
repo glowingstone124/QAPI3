@@ -30,7 +30,7 @@ internal suspend fun LLMServices.dispatchStreamChat(
 	val resolvedConvId = conversationId ?: extractConversationId(body)
 	val requester = principal.toRequester(conversationId = resolvedConvId, model = model)
 	val provider = providers.current().forMode(model)
-	if (provider.apiToken.isBlank()) {
+	if (provider.apiToken.isBlank() && provider.fallbackProviders.isEmpty()) {
 		return LLMStreamResult(500, flowOfText(errorJson("server_error", "LLM 上游令牌未配置")))
 	}
 	val request = normalizeRequest(body, true, requester, model, provider)
@@ -42,11 +42,13 @@ internal suspend fun LLMServices.dispatchStreamChat(
 	}
 	val reservation = requireNotNull(quota.reservation)
 
-	val chunks = if (request.clientTools != null) streamClientTools(request, requester, requestId, provider, reservation) else when (provider.protocol(request.preset)) {
-		LLMProtocol.RESPONSES -> streamFromResponses(request, requester, requestId, "stream", provider, reservation)
-		LLMProtocol.ANTHROPIC -> streamFromAnthropic(request, requester, requestId, "stream", provider, reservation)
-		LLMProtocol.CHAT_COMPLETIONS -> streamFromUpstream(request, requester, requestId, "stream", provider, reservation)
-		LLMProtocol.COMMANDCODE -> streamFromCommandCode(request, requester, requestId, "stream", provider, reservation)
+	val activeRequester = requester.copy(activeProvider = provider.name, activeModel = request.model)
+	val chunks = if (provider.fallbackProviders.isNotEmpty()) streamWithFallback(request, activeRequester, requestId, provider, reservation)
+	else if (request.clientTools != null) streamClientTools(request, activeRequester, requestId, provider, reservation) else when (provider.protocol(request.preset)) {
+		LLMProtocol.RESPONSES -> streamFromResponses(request, activeRequester, requestId, "stream", provider, reservation)
+		LLMProtocol.ANTHROPIC -> streamFromAnthropic(request, activeRequester, requestId, "stream", provider, reservation)
+		LLMProtocol.CHAT_COMPLETIONS -> streamFromUpstream(request, activeRequester, requestId, "stream", provider, reservation)
+		LLMProtocol.COMMANDCODE -> streamFromCommandCode(request, activeRequester, requestId, "stream", provider, reservation)
 	}
 	return LLMStreamResult(
 		200,
@@ -133,7 +135,7 @@ private suspend fun LLMServices.completeAuthenticatedChat(
 	source: String,
 	clientRequestId: String?,
 ): LLMNonStreamResult {
-	if (provider.apiToken.isBlank()) {
+	if (provider.apiToken.isBlank() && provider.fallbackProviders.isEmpty()) {
 		return LLMNonStreamResult(500, errorJson("server_error", "LLM 上游令牌未配置"))
 	}
 	val request = normalizeRequest(body, false, requester, model, provider)
