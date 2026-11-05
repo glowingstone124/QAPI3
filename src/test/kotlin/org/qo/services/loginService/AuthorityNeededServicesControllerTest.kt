@@ -155,4 +155,24 @@ class AuthorityNeededServicesControllerTest {
 			.jsonPath("$.reason").isEqualTo("Invalid login")
 		Mockito.verifyNoInteractions(ipWhitelistServices)
 	}
+
+	@Test
+	fun updateKotshiAccount_supportsActiveResponseToggle() = runBlocking {
+		Mockito.`when`(kotshiAccountService.updateSettings("valid-token", null, false))
+			.thenReturn(KotshiPrivacySettings(queryEnabled = true, activeResponseEnabled = false))
+
+		webTestClient.patch()
+			.uri("/qo/authorization/account/kotshi")
+			.header("token", "valid-token")
+			.contentType(MediaType.APPLICATION_JSON)
+			.bodyValue("""{"active_response_enabled":false}""")
+			.exchange()
+			.expectStatus().isOk
+			.expectBody()
+			.jsonPath("$.kotshi_query_enabled").isEqualTo(true)
+			.jsonPath("$.active_response_enabled").isEqualTo(false)
+			.jsonPath("$.qbot_active_response_enabled").isEqualTo(false)
+
+		Mockito.verify(kotshiAccountService).updateSettings("valid-token", null, false)
+	}
 }

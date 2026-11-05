@@ -9,9 +9,10 @@ import reactor.core.publisher.Mono
 
 data class KotshiPrivacySettings(
 	val queryEnabled: Boolean,
+	val activeResponseEnabled: Boolean = true,
 )
 
-/** Stores the account-level permission used by Kotshi's player lookup path. */
+/** Stores the account-level permission used by Kotshi's player lookup path and QBot active responses. */
 @Service
 class KotshiPrivacyService @Autowired constructor(
 	private val repository: KotshiPrivacyDbRepository,
@@ -20,12 +21,27 @@ class KotshiPrivacyService @Autowired constructor(
 
 	suspend fun settings(username: String): KotshiPrivacySettings? = repository.settings(username)
 
+	suspend fun settingsByUid(uid: Long): KotshiPrivacySettings? = repository.settingsByUid(uid)
+
 	suspend fun isQueryEnabled(username: String): Boolean = settings(username)?.queryEnabled ?: false
+
+	suspend fun isActiveResponseEnabled(username: String): Boolean = settings(username)?.activeResponseEnabled ?: true
+
+	suspend fun isActiveResponseEnabledByUid(uid: Long): Boolean = settingsByUid(uid)?.activeResponseEnabled ?: true
 
 	fun isQueryEnabledReactive(username: String): Mono<Boolean> = mono {
 		isQueryEnabled(username)
 	}
 
 	suspend fun update(username: String, enabled: Boolean): KotshiPrivacySettings? =
-		repository.update(username, enabled)
+		repository.update(username, queryEnabled = enabled)
+
+	suspend fun updateSettings(
+		username: String,
+		queryEnabled: Boolean? = null,
+		activeResponseEnabled: Boolean? = null,
+	): KotshiPrivacySettings? = repository.update(username, queryEnabled, activeResponseEnabled)
+
+	suspend fun updateActiveResponseByUid(uid: Long, enabled: Boolean): Boolean =
+		repository.updateByUid(uid, enabled)
 }

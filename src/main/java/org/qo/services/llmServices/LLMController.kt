@@ -1,5 +1,6 @@
 package org.qo.services.llmServices
 
+import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.firstOrNull
@@ -10,6 +11,7 @@ import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
 import org.springframework.http.ResponseEntity
 import org.springframework.http.codec.ServerSentEvent
+import org.qo.services.loginService.KotshiPrivacyService
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.util.PatternMatchUtils
 import org.springframework.web.bind.annotation.PathVariable
@@ -27,6 +29,7 @@ class LLMController(
 	private val llmServices: LLMServices,
 	private val kotshiConversationService: KotshiConversationService? = null,
 	private val tokenStatisticsService: LLMTokenStatisticsService? = null,
+	private val kotshiPrivacyService: KotshiPrivacyService? = null,
 	@Value("\${qapi.llm.web-allowed-origin-patterns:https://*.qoriginal.vip,http://localhost:*,http://127.0.0.1:*}")
 	allowedWebOriginPatterns: String,
 ) {
@@ -149,6 +152,67 @@ class LLMController(
 			)
 		val result = llmServices.quotaStatus(requestToken)
 		return jsonResponse(result.body, HttpStatus.valueOf(result.status), result.quota)
+	}
+
+	@GetMapping("/v1/bot/active-response", produces = [MediaType.APPLICATION_JSON_VALUE])
+	suspend fun getBotActiveResponse(
+		@RequestHeader("token", required = false) token: String?,
+		@RequestHeader(HttpHeaders.AUTHORIZATION, required = false) authorization: String?,
+		@RequestHeader("X-QQ-UID", required = false) headerUid: Long?,
+		@RequestParam("uid", required = false) paramUid: Long?,
+	): ResponseEntity<String> {
+		val requestToken = AuthTokens.resolve(token, authorization)
+			?: return jsonResponse(
+				"""{"error":{"message":"缺少或无效的令牌","type":"invalid_token","code":"invalid_token"}}""",
+				HttpStatus.UNAUTHORIZED
+			)
+		val targetUid = headerUid ?: paramUid ?: return jsonResponse(
+			"""{"error":{"message":"缺少用户 UID","type":"missing_uid","code":"missing_uid"}}""",
+			HttpStatus.BAD_REQUEST
+		)
+		val enabled = kotshiPrivacyService?.isActiveResponseEnabledByUid(targetUid) ?: true
+		return jsonResponse(
+			JsonObject().apply {
+				addProperty("uid", targetUid)
+				addProperty("active_response_enabled", enabled)
+				addProperty("qbot_active_response_enabled", enabled)
+			}.toString(),
+			HttpStatus.OK
+		)
+	}
+
+	@PostMapping("/v1/bot/active-response", produces = [MediaType.APPLICATION_JSON_VALUE])
+	suspend fun setBotActiveResponse(
+		@RequestHeader("token", required = false) token: String?,
+		@RequestHeader(HttpHeaders.AUTHORIZATION, required = false) authorization: String?,
+		@RequestHeader("X-QQ-UID", required = false) headerUid: Long?,
+		@RequestBody body: String,
+	): ResponseEntity<String> {
+		val requestToken = AuthTokens.resolve(token, authorization)
+			?: return jsonResponse(
+				"""{"error":{"message":"缺少或无效的令牌","type":"invalid_token","code":"invalid_token"}}""",
+				HttpStatus.UNAUTHORIZED
+			)
+		val json = runCatching { JsonParser.parseString(body).asJsonObject }.getOrNull()
+		val targetUid = headerUid ?: json?.get("uid")?.asLong ?: return jsonResponse(
+			"""{"error":{"message":"缺少用户 UID","type":"missing_uid","code":"missing_uid"}}""",
+			HttpStatus.BAD_REQUEST
+		)
+		val enabled = (json?.get("active_response_enabled") ?: json?.get("qbot_active_response_enabled") ?: json?.get("enabled"))
+			?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isBoolean }
+			?.asBoolean ?: return jsonResponse(
+				"""{"error":{"message":"active_response_enabled must be boolean","type":"invalid_param","code":"invalid_param"}}""",
+				HttpStatus.BAD_REQUEST
+			)
+		kotshiPrivacyService?.updateActiveResponseByUid(targetUid, enabled)
+		return jsonResponse(
+			JsonObject().apply {
+				addProperty("uid", targetUid)
+				addProperty("active_response_enabled", enabled)
+				addProperty("qbot_active_response_enabled", enabled)
+			}.toString(),
+			HttpStatus.OK
+		)
 	}
 
 	@PostMapping("/v1/chat/completions/bot", produces = [MediaType.APPLICATION_JSON_VALUE])

@@ -100,14 +100,21 @@ class AuthorityNeededServicesController(
 	): ResponseEntity<String> {
 		val resolvedToken = resolveLoginToken(token, authorization) ?: return missingTokenResponse()
 		val json = runCatching { JsonParser.parseString(body).asJsonObject }.getOrNull()
-		val enabled = (json?.get("kotshi_query_enabled") ?: json?.get("query_enabled"))
+		val queryEnabled = (json?.get("kotshi_query_enabled") ?: json?.get("query_enabled"))
 			?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isBoolean }
 			?.asBoolean
-			?: return ri.GeneralHttpHeader("{\"error\":\"kotshi_query_enabled must be boolean\"}", HttpStatus.BAD_REQUEST)
-		val settings = kotshiAccountService.updateQueryEnabled(resolvedToken, enabled)
+		val activeResponseEnabled = (json?.get("active_response_enabled") ?: json?.get("qbot_active_response_enabled"))
+			?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isBoolean }
+			?.asBoolean
+		if (queryEnabled == null && activeResponseEnabled == null) {
+			return ri.GeneralHttpHeader("{\"error\":\"kotshi_query_enabled or active_response_enabled must be boolean\"}", HttpStatus.BAD_REQUEST)
+		}
+		val settings = kotshiAccountService.updateSettings(resolvedToken, queryEnabled, activeResponseEnabled)
 			?: return ri.GeneralHttpHeader("{\"error\":\"Invalid token.\"}", HttpStatus.UNAUTHORIZED)
 		return ri.GeneralHttpHeader(JsonObject().apply {
 			addProperty("kotshi_query_enabled", settings.queryEnabled)
+			addProperty("active_response_enabled", settings.activeResponseEnabled)
+			addProperty("qbot_active_response_enabled", settings.activeResponseEnabled)
 		}.toString())
 	}
 

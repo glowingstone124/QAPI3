@@ -73,4 +73,17 @@ class KotshiAccountUsageIntegrationTest {
         assertEquals(24L,recent.first().totalTokens)
         assertEquals(5L,recent.last().totalTokens)
     }
+
+    @Test fun `channel breakdown groups requests by source`(): Unit = runBlocking {
+        record("web","completed",15)
+        record("qq","failed",21,now.plusMillis(1))
+        record("qq","completed",50,now.plusMillis(2))
+        val (_, _, channels) = service.loadUsageWithChannels(uid, now)
+        assertEquals(2L, channels["qq"]?.requests)
+        assertEquals(1L, channels["qq"]?.completed)
+        assertEquals(1L, channels["qq"]?.failed)
+        assertEquals(71L, channels["qq"]?.totalTokens)
+        assertEquals(1L, channels["web"]?.requests)
+        assertEquals(15L, channels["web"]?.totalTokens)
+    }
 }

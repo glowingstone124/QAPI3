@@ -4,6 +4,7 @@ import io.r2dbc.spi.R2dbcException
 import io.r2dbc.spi.Row
 import kotlinx.coroutines.CancellationException
 import org.qo.datas.ReactiveDatabase
+import org.qo.services.llmServices.KotshiChannelSummary
 import org.qo.services.llmServices.KotshiUsageRecord
 import org.qo.services.llmServices.KotshiUsageSummary
 import org.springframework.stereotype.Repository
@@ -186,7 +187,7 @@ class LlmAccessRecordDbRepository(
 		ensureSchema()
 		return database.all(
 			"""
-			SELECT source, status, total_tokens, created_at, completed_at
+			SELECT source, status, total_tokens, prompt_tokens, completion_tokens, created_at, completed_at, error_message
 			FROM llm_access_records
 			WHERE uid = ?
 			ORDER BY created_at DESC
@@ -200,8 +201,36 @@ class LlmAccessRecordDbRepository(
 				totalTokens = number(row.get("total_tokens")),
 				createdAt = number(row.get("created_at")),
 				completedAt = row.get("completed_at")?.let(::number),
+				promptTokens = number(row.get("prompt_tokens")),
+				completionTokens = number(row.get("completion_tokens")),
+				errorMessage = row.get("error_message", String::class.java),
 			)
 		}
+	}
+
+	suspend fun loadChannelSummary(uid: Long, dayStart: Long): Map<String, KotshiChannelSummary> {
+		ensureSchema()
+		return database.all(
+			"""
+			SELECT source,
+			       COUNT(*) AS requests,
+			       SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS completed,
+			       SUM(CASE WHEN status IN ('failed', 'rejected') THEN 1 ELSE 0 END) AS failed,
+			       COALESCE(SUM(total_tokens), 0) AS total_tokens
+			FROM llm_access_records
+			WHERE uid = ? AND created_at >= ?
+			GROUP BY source
+			""".trimIndent(),
+			listOf(uid, dayStart),
+		) { row ->
+			val source = row.get("source", String::class.java) ?: "unknown"
+			source to KotshiChannelSummary(
+				requests = number(row.get("requests")),
+				completed = number(row.get("completed")),
+				failed = number(row.get("failed")),
+				totalTokens = number(row.get("total_tokens")),
+			)
+		}.toMap()
 	}
 
 	private fun number(value: Any?): Long = when (value) {
