@@ -167,6 +167,114 @@ class LLMDailyQuotaServiceTest {
         assertEquals(120, service.effectiveLimit(true, after))
     }
 
+    @Test
+    fun `group quota priority reserves from group pool first then falls back to personal then paid`(): Unit = runBlocking {
+        val store = InMemoryQuotaStore().apply {
+            balances[123456L] = 100
+        }
+        val service = LLMDailyQuotaService(
+            store, 50, 20, "Asia/Shanghai",
+            configuredPromotionMultiplier = 1,
+            configuredGroupWeeklyLimit = 500,
+            configuredPilotQuotaGroups = "*",
+        )
+        val now = Instant.parse("2026-08-31T08:00:00Z")
+        val p = principal(LLMSource.QQ)
+        val groupId = 946085440L
+
+        // 1. Reserve 500 units in group -> all from group quota
+        val res1 = service.reserve(p, "req-group-full", now, estimatedUnits = 500, groupId = groupId)
+        assertEquals(LLMQuotaStatus.ACCEPTED, res1.status)
+        assertEquals(500, res1.view.groupLimit)
+        assertEquals(500, res1.view.groupUsed)
+        assertEquals(0, res1.view.groupRemaining)
+        assertEquals(0, res1.view.used) // personal used untouched!
+        assertEquals(100, res1.view.paidCredits) // paid credits untouched!
+
+        // 2. Next turn in group: 30 units -> group pool is 0, falls back to personal weekly quota
+        val res2 = service.reserve(p, "req-fallback-personal", now, estimatedUnits = 30, groupId = groupId)
+        assertEquals(LLMQuotaStatus.ACCEPTED, res2.status)
+        assertEquals(30, res2.view.used) // 30 personal units used
+        assertEquals(20, res2.view.remaining)
+        assertEquals(100, res2.view.paidCredits) // paid credits still untouched!
+
+        // 3. Next turn: 40 units -> 20 from personal (exhausting personal free), 20 from paid credits
+        val res3 = service.reserve(p, "req-fallback-paid", now, estimatedUnits = 40, groupId = groupId)
+        assertEquals(LLMQuotaStatus.ACCEPTED, res3.status)
+        assertEquals(50, res3.view.used) // personal limit reached (50)
+        assertEquals(0, res3.view.remaining)
+        assertEquals(80, res3.view.paidCredits) // 100 - 20 = 80
+
+        // 4. Next turn: 90 units -> group 0, personal 0, paid remaining 80 < 90 -> EXCEEDED!
+        val res4 = service.reserve(p, "req-exceeded", now, estimatedUnits = 90, groupId = groupId)
+        assertEquals(LLMQuotaStatus.EXCEEDED, res4.status)
+        assertEquals(80, res4.view.paidCredits)
+    }
+
+    @Test
+    fun `pilot groups filtering allows specified group ids and rejects non-pilot groups`(): Unit = runBlocking {
+        val store = InMemoryQuotaStore()
+        val service = LLMDailyQuotaService(
+            store, 50, 20, "Asia/Shanghai",
+            configuredPromotionMultiplier = 1,
+            configuredGroupWeeklyLimit = 500,
+            configuredPilotQuotaGroups = "11111, 22222",
+        )
+        val now = Instant.parse("2026-08-31T08:00:00Z")
+        val p = principal(LLMSource.QQ)
+
+        val defaultService = LLMDailyQuotaService(store, 50, 20, "Asia/Shanghai", configuredPromotionMultiplier = 1)
+        kotlin.test.assertFalse(defaultService.isGroupQuotaEnabled(11111L))
+
+        assertTrue(service.isGroupQuotaEnabled(11111L))
+        assertTrue(service.isGroupQuotaEnabled(22222L))
+        kotlin.test.assertFalse(service.isGroupQuotaEnabled(33333L))
+        kotlin.test.assertFalse(service.isGroupQuotaEnabled(null))
+        kotlin.test.assertFalse(service.isGroupQuotaEnabled(-1L))
+
+        // Pilot group 11111 gets group quota
+        val pilotRes = service.reserve(p, "pilot-req", now, estimatedUnits = 10, groupId = 11111L)
+        assertEquals(10, pilotRes.view.groupUsed)
+        assertEquals(0, pilotRes.view.used)
+
+        // Non-pilot group 33333 does not get group quota (uses personal weekly quota)
+        val nonPilotRes = service.reserve(p, "non-pilot-req", now, estimatedUnits = 10, groupId = 33333L)
+        kotlin.test.assertNull(nonPilotRes.view.groupLimit)
+        assertEquals(10, nonPilotRes.view.used)
+    }
+
+    @Test
+    fun `snapshot returns group quota details for pilot group and accepts if group quota remains`(): Unit = runBlocking {
+        val store = InMemoryQuotaStore()
+        val service = LLMDailyQuotaService(
+            store, 50, 20, "Asia/Shanghai",
+            configuredPromotionMultiplier = 1,
+            configuredGroupWeeklyLimit = 500,
+            configuredPilotQuotaGroups = "*",
+        )
+        val now = Instant.parse("2026-08-31T08:00:00Z")
+        val p = principal(LLMSource.QQ)
+
+        // Exhaust personal quota completely
+        repeat(50) {
+            service.reserve(p, "personal-$it", now, estimatedUnits = 1, groupId = null)
+        }
+
+        // Snapshot without group: personal quota exceeded
+        val snapPersonal = service.snapshot(p.qqUid, hasAccount = true, now = now)
+        assertEquals(LLMQuotaStatus.EXCEEDED, snapPersonal.status)
+        assertEquals(50, snapPersonal.view.used)
+        assertEquals(0, snapPersonal.view.remaining)
+        kotlin.test.assertNull(snapPersonal.view.groupLimit)
+
+        // Snapshot with pilot group: ACCEPTED because group shared quota is available!
+        val snapGroup = service.snapshot(p.qqUid, hasAccount = true, now = now, groupId = 946085440L)
+        assertEquals(LLMQuotaStatus.ACCEPTED, snapGroup.status)
+        assertEquals(500, snapGroup.view.groupLimit)
+        assertEquals(0, snapGroup.view.groupUsed)
+        assertEquals(500, snapGroup.view.groupRemaining)
+    }
+
     private fun principal(source: LLMSource) = LLMPrincipal(
         qqUid = 123456L,
         displayName = "tester",
@@ -175,30 +283,104 @@ class LLMDailyQuotaServiceTest {
     )
 
     private class InMemoryQuotaStore : LLMQuotaStore {
-        private val counts = mutableMapOf<String, Int>()
-        private val requests = mutableMapOf<String, String>()
+        val counts = mutableMapOf<String, Int>()
+        val groupCounts = mutableMapOf<String, Int>()
+        val balances = mutableMapOf<Long, Int>()
+        val requests = mutableMapOf<String, String>()
         var available = true
 
-                override suspend fun reserve(
+        override suspend fun reserve(
             quotaKey: String,
             requestKey: String,
             limit: Int,
             expiresAtEpochSeconds: Long,
+        ): LLMQuotaStoreDecision? = reserveUnits(
+            principal = LLMPrincipal(quotaKey.substringAfterLast(':').toLong(), "", LLMSource.WEB, ""),
+            quotaKey = quotaKey,
+            requestKey = requestKey,
+            limit = limit,
+            expiresAt = expiresAtEpochSeconds,
+            units = 1,
+            mode = "fast",
+            provider = "",
+            model = "",
+            estimatedCost = LLMDailyQuotaService.COST_PER_UNIT,
+        )
+
+        override suspend fun reserveUnits(
+            principal: LLMPrincipal,
+            quotaKey: String,
+            requestKey: String,
+            limit: Int,
+            expiresAt: Long,
+            units: Int,
+            mode: String,
+            provider: String,
+            model: String,
+            estimatedCost: java.math.BigDecimal,
+            groupId: Long?,
+            groupLimit: Int,
         ): LLMQuotaStoreDecision? = synchronized(this) {
             if (!available) return null
             val current = counts[quotaKey] ?: 0
+            val p = quotaKey.substringAfter("llm:weekly:").substringBeforeLast(':')
+            val groupKey = if (groupId != null && groupId > 0) "$groupId:$p" else null
+            val currentGroup = if (groupKey != null) groupCounts[groupKey] ?: 0 else 0
+            val paid = balances[principal.qqUid] ?: 0
+
             if (requestKey in requests) {
-                return LLMQuotaStoreDecision(LLMQuotaStatus.DUPLICATE, current)
+                return LLMQuotaStoreDecision(
+                    LLMQuotaStatus.DUPLICATE,
+                    current,
+                    paid,
+                    groupUsed = if (groupId != null && groupId > 0 && groupLimit > 0) currentGroup else null,
+                    groupLimit = if (groupId != null && groupId > 0 && groupLimit > 0) groupLimit else null,
+                )
             }
-            if (current >= limit) {
-                return LLMQuotaStoreDecision(LLMQuotaStatus.EXCEEDED, current)
+
+            val (groupUnits, weeklyUnits, paidUnits) = if (groupId != null && groupId > 0 && groupLimit > 0) {
+                val availableGroup = (groupLimit - currentGroup).coerceAtLeast(0)
+                val gUnits = minOf(units, availableGroup)
+                val remAfterGroup = units - gUnits
+                val wUnits = minOf(remAfterGroup, (limit - current).coerceAtLeast(0))
+                val pUnits = remAfterGroup - wUnits
+                Triple(gUnits, wUnits, pUnits)
+            } else {
+                val wUnits = minOf(units, (limit - current).coerceAtLeast(0))
+                val pUnits = units - wUnits
+                Triple(0, wUnits, pUnits)
             }
+
+            if (paid < paidUnits) {
+                return LLMQuotaStoreDecision(
+                    LLMQuotaStatus.EXCEEDED,
+                    current,
+                    paid,
+                    groupUsed = if (groupId != null && groupId > 0 && groupLimit > 0) currentGroup else null,
+                    groupLimit = if (groupId != null && groupId > 0 && groupLimit > 0) groupLimit else null,
+                )
+            }
+
             requests[requestKey] = "reserved"
-            counts[quotaKey] = current + 1
-            return LLMQuotaStoreDecision(LLMQuotaStatus.ACCEPTED, current + 1)
+            if (groupKey != null && groupUnits > 0) {
+                groupCounts[groupKey] = currentGroup + groupUnits
+            }
+            if (weeklyUnits > 0) {
+                counts[quotaKey] = current + weeklyUnits
+            }
+            if (paidUnits > 0) {
+                balances[principal.qqUid] = paid - paidUnits
+            }
+            return LLMQuotaStoreDecision(
+                LLMQuotaStatus.ACCEPTED,
+                used = current + weeklyUnits,
+                paidCredits = paid - paidUnits,
+                groupUsed = if (groupId != null && groupId > 0 && groupLimit > 0) currentGroup + groupUnits else null,
+                groupLimit = if (groupId != null && groupId > 0 && groupLimit > 0) groupLimit else null,
+            )
         }
 
-                override suspend fun refund(reservation: LLMQuotaReservation): Int? = synchronized(this) {
+        override suspend fun refund(reservation: LLMQuotaReservation): Int? = synchronized(this) {
             if (!available) return null
             val current = counts[reservation.quotaKey] ?: 0
             if (requests[reservation.requestKey] == "reserved") {
@@ -208,6 +390,11 @@ class LLMDailyQuotaServiceTest {
             return counts[reservation.quotaKey] ?: 0
         }
 
-                override suspend fun used(quotaKey: String): Int? = if (available) counts[quotaKey] ?: 0 else null
+        override suspend fun used(quotaKey: String): Int? = if (available) counts[quotaKey] ?: 0 else null
+
+        override suspend fun groupUsed(groupId: Long, period: String): Int? =
+            if (available) groupCounts["$groupId:$period"] ?: 0 else null
+
+        override suspend fun balance(qqUid: Long): Int = balances[qqUid] ?: 0
     }
 }

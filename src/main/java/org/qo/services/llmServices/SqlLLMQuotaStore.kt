@@ -14,6 +14,15 @@ class SqlLLMQuotaStore(private val db: ReactiveDatabase) : LLMQuotaStore {
 	private val schemaInitializer = SchemaInitializer()
 	suspend fun schema() = schemaInitializer.ensure {
 		for (sql in SCHEMA) db.execute(sql)
+		val migrations = listOf(
+			"ALTER TABLE ai_quota_reservation ADD COLUMN group_id BIGINT NULL",
+			"ALTER TABLE ai_quota_reservation ADD COLUMN group_units INT NOT NULL DEFAULT 0",
+			"ALTER TABLE ai_usage ADD COLUMN group_id BIGINT NULL",
+			"ALTER TABLE ai_usage ADD COLUMN group_units INT NOT NULL DEFAULT 0",
+		)
+		for (sql in migrations) {
+			runCatching { db.execute(sql) }
+		}
 	}
 
 	private fun period(key: String) = key.substringAfter("llm:weekly:").substringBeforeLast(':')
@@ -33,11 +42,27 @@ class SqlLLMQuotaStore(private val db: ReactiveDatabase) : LLMQuotaStore {
 		)
 	}
 
+	private suspend fun groupWeek(groupId: Long, period: String) {
+		db.execute(
+			"INSERT INTO ai_group_weekly_usage (group_id, period, used) VALUES (?, ?, 0) ON DUPLICATE KEY UPDATE group_id=group_id",
+			listOf(groupId, period)
+		)
+	}
+
 	override suspend fun used(quotaKey: String): Int? {
 		schema()
 		return db.one(
 			"SELECT used FROM ai_weekly_usage WHERE user_id=? AND period=?",
 			listOf(uid(quotaKey), period(quotaKey))
+		) { number(it, "used").toInt() } ?: 0
+	}
+
+	override suspend fun groupUsed(groupId: Long, period: String): Int? {
+		if (groupId <= 0) return 0
+		schema()
+		return db.one(
+			"SELECT used FROM ai_group_weekly_usage WHERE group_id=? AND period=?",
+			listOf(groupId, period)
 		) { number(it, "used").toInt() } ?: 0
 	}
 
@@ -58,6 +83,8 @@ class SqlLLMQuotaStore(private val db: ReactiveDatabase) : LLMQuotaStore {
 		amount: Int,
 		referenceId: String,
 		kind: String,
+		groupId: Long?,
+		groupLimit: Int,
 	): CreditDeductionResult {
 		require(amount > 0) { "Deduction amount must be positive" }
 		schema()
@@ -66,6 +93,19 @@ class SqlLLMQuotaStore(private val db: ReactiveDatabase) : LLMQuotaStore {
 			val paid = db.one("SELECT paid_credits FROM ai_quota_account WHERE user_id=? FOR UPDATE", listOf(qqUid)) {
 				number(it, "paid_credits").toInt()
 			} ?: 0
+
+			val (groupUsed, availableGroup) = if (groupId != null && groupId > 0 && groupLimit > 0 && period.isNotBlank() && period != "all") {
+				groupWeek(groupId, period)
+				val u = db.one("SELECT used FROM ai_group_weekly_usage WHERE group_id=? AND period=? FOR UPDATE", listOf(groupId, period)) {
+					number(it, "used").toInt()
+				} ?: 0
+				u to maxOf(0, groupLimit - u)
+			} else {
+				0 to 0
+			}
+
+			val groupDeduct = minOf(amount, availableGroup)
+			val remAfterGroup = amount - groupDeduct
 
 			val (used, availableWeekly) = if (limit > 0 && period.isNotBlank() && period != "all") {
 				week(qqUid, period)
@@ -77,19 +117,27 @@ class SqlLLMQuotaStore(private val db: ReactiveDatabase) : LLMQuotaStore {
 				0 to 0
 			}
 
-			val weeklyDeduct = minOf(amount, availableWeekly)
-			val paidDeduct = amount - weeklyDeduct
+			val weeklyDeduct = minOf(remAfterGroup, availableWeekly)
+			val paidDeduct = remAfterGroup - weeklyDeduct
 
 			if (paid < paidDeduct) {
+				val groupInfo = if (groupLimit > 0) "群共享可用额度：${availableGroup} 点，" else ""
 				return@inTransaction CreditDeductionResult(
 					success = false,
 					remainingCredits = paid,
 					weeklyDeducted = 0,
 					paidDeducted = 0,
-					error = "账户剩余额度不足（剩余免费额度：${availableWeekly} 点，Paid Credits：${paid} 点，本次生成图片需要：${amount} 点）。请充值点数或等待下周免费额度重置。"
+					groupDeducted = 0,
+					error = "账户剩余额度不足（${groupInfo}剩余免费额度：${availableWeekly} 点，Paid Credits：${paid} 点，本次生成图片需要：${amount} 点）。请充值点数或等待下周免费额度重置。"
 				)
 			}
 
+			if (groupDeduct > 0 && groupId != null) {
+				db.execute(
+					"UPDATE ai_group_weekly_usage SET used=used+? WHERE group_id=? AND period=?",
+					listOf(groupDeduct, groupId, period)
+				)
+			}
 			if (weeklyDeduct > 0) {
 				db.execute(
 					"UPDATE ai_weekly_usage SET used=used+? WHERE user_id=? AND period=?",
@@ -112,6 +160,7 @@ class SqlLLMQuotaStore(private val db: ReactiveDatabase) : LLMQuotaStore {
 				remainingCredits = paid - paidDeduct,
 				weeklyDeducted = weeklyDeduct,
 				paidDeducted = paidDeduct,
+				groupDeducted = groupDeduct,
 			)
 		}
 	}
@@ -123,11 +172,19 @@ class SqlLLMQuotaStore(private val db: ReactiveDatabase) : LLMQuotaStore {
 		paidAmount: Int,
 		referenceId: String,
 		kind: String,
+		groupId: Long?,
+		groupAmount: Int,
 	): Boolean {
-		if (weeklyAmount <= 0 && paidAmount <= 0) return true
+		if (weeklyAmount <= 0 && paidAmount <= 0 && groupAmount <= 0) return true
 		schema()
 		return db.inTransaction {
 			account(qqUid)
+			if (groupAmount > 0 && groupId != null && groupId > 0 && period.isNotBlank() && period != "all") {
+				db.execute(
+					"UPDATE ai_group_weekly_usage SET used=GREATEST(0, used-?) WHERE group_id=? AND period=?",
+					listOf(groupAmount, groupId, period)
+				)
+			}
 			if (weeklyAmount > 0 && period.isNotBlank() && period != "all") {
 				db.execute(
 					"UPDATE ai_weekly_usage SET used=GREATEST(0, used-?) WHERE user_id=? AND period=?",
@@ -171,16 +228,20 @@ class SqlLLMQuotaStore(private val db: ReactiveDatabase) : LLMQuotaStore {
 			"fast",
 			"",
 			"",
-			LLMDailyQuotaService.COST_PER_UNIT
+			LLMDailyQuotaService.COST_PER_UNIT,
+			null,
+			0
 		)
 
 	override suspend fun reserveUnits(
 		principal: LLMPrincipal, quotaKey: String, requestKey: String, limit: Int,
-		expiresAt: Long, units: Int, mode: String, provider: String, model: String, estimatedCost: BigDecimal
+		expiresAt: Long, units: Int, mode: String, provider: String, model: String, estimatedCost: BigDecimal,
+		groupId: Long?, groupLimit: Int,
 	): LLMQuotaStoreDecision? {
 		schema()
 		return db.inTransaction {
 			val uid = principal.qqUid
+			val p = period(quotaKey)
 			account(uid)
 			// All account operations lock the account first, including payments.
 			val paid = db.one("SELECT paid_credits FROM ai_quota_account WHERE user_id=? FOR UPDATE", listOf(uid)) {
@@ -189,54 +250,104 @@ class SqlLLMQuotaStore(private val db: ReactiveDatabase) : LLMQuotaStore {
 					"paid_credits"
 				).toInt()
 			}!!
-			week(uid, period(quotaKey))
+			week(uid, p)
 			val used = db.one(
 				"SELECT used FROM ai_weekly_usage WHERE user_id=? AND period=? FOR UPDATE",
-				listOf(uid, period(quotaKey))
+				listOf(uid, p)
 			) { number(it, "used").toInt() }!!
+			val groupUsed = if (groupId != null && groupId > 0 && groupLimit > 0) {
+				groupWeek(groupId, p)
+				db.one(
+					"SELECT used FROM ai_group_weekly_usage WHERE group_id=? AND period=? FOR UPDATE",
+					listOf(groupId, p)
+				) { number(it, "used").toInt() } ?: 0
+			} else {
+				0
+			}
 			if (db.one(
 					"SELECT request_key FROM ai_quota_reservation WHERE request_key=?",
 					listOf(requestKey)
 				) { true } == true
 			)
-				return@inTransaction LLMQuotaStoreDecision(LLMQuotaStatus.DUPLICATE, used, paid)
+				return@inTransaction LLMQuotaStoreDecision(
+					LLMQuotaStatus.DUPLICATE,
+					used,
+					paid,
+					groupUsed = if (groupId != null && groupId > 0 && groupLimit > 0) groupUsed else null,
+					groupLimit = if (groupId != null && groupId > 0 && groupLimit > 0) groupLimit else null,
+				)
 			val now = Instant.now().epochSecond
 			val active = db.one(
 				"SELECT COUNT(*) AS n FROM ai_quota_reservation WHERE user_id=? AND status IN ('reserved','pending')",
 				listOf(uid)
 			) { number(it, "n") }!!
 			if (active >= (if (principal.hasAccount) 10 else 5))
-				return@inTransaction LLMQuotaStoreDecision(LLMQuotaStatus.RATE_LIMITED, used, paid)
+				return@inTransaction LLMQuotaStoreDecision(
+					LLMQuotaStatus.RATE_LIMITED,
+					used,
+					paid,
+					groupUsed = if (groupId != null && groupId > 0 && groupLimit > 0) groupUsed else null,
+					groupLimit = if (groupId != null && groupId > 0 && groupLimit > 0) groupLimit else null,
+				)
 			val month = Instant.now().atZone(ZoneId.of("Asia/Shanghai")).toLocalDate().withDayOfMonth(1).toString()
 			db.execute(
 				"INSERT INTO ai_free_budget (period, actual_cost, reserved_cost) VALUES (?, 0, 0) ON DUPLICATE KEY UPDATE period=period",
 				listOf(month)
 			)
-			val weekly = minOf(units, (limit - used).coerceAtLeast(0))
-			val paidUnits = units - weekly
-			val freeReserve = if (weekly == 0) BigDecimal.ZERO else estimatedCost.multiply(BigDecimal(weekly))
+			val (groupUnits, weeklyUnits, paidUnits) = if (groupId != null && groupId > 0 && groupLimit > 0) {
+				val availableGroup = (groupLimit - groupUsed).coerceAtLeast(0)
+				val gUnits = minOf(units, availableGroup)
+				val remAfterGroup = units - gUnits
+				val wUnits = minOf(remAfterGroup, (limit - used).coerceAtLeast(0))
+				val pUnits = remAfterGroup - wUnits
+				Triple(gUnits, wUnits, pUnits)
+			} else {
+				val wUnits = minOf(units, (limit - used).coerceAtLeast(0))
+				val pUnits = units - wUnits
+				Triple(0, wUnits, pUnits)
+			}
+			val freeUnits = groupUnits + weeklyUnits
+			val freeReserve = if (freeUnits == 0) BigDecimal.ZERO else estimatedCost.multiply(BigDecimal(freeUnits))
 				.divide(BigDecimal(units), 12, java.math.RoundingMode.DOWN)
-			if (paid < paidUnits) return@inTransaction LLMQuotaStoreDecision(LLMQuotaStatus.EXCEEDED, used, paid)
-			db.execute(
-				"UPDATE ai_weekly_usage SET used=used+? WHERE user_id=? AND period=?",
-				listOf(weekly, uid, period(quotaKey))
+			if (paid < paidUnits) return@inTransaction LLMQuotaStoreDecision(
+				LLMQuotaStatus.EXCEEDED,
+				used,
+				paid,
+				groupUsed = if (groupId != null && groupId > 0 && groupLimit > 0) groupUsed else null,
+				groupLimit = if (groupId != null && groupId > 0 && groupLimit > 0) groupLimit else null,
 			)
+			if (groupUnits > 0 && groupId != null) {
+				db.execute(
+					"UPDATE ai_group_weekly_usage SET used=used+? WHERE group_id=? AND period=?",
+					listOf(groupUnits, groupId, p)
+				)
+			}
+			if (weeklyUnits > 0) {
+				db.execute(
+					"UPDATE ai_weekly_usage SET used=used+? WHERE user_id=? AND period=?",
+					listOf(weeklyUnits, uid, p)
+				)
+			}
+			if (paidUnits > 0) {
+				db.execute(
+					"UPDATE ai_quota_account SET paid_credits=paid_credits-? WHERE user_id=?",
+					listOf(paidUnits, uid)
+				)
+			}
+			if (freeReserve.signum() > 0) {
+				db.execute(
+					"UPDATE ai_free_budget SET reserved_cost=reserved_cost+? WHERE period=?",
+					listOf(freeReserve, month)
+				)
+			}
 			db.execute(
-				"UPDATE ai_quota_account SET paid_credits=paid_credits-? WHERE user_id=?",
-				listOf(paidUnits, uid)
-			)
-			db.execute(
-				"UPDATE ai_free_budget SET reserved_cost=reserved_cost+? WHERE period=?",
-				listOf(freeReserve, month)
-			)
-			db.execute(
-				"INSERT INTO ai_quota_reservation (request_key,user_id,period,weekly_limit,weekly_units,paid_units,mode,provider,model,status,created_at,reset_at,budget_period,free_reserved) VALUES (?,?,?,?,?,?,?,?,?,'reserved',?,?,?,?)",
+				"INSERT INTO ai_quota_reservation (request_key,user_id,period,weekly_limit,weekly_units,paid_units,mode,provider,model,status,created_at,reset_at,budget_period,free_reserved,group_id,group_units) VALUES (?,?,?,?,?,?,?,?,?,'reserved',?,?,?,?,?,?)",
 				listOf(
 					requestKey,
 					uid,
-					period(quotaKey),
+					p,
 					limit,
-					weekly,
+					weeklyUnits,
 					paidUnits,
 					mode,
 					provider,
@@ -244,16 +355,25 @@ class SqlLLMQuotaStore(private val db: ReactiveDatabase) : LLMQuotaStore {
 					now,
 					expiresAt,
 					month,
-					freeReserve
+					freeReserve,
+					groupId,
+					groupUnits,
 				)
 			)
-			LLMQuotaStoreDecision(LLMQuotaStatus.ACCEPTED, used + weekly, paid - paidUnits)
+			LLMQuotaStoreDecision(
+				LLMQuotaStatus.ACCEPTED,
+				used = used + weeklyUnits,
+				paidCredits = paid - paidUnits,
+				groupUsed = if (groupId != null && groupId > 0 && groupLimit > 0) groupUsed + groupUnits else null,
+				groupLimit = if (groupId != null && groupId > 0 && groupLimit > 0) groupLimit else null,
+			)
 		}
 	}
 
 	private data class Reservation(
 		val uid: Long, val period: String, val limit: Int, val weekly: Int, val paid: Int,
-		val status: String, val reset: Long, val month: String, val freeReserved: BigDecimal
+		val status: String, val reset: Long, val month: String, val freeReserved: BigDecimal,
+		val groupId: Long?, val groupUnits: Int,
 	)
 
 	private data class ZombieReservation(
@@ -263,6 +383,8 @@ class SqlLLMQuotaStore(private val db: ReactiveDatabase) : LLMQuotaStore {
 		val paid: Int,
 		val month: String,
 		val freeReserved: BigDecimal,
+		val groupId: Long?,
+		val groupUnits: Int,
 	)
 
 	private suspend fun locked(reservation: LLMQuotaReservation): Reservation? {
@@ -280,7 +402,9 @@ class SqlLLMQuotaStore(private val db: ReactiveDatabase) : LLMQuotaStore {
 				it.get("status", String::class.java)!!,
 				number(it, "reset_at"),
 				it.get("budget_period", String::class.java)!!,
-				it.get("free_reserved") as BigDecimal
+				it.get("free_reserved") as BigDecimal,
+				(it.get("group_id") as? Number)?.toLong(),
+				(it.get("group_units") as? Number)?.toInt() ?: 0,
 			)
 		}
 	}
@@ -291,23 +415,34 @@ class SqlLLMQuotaStore(private val db: ReactiveDatabase) : LLMQuotaStore {
 		return db.inTransaction {
 			val r = locked(reservation) ?: return@inTransaction null
 			if (r.status == "reserved") {
-				db.execute(
-					"UPDATE ai_weekly_usage SET used=used-? WHERE user_id=? AND period=?",
-					listOf(r.weekly, r.uid, r.period)
-				)
-				db.execute(
-					"UPDATE ai_quota_account SET paid_credits=paid_credits+? WHERE user_id=?",
-					listOf(r.paid, r.uid)
-				)
-				val failedFreeCost = if (usage == null || r.weekly == 0) BigDecimal.ZERO else
-					usage.actualCostCny.multiply(BigDecimal(r.weekly))
-						.divide(BigDecimal(r.weekly + r.paid), 12, java.math.RoundingMode.DOWN)
+				if (r.groupId != null && r.groupUnits > 0) {
+					db.execute(
+						"UPDATE ai_group_weekly_usage SET used=GREATEST(0, used-?) WHERE group_id=? AND period=?",
+						listOf(r.groupUnits, r.groupId, r.period)
+					)
+				}
+				if (r.weekly > 0) {
+					db.execute(
+						"UPDATE ai_weekly_usage SET used=used-? WHERE user_id=? AND period=?",
+						listOf(r.weekly, r.uid, r.period)
+					)
+				}
+				if (r.paid > 0) {
+					db.execute(
+						"UPDATE ai_quota_account SET paid_credits=paid_credits+? WHERE user_id=?",
+						listOf(r.paid, r.uid)
+					)
+				}
+				val freeUnits = r.groupUnits + r.weekly
+				val failedFreeCost = if (usage == null || freeUnits == 0) BigDecimal.ZERO else
+					usage.actualCostCny.multiply(BigDecimal(freeUnits))
+						.divide(BigDecimal(freeUnits + r.paid), 12, java.math.RoundingMode.DOWN)
 				db.execute(
 					"UPDATE ai_free_budget SET reserved_cost=reserved_cost-?,actual_cost=actual_cost+? WHERE period=?",
 					listOf(r.freeReserved, failedFreeCost, r.month)
 				)
 				if (usage != null) db.execute(
-					"INSERT INTO ai_usage (request_key,user_id,conversation_id,input_tokens,output_tokens,cached_tokens,reasoning_tokens,actual_cost,charged_units,weekly_units,paid_units,created_at) VALUES (?,?,?,?,?,?,?,?,0,0,0,?)",
+					"INSERT INTO ai_usage (request_key,user_id,conversation_id,input_tokens,output_tokens,cached_tokens,reasoning_tokens,actual_cost,charged_units,weekly_units,paid_units,created_at,group_id,group_units) VALUES (?,?,?,?,?,?,?,?,0,0,0,?,?,0)",
 					listOf(
 						reservation.requestKey,
 						r.uid,
@@ -317,47 +452,87 @@ class SqlLLMQuotaStore(private val db: ReactiveDatabase) : LLMQuotaStore {
 						usage.cachedTokens,
 						usage.reasoningTokens,
 						usage.actualCostCny,
-						Instant.now().epochSecond
+						Instant.now().epochSecond,
+						r.groupId,
 					)
 				)
 				db.execute(
 					"UPDATE ai_quota_reservation SET status='refunded' WHERE request_key=?",
 					listOf(reservation.requestKey)
 				)
-				db.execute(
-					"INSERT INTO ai_credit_ledger (user_id,reference_id,delta,kind,created_at) VALUES (?,?,?,'refund',?)",
-					listOf(r.uid, reservation.requestKey, r.paid, Instant.now().epochSecond)
-				)
+				if (r.paid > 0) {
+					db.execute(
+						"INSERT INTO ai_credit_ledger (user_id,reference_id,delta,kind,created_at) VALUES (?,?,?,'refund',?)",
+						listOf(r.uid, reservation.requestKey, r.paid, Instant.now().epochSecond)
+					)
+				}
 			}
 			used(reservation.quotaKey)
 		}
 	}
 
-	override suspend fun settle(reservation: LLMQuotaReservation, usage: AiQuotaUsage): LLMQuotaView? {
+	override suspend fun settle(reservation: LLMQuotaReservation, usage: AiQuotaUsage): LLMQuotaView? =
+		settle(reservation, usage, reservation.view.groupLimit ?: 0)
+
+	override suspend fun settle(reservation: LLMQuotaReservation, usage: AiQuotaUsage, groupLimit: Int): LLMQuotaView? {
 		require(usage.chargedUnits == LLMDailyQuotaService.units(usage.actualCostCny))
 		schema()
 		return db.inTransaction {
 			val r = locked(reservation) ?: return@inTransaction null
 			if (r.status == "refunded") error("Cannot settle a refunded request")
 			if (r.status == "reserved" || r.status == "pending") {
-				val used = used(reservation.quotaKey)!!
+				val totalUnits = usage.chargedUnits
+				val (newGroupUnits, remAfterGroup) = if (r.groupId != null && r.groupId > 0 && groupLimit > 0) {
+					groupWeek(r.groupId, r.period)
+					val currentGroupUsed = db.one(
+						"SELECT used FROM ai_group_weekly_usage WHERE group_id=? AND period=? FOR UPDATE",
+						listOf(r.groupId, r.period)
+					) { number(it, "used").toInt() } ?: 0
+					val availableGroup = (groupLimit - currentGroupUsed + r.groupUnits).coerceAtLeast(0)
+					val gUnits = minOf(totalUnits, availableGroup)
+					gUnits to (totalUnits - gUnits)
+				} else {
+					0 to totalUnits
+				}
+
+				val currentUsed = used(reservation.quotaKey)!!
 				val paid = balance(r.uid)
-				val availableWeekly = (r.limit - used + r.weekly).coerceAtLeast(0)
+				val availableWeekly = (r.limit - currentUsed + r.weekly).coerceAtLeast(0)
+
 				// An admitted turn completes even when its real cost exceeds the balance.
-				// Use available weekly units and Credits first, then overdraw weekly units.
-				val normalWeekly = minOf(usage.chargedUnits, availableWeekly)
-				val paidUnits = minOf(usage.chargedUnits - normalWeekly, paid + r.paid)
-				val weekly = usage.chargedUnits - paidUnits
-				val freeActual = if (weekly == 0) BigDecimal.ZERO else usage.actualCostCny.multiply(BigDecimal(weekly))
+				// Use available group, available weekly units and Credits first, then overdraw weekly units.
+				val normalWeekly = minOf(remAfterGroup, availableWeekly)
+				val remAfterWeekly = remAfterGroup - normalWeekly
+				val newPaidUnits = minOf(remAfterWeekly, paid + r.paid)
+				val newWeeklyUnits = remAfterGroup - newPaidUnits
+
+				val freeUnits = newGroupUnits + newWeeklyUnits
+				val freeActual = if (freeUnits == 0) BigDecimal.ZERO else usage.actualCostCny.multiply(BigDecimal(freeUnits))
 					.divide(BigDecimal(usage.chargedUnits), 12, java.math.RoundingMode.DOWN)
-				db.execute(
-					"UPDATE ai_weekly_usage SET used=used+? WHERE user_id=? AND period=?",
-					listOf(weekly - r.weekly, r.uid, r.period)
-				)
-				db.execute(
-					"UPDATE ai_quota_account SET paid_credits=paid_credits+? WHERE user_id=?",
-					listOf(r.paid - paidUnits, r.uid)
-				)
+
+				if (r.groupId != null && r.groupId > 0) {
+					val groupDelta = newGroupUnits - r.groupUnits
+					if (groupDelta != 0) {
+						db.execute(
+							"UPDATE ai_group_weekly_usage SET used=used+? WHERE group_id=? AND period=?",
+							listOf(groupDelta, r.groupId, r.period)
+						)
+					}
+				}
+				val weeklyDelta = newWeeklyUnits - r.weekly
+				if (weeklyDelta != 0) {
+					db.execute(
+						"UPDATE ai_weekly_usage SET used=used+? WHERE user_id=? AND period=?",
+						listOf(weeklyDelta, r.uid, r.period)
+					)
+				}
+				val paidDelta = r.paid - newPaidUnits
+				if (paidDelta != 0) {
+					db.execute(
+						"UPDATE ai_quota_account SET paid_credits=paid_credits+? WHERE user_id=?",
+						listOf(paidDelta, r.uid)
+					)
+				}
 				db.execute(
 					"UPDATE ai_free_budget SET actual_cost=actual_cost+?,reserved_cost=reserved_cost-? WHERE period=?",
 					listOf(freeActual, r.freeReserved, r.month)
@@ -367,7 +542,11 @@ class SqlLLMQuotaStore(private val db: ReactiveDatabase) : LLMQuotaStore {
 					listOf(reservation.requestKey)
 				)
 				db.execute(
-					"INSERT INTO ai_usage (request_key,user_id,conversation_id,input_tokens,output_tokens,cached_tokens,reasoning_tokens,actual_cost,charged_units,weekly_units,paid_units,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE weekly_units=VALUES(weekly_units),paid_units=VALUES(paid_units)",
+					"""
+					INSERT INTO ai_usage (request_key,user_id,conversation_id,input_tokens,output_tokens,cached_tokens,reasoning_tokens,actual_cost,charged_units,weekly_units,paid_units,created_at,group_id,group_units)
+					VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+					ON DUPLICATE KEY UPDATE weekly_units=VALUES(weekly_units),paid_units=VALUES(paid_units),group_id=VALUES(group_id),group_units=VALUES(group_units)
+					""".trimIndent(),
 					listOf(
 						reservation.requestKey,
 						r.uid,
@@ -378,23 +557,55 @@ class SqlLLMQuotaStore(private val db: ReactiveDatabase) : LLMQuotaStore {
 						usage.reasoningTokens,
 						usage.actualCostCny,
 						usage.chargedUnits,
-						weekly,
-						paidUnits,
-						Instant.now().epochSecond
+						newWeeklyUnits,
+						newPaidUnits,
+						Instant.now().epochSecond,
+						r.groupId,
+						newGroupUnits,
 					)
 				)
-				db.execute(
-					"INSERT INTO ai_credit_ledger (user_id,reference_id,delta,kind,created_at) VALUES (?,?,?,'usage',?)",
-					listOf(r.uid, reservation.requestKey, -paidUnits, Instant.now().epochSecond)
-				)
+				if (newPaidUnits > 0) {
+					db.execute(
+						"INSERT INTO ai_credit_ledger (user_id,reference_id,delta,kind,created_at) VALUES (?,?,?,'usage',?)",
+						listOf(r.uid, reservation.requestKey, -newPaidUnits, Instant.now().epochSecond)
+					)
+				}
 			}
-			val used = used(reservation.quotaKey)!!
-			LLMQuotaView(
-				r.limit, used, r.limit - used, r.reset, balance(r.uid),
+
+			val finalUsed = used(reservation.quotaKey)!!
+			val finalGroupUsed = if (r.groupId != null && r.groupId > 0 && groupLimit > 0) {
 				db.one(
-					"SELECT charged_units FROM ai_usage WHERE request_key=?",
+					"SELECT used FROM ai_group_weekly_usage WHERE group_id=? AND period=?",
+					listOf(r.groupId, r.period)
+				) { number(it, "used").toInt() } ?: 0
+			} else null
+			val finalGroupRemaining = if (finalGroupUsed != null) {
+				(groupLimit - finalGroupUsed).coerceAtLeast(0)
+			} else null
+
+			val chargedUnits = db.one(
+				"SELECT charged_units FROM ai_usage WHERE request_key=?",
+				listOf(reservation.requestKey)
+			) { number(it, "charged_units").toInt() }
+			val groupChargedUnits = if (r.groupId != null && r.groupId > 0 && groupLimit > 0) {
+				db.one(
+					"SELECT group_units FROM ai_usage WHERE request_key=?",
 					listOf(reservation.requestKey)
-				) { number(it, "charged_units").toInt() })
+				) { number(it, "group_units").toInt() }
+			} else null
+
+			LLMQuotaView(
+				limit = r.limit,
+				used = finalUsed,
+				remaining = r.limit - finalUsed,
+				resetAtEpochSeconds = r.reset,
+				paidCredits = balance(r.uid),
+				chargedUnits = chargedUnits,
+				groupLimit = if (r.groupId != null && r.groupId > 0 && groupLimit > 0) groupLimit else null,
+				groupUsed = finalGroupUsed,
+				groupRemaining = finalGroupRemaining,
+				groupChargedUnits = groupChargedUnits,
+			)
 		}
 	}
 
@@ -408,7 +619,7 @@ class SqlLLMQuotaStore(private val db: ReactiveDatabase) : LLMQuotaStore {
 				listOf(reservation.requestKey)
 			)
 			if (usage != null) db.execute(
-				"INSERT INTO ai_usage (request_key,user_id,conversation_id,input_tokens,output_tokens,cached_tokens,reasoning_tokens,actual_cost,charged_units,weekly_units,paid_units,created_at) VALUES (?,?,?,?,?,?,?,?,?,0,0,?)",
+				"INSERT INTO ai_usage (request_key,user_id,conversation_id,input_tokens,output_tokens,cached_tokens,reasoning_tokens,actual_cost,charged_units,weekly_units,paid_units,created_at,group_id,group_units) VALUES (?,?,?,?,?,?,?,?,?,0,0,?,?,0)",
 				listOf(
 					reservation.requestKey,
 					r.uid,
@@ -419,7 +630,8 @@ class SqlLLMQuotaStore(private val db: ReactiveDatabase) : LLMQuotaStore {
 					usage.reasoningTokens,
 					usage.actualCostCny,
 					usage.chargedUnits,
-					Instant.now().epochSecond
+					Instant.now().epochSecond,
+					r.groupId,
 				)
 			)
 		}
@@ -438,7 +650,7 @@ class SqlLLMQuotaStore(private val db: ReactiveDatabase) : LLMQuotaStore {
 			db.one("SELECT user_id FROM ai_quota_account WHERE user_id=? FOR UPDATE", listOf(userId)) { true }
 			val candidates = db.all(
 				"""
-				SELECT request_key,period,weekly_units,paid_units,budget_period,free_reserved
+				SELECT request_key,period,weekly_units,paid_units,budget_period,free_reserved,group_id,group_units
 				FROM ai_quota_reservation
 				WHERE user_id=? AND status='pending' AND created_at<=?
 				  AND NOT EXISTS (
@@ -455,6 +667,8 @@ class SqlLLMQuotaStore(private val db: ReactiveDatabase) : LLMQuotaStore {
 					number(it, "paid_units").toInt(),
 					it.get("budget_period", String::class.java)!!,
 					it.get("free_reserved") as BigDecimal,
+					(it.get("group_id") as? Number)?.toLong(),
+					(it.get("group_units") as? Number)?.toInt() ?: 0,
 				)
 			}
 			var cancelled = 0
@@ -468,14 +682,24 @@ class SqlLLMQuotaStore(private val db: ReactiveDatabase) : LLMQuotaStore {
 						listOf(candidate.requestKey)
 					) { true } == true
 				) continue
-				db.execute(
-					"UPDATE ai_weekly_usage SET used=used-? WHERE user_id=? AND period=?",
-					listOf(candidate.weekly, userId, candidate.period)
-				)
-				db.execute(
-					"UPDATE ai_quota_account SET paid_credits=paid_credits+? WHERE user_id=?",
-					listOf(candidate.paid, userId)
-				)
+				if (candidate.groupId != null && candidate.groupUnits > 0) {
+					db.execute(
+						"UPDATE ai_group_weekly_usage SET used=GREATEST(0, used-?) WHERE group_id=? AND period=?",
+						listOf(candidate.groupUnits, candidate.groupId, candidate.period)
+					)
+				}
+				if (candidate.weekly > 0) {
+					db.execute(
+						"UPDATE ai_weekly_usage SET used=used-? WHERE user_id=? AND period=?",
+						listOf(candidate.weekly, userId, candidate.period)
+					)
+				}
+				if (candidate.paid > 0) {
+					db.execute(
+						"UPDATE ai_quota_account SET paid_credits=paid_credits+? WHERE user_id=?",
+						listOf(candidate.paid, userId)
+					)
+				}
 				db.execute(
 					"UPDATE ai_free_budget SET reserved_cost=reserved_cost-? WHERE period=?",
 					listOf(candidate.freeReserved, candidate.month)
@@ -484,10 +708,12 @@ class SqlLLMQuotaStore(private val db: ReactiveDatabase) : LLMQuotaStore {
 					"UPDATE ai_quota_reservation SET status='refunded' WHERE request_key=?",
 					listOf(candidate.requestKey)
 				)
-				db.execute(
-					"INSERT INTO ai_credit_ledger (user_id,reference_id,delta,kind,created_at) VALUES (?,?,?,'refund',?)",
-					listOf(userId, candidate.requestKey, candidate.paid, now)
-				)
+				if (candidate.paid > 0) {
+					db.execute(
+						"INSERT INTO ai_credit_ledger (user_id,reference_id,delta,kind,created_at) VALUES (?,?,?,'refund',?)",
+						listOf(userId, candidate.requestKey, candidate.paid, now)
+					)
+				}
 				cancelled++
 			}
 			cancelled
@@ -548,8 +774,9 @@ class SqlLLMQuotaStore(private val db: ReactiveDatabase) : LLMQuotaStore {
 			val period = it.get("period", String::class.java)!!
 			val limit = number(it, "weekly_limit").toInt()
 			val reset = number(it, "reset_at")
+			val groupId = (it.get("group_id") as? Number)?.toLong()
 			val reservation =
-				LLMQuotaReservation("llm:weekly:$period:$userId", key, reset, LLMQuotaView(limit, 0, 0, reset), userId)
+				LLMQuotaReservation("llm:weekly:$period:$userId", key, reset, LLMQuotaView(limit, 0, 0, reset), userId, groupId = groupId)
 			reservation to AiQuotaUsage(
 				number(it, "input_tokens"),
 				number(it, "output_tokens"),

@@ -1,7 +1,7 @@
 package org.qo.services.llmServices
 
-import org.junit.jupiter.api.io.TempDir
 import kotlinx.coroutines.runBlocking
+import org.junit.jupiter.api.io.TempDir
 import org.springframework.context.annotation.AnnotationConfigApplicationContext
 import java.nio.file.Files
 import java.nio.file.Path
@@ -9,6 +9,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class LLMMemoryServiceTest {
@@ -86,6 +87,110 @@ class LLMMemoryServiceTest {
 		assertEquals(2, repository.findByGroup(100).size)
 		assertTrue(repository.isMigrationComplete("legacy-memory-txt-v1"))
 		assertTrue(Files.exists(legacy))
+	}
+
+	@Test
+	fun `infers tier from category and sets episodic ttl default`() = runBlocking {
+		val service = service(FakeMemoryRepository())
+		val core = service.upsertMemory(100, "Alice", "fav", "喜欢绿茶", category = "preference")!!
+		assertEquals("core", core.record.tier)
+		assertNull(core.record.expiresAt)
+
+		val now = System.currentTimeMillis()
+		val episodic = service.upsertMemory(100, "项目", "status", "第一阶段已完成", category = "status")!!
+		assertEquals("episodic", episodic.record.tier)
+		assertNotNull(episodic.record.expiresAt)
+		assertTrue(episodic.record.expiresAt!! >= now + 13 * 86_400_000L)
+
+		val semantic = service.upsertMemory(100, "文档", "link", "https://wiki.example.com", category = "general")!!
+		assertEquals("semantic", semantic.record.tier)
+
+		val explicit = service.upsertMemory(100, "Bob", "identity", "副服主", tier = "core", importance = 5)!!
+		assertEquals("core", explicit.record.tier)
+		assertEquals(5, explicit.record.importance)
+	}
+
+	@Test
+	fun `merges user global memories when searching in group chat`() = runBlocking {
+		val service = service(FakeMemoryRepository())
+		// User 42's global preference
+		service.upsertMemory(0L, "Alice", "global_drink", "无论在哪个群都只喝乌龙茶", tier = "core", sourceUid = "42")
+		// Group 100's specific role
+		service.upsertMemory(100L, "Alice", "group_role", "群100首席建筑师", tier = "semantic", sourceUid = "42")
+
+		// Search in group 100 with includeUserGlobalUid = "42"
+		val group100Matches = service.search(100L, "Alice", includeUserGlobalUid = "42")
+		assertEquals(2, group100Matches.size)
+		assertTrue(group100Matches.any { it.fact.contains("乌龙茶") })
+		assertTrue(group100Matches.any { it.fact.contains("首席建筑师") })
+
+		// Search in group 200 with includeUserGlobalUid = "42" gets global memory but not group 100 memory
+		val group200Matches = service.search(200L, "Alice", includeUserGlobalUid = "42")
+		assertEquals(1, group200Matches.size)
+		assertEquals("无论在哪个群都只喝乌龙茶", group200Matches.single().fact)
+
+		// Search in group 100 for other user 99 does not get user 42's global memory
+		val group100OtherUser = service.search(100L, "Alice", includeUserGlobalUid = "99")
+		assertEquals(1, group100OtherUser.size)
+		assertEquals("群100首席建筑师", group100OtherUser.single().fact)
+
+		// Tier filtering
+		val onlyCore = service.search(100L, "Alice", includeUserGlobalUid = "42", tierFilter = "core")
+		assertEquals(1, onlyCore.size)
+		assertEquals("core", onlyCore.single().tier)
+	}
+
+	@Test
+	fun `buildContext injects core memories unconditionally and partitions layers`() = runBlocking {
+		val service = service(FakeMemoryRepository())
+		service.upsertMemory(100L, "规则", "core_rule", "群内严禁广告和刷屏", tier = "core", importance = 5)
+		service.upsertMemory(100L, "活动", "event_progress", "主城地铁东线正在铺轨", tier = "episodic", importance = 3)
+		service.upsertMemory(100L, "历史", "ancient_winner", "第一届建筑大赛冠军是 Charlie", tier = "semantic", importance = 2)
+
+		// Unrelated query: "今天有什么好吃的"
+		val context = service.buildContext(100L, "今天有什么好吃的", 42L)
+		assertNotNull(context)
+		// Core memory must be present even though "今天有什么好吃的" doesn't match "规则" or "广告"
+		assertTrue(context.contains("【Core 核心常驻记忆】"))
+		assertTrue(context.contains("群内严禁广告和刷屏"))
+		// Episodic memory is present due to recent decay bonus
+		assertTrue(context.contains("【Episodic 近期情景记忆】"))
+		assertTrue(context.contains("主城地铁东线正在铺轨"))
+		// Semantic memory about Charlie should NOT be included because question doesn't match
+		assertFalse(context.contains("Charlie"))
+
+		// Matching query: "建筑大赛"
+		val matchedContext = service.buildContext(100L, "谁赢了建筑大赛", 42L)
+		assertNotNull(matchedContext)
+		assertTrue(matchedContext.contains("【Semantic 长期相关记忆】"))
+		assertTrue(matchedContext.contains("Charlie"))
+	}
+
+	@Test
+	fun `buildContext works for private chat with null groupId and valid uid`() = runBlocking {
+		val service = service(FakeMemoryRepository())
+		service.upsertMemory(0L, "个人偏好", "code_style", "喜欢使用 Kotlin 和响应式编程", tier = "core", sourceUid = "42")
+
+		val context = service.buildContext(null, "写一段代码", 42L)
+		assertNotNull(context)
+		assertTrue(context.contains("【Core 核心常驻记忆】"))
+		assertTrue(context.contains("[core/global]"))
+		assertTrue(context.contains("喜欢使用 Kotlin 和响应式编程"))
+
+		// Missing both groupId and uid returns null
+		assertNull(service.buildContext(null, "写一段代码", null))
+	}
+
+	@Test
+	fun `forgets by subject and memoryKey in global and group scopes`() = runBlocking {
+		val service = service(FakeMemoryRepository())
+		service.upsertMemory(0L, "Alice", "temp_status", "正在参加会议", tier = "episodic", sourceUid = "42")
+		assertEquals(1, service.search(0L, "Alice", includeUserGlobalUid = "42").size)
+
+		val removed = service.forget(0L, null, null, sourceUid = "42", subject = "Alice", memoryKey = "temp_status")
+		assertEquals(1, removed.size)
+		assertEquals("正在参加会议", removed.single().fact)
+		assertTrue(service.search(0L, "Alice", includeUserGlobalUid = "42").isEmpty())
 	}
 
 	private fun service(repository: LLMMemoryRepository): LLMMemoryService = LLMMemoryService(

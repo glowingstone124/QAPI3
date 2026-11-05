@@ -156,6 +156,9 @@ internal suspend fun LLMServices.enrichMessages(
 	stableContextParts.add(LLMServices.hardOutputRules(enableMarkdown, isWeb))
 	val groupConversation = groupContext != null || requester?.groupId != null
 	if (groupConversation && !isWeb) stableContextParts.add(LLMGroupChatPolicy.systemRules)
+	if (!isWeb && requester?.source == LLMSource.QQ.value && requester.groupId == null) {
+		stableContextParts.add("当前处于 1对1 私聊场景。以自然亲切、专属针对当前用户的聊天语气回应，无需多人群聊防串味限制。")
+	}
 	if (botReplyMessages && requester?.source == LLMSource.QQ.value) stableContextParts.add(LLMBotReplyFormat.systemRules)
 	if (groupImages?.metadata()?.size()?.let { it > 0 } == true) stableContextParts.add(LLMGroupImages.systemRules)
 	requester?.takeIf { !isWeb }?.let { currentRequester ->
@@ -168,7 +171,7 @@ internal suspend fun LLMServices.enrichMessages(
 		ragService.buildContext(userQuestion, qoRequester.groupId)?.let(referenceContextParts::add)
 	}
 	if (!isWeb) {
-		memoryService.buildContext(requester?.groupId, userQuestion)?.let {
+		memoryService.buildContext(requester?.groupId, userQuestion, requester?.uid)?.let {
 			referenceContextParts.add(it)
 		}
 	}

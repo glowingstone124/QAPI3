@@ -18,8 +18,8 @@ class GetUserQuotaTool @Autowired constructor(
 	override val definition = ToolSupport.functionTool(
 		name = id,
 		description = """
-			查询当前用户每周剩余的 LLM Units、Paid Credits、每周额度上限与账户类型（QO绑定用户或游客）。
-			当用户询问自己本周额度、剩余 Credits、对话次数限制，或者咨询如何获取更多额度时使用。
+			查询当前用户的额度与状态：在群聊中同时查询本群共享周额度池（group_limit, group_used, group_remaining）以及用户个人的每周 LLM Units、Paid Credits、额度上限与账户类型（QO绑定用户或游客）。
+			当用户询问自己或当前群本周额度、剩余 Credits、对话次数限制，或者咨询如何获取更多额度时使用。
 		""".trimIndent(),
 		properties = linkedMapOf(
 			"target_uid" to ToolSupport.property(
@@ -39,7 +39,7 @@ class GetUserQuotaTool @Autowired constructor(
 		if (targetUid != currentUid) return ToolSupport.errorResult("forbidden", "只能查询自己的额度")
 		val user = runCatching { userORM.readAsync(targetUid) }.getOrNull()
 		val hasAccount = user != null
-		val decision = dailyQuotaService.snapshot(targetUid, hasAccount)
+		val decision = dailyQuotaService.snapshot(targetUid, hasAccount, groupId = context.groupId)
 		if (decision.status == LLMQuotaStatus.UNAVAILABLE) {
 			return ToolSupport.errorResult("quota_unavailable", "额度服务暂时不可用")
 		}
@@ -55,6 +55,9 @@ class GetUserQuotaTool @Autowired constructor(
 			addProperty("reset_at", view.resetAtEpochSeconds)
 			addProperty("paid_credits", view.paidCredits)
 			addProperty("period", "weekly")
+			view.groupLimit?.let { addProperty("group_limit", it) }
+			view.groupUsed?.let { addProperty("group_used", it) }
+			view.groupRemaining?.let { addProperty("group_remaining", it) }
 			if (!hasAccount) {
 				val (guestLimit, accountLimit) = dailyQuotaService.weeklyLimits()
 				addProperty("tip", "QQ 身份每周 $guestLimit Units。注册 QO 账户后同一身份提升至每周 $accountLimit Units，已用额度保留。")

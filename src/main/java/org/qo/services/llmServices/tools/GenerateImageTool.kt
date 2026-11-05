@@ -117,7 +117,13 @@ class GenerateImageTool @Autowired constructor(
 		val referenceId = "img:${context.groupId ?: "p"}:$qqUid:${UUID.randomUUID().toString().take(12)}"
 		val deduction: CreditDeductionResult? = if (quotaService != null && cost > 0) {
 			val hasAccount = runCatching { userORM.readAsync(qqUid) }.getOrNull() != null
-			val res = quotaService.deductQuota(qqUid, cost, referenceId, hasAccount = hasAccount)
+			val res = quotaService.deductQuota(
+				qqUid = qqUid,
+				amount = cost,
+				referenceId = referenceId,
+				hasAccount = hasAccount,
+				groupId = context.groupId,
+			)
 			if (!res.success) {
 				return ToolSupport.errorResult(
 					"insufficient_credits",
@@ -137,6 +143,8 @@ class GenerateImageTool @Autowired constructor(
 						weeklyAmount = deduction.weeklyDeducted,
 						paidAmount = deduction.paidDeducted,
 						referenceId = referenceId,
+						groupId = context.groupId,
+						groupAmount = deduction.groupDeducted,
 					)
 				}
 			}
@@ -216,30 +224,39 @@ class GenerateImageTool @Autowired constructor(
 			else -> imageUrl!!
 		}
 
-		val groupId = context.groupId
-		if (groupId != null) {
-			val botEndpoint = config.qbotEndpoint ?: System.getenv("QBOT_ENDPOINT")?.trim().orEmpty()
-			val botToken = config.qbotToken ?: System.getenv("QBOT_TOKEN")?.trim().orEmpty()
-			if (botEndpoint.isNotBlank() && botToken.isNotBlank()) {
-				val sendResult = sendImageToBot(botEndpoint, botToken, groupId, imagePayload, prompt)
-				if (!sendResult.success) {
-					refundOnError()
-					return ToolSupport.errorResult(
-						"bot_send_failed",
-						"图片已生成，但推送至 QQ 群失败：${sendResult.error}"
-					)
-				}
-				return ToolSupport.result(id) {
-					addProperty("status", "success")
-					addProperty("message", "图片已成功使用 $model 生成，并已直接发送至当前 QQ 群聊天中。")
-					addProperty("prompt", prompt)
-					revisedPrompt?.let { addProperty("revised_prompt", it) }
-					addProperty("credits_consumed", cost)
-					if (deduction != null) {
-						addProperty("weekly_units_deducted", deduction.weeklyDeducted)
-						addProperty("paid_credits_deducted", deduction.paidDeducted)
-						addProperty("remaining_credits", deduction.remainingCredits)
+		val botEndpoint = config.qbotEndpoint ?: System.getenv("QBOT_ENDPOINT")?.trim().orEmpty()
+		val botToken = config.qbotToken ?: System.getenv("QBOT_TOKEN")?.trim().orEmpty()
+		if (botEndpoint.isNotBlank() && botToken.isNotBlank()) {
+			val sendResult = sendImageToBot(
+				botEndpoint = botEndpoint,
+				botToken = botToken,
+				groupId = context.groupId,
+				userId = qqUid,
+				imagePayload = imagePayload,
+				prompt = prompt,
+			)
+			if (!sendResult.success) {
+				refundOnError()
+				val targetDesc = if (context.groupId != null) "QQ 群" else "QQ 私聊"
+				return ToolSupport.errorResult(
+					"bot_send_failed",
+					"图片已生成，但推送至 $targetDesc 失败：${sendResult.error}"
+				)
+			}
+			return ToolSupport.result(id) {
+				addProperty("status", "success")
+				val targetDesc = if (context.groupId != null) "当前 QQ 群聊天" else "当前 QQ 私聊"
+				addProperty("message", "图片已成功使用 $model 生成，并已直接发送至 $targetDesc 中。")
+				addProperty("prompt", prompt)
+				revisedPrompt?.let { addProperty("revised_prompt", it) }
+				addProperty("credits_consumed", cost)
+				if (deduction != null) {
+					if (deduction.groupDeducted > 0) {
+						addProperty("group_units_deducted", deduction.groupDeducted)
 					}
+					addProperty("weekly_units_deducted", deduction.weeklyDeducted)
+					addProperty("paid_credits_deducted", deduction.paidDeducted)
+					addProperty("remaining_credits", deduction.remainingCredits)
 				}
 			}
 		}
@@ -251,6 +268,9 @@ class GenerateImageTool @Autowired constructor(
 			revisedPrompt?.let { addProperty("revised_prompt", it) }
 			addProperty("credits_consumed", cost)
 			if (deduction != null) {
+				if (deduction.groupDeducted > 0) {
+					addProperty("group_units_deducted", deduction.groupDeducted)
+				}
 				addProperty("weekly_units_deducted", deduction.weeklyDeducted)
 				addProperty("paid_credits_deducted", deduction.paidDeducted)
 				addProperty("remaining_credits", deduction.remainingCredits)
@@ -269,12 +289,17 @@ class GenerateImageTool @Autowired constructor(
 	private suspend fun sendImageToBot(
 		botEndpoint: String,
 		botToken: String,
-		groupId: Long,
+		groupId: Long?,
+		userId: Long?,
 		imagePayload: String,
 		prompt: String,
 	): BotSendResult {
 		val payload = ToolSupport.gson.toJson(JsonObject().apply {
-			addProperty("group_id", groupId)
+			if (groupId != null) {
+				addProperty("group_id", groupId)
+			} else if (userId != null) {
+				addProperty("user_id", userId)
+			}
 			addProperty("image", imagePayload)
 			addProperty("prompt", prompt)
 		})

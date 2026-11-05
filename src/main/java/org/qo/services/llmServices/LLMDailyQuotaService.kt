@@ -41,6 +41,10 @@ data class LLMQuotaView(
 	val resetAtEpochSeconds: Long,
 	val paidCredits: Int = 0,
 	val chargedUnits: Int? = null,
+	val groupLimit: Int? = null,
+	val groupUsed: Int? = null,
+	val groupRemaining: Int? = null,
+	val groupChargedUnits: Int? = null,
 )
 
 data class LLMQuotaReservation(
@@ -50,6 +54,7 @@ data class LLMQuotaReservation(
 	val view: LLMQuotaView,
 	val qqUid: Long = 0,
 	val reservedUnits: Int = 1,
+	val groupId: Long? = null,
 )
 
 data class LLMQuotaDecision(
@@ -62,6 +67,8 @@ data class LLMQuotaStoreDecision(
 	val status: LLMQuotaStatus,
 	val used: Int,
 	val paidCredits: Int = 0,
+	val groupUsed: Int? = null,
+	val groupLimit: Int? = null,
 )
 
 data class CreditDeductionResult(
@@ -69,6 +76,7 @@ data class CreditDeductionResult(
 	val remainingCredits: Int,
 	val weeklyDeducted: Int = 0,
 	val paidDeducted: Int = 0,
+	val groupDeducted: Int = 0,
 	val error: String? = null,
 )
 
@@ -83,6 +91,7 @@ interface LLMQuotaStore {
 	suspend fun refund(reservation: LLMQuotaReservation): Int?
 	suspend fun refundUsage(reservation: LLMQuotaReservation, usage: AiQuotaUsage?): Int? = refund(reservation)
 	suspend fun used(quotaKey: String): Int?
+	suspend fun groupUsed(groupId: Long, period: String): Int? = 0
 	suspend fun reserveSubsidy(source: String, summary: LLMSummaryConfig, estimate: java.math.BigDecimal): String? =
 		null
 
@@ -99,7 +108,9 @@ interface LLMQuotaStore {
 		limit: Int,
 		amount: Int,
 		referenceId: String,
-		kind: String = "image"
+		kind: String = "image",
+		groupId: Long? = null,
+		groupLimit: Int = 0,
 	): CreditDeductionResult = CreditDeductionResult(true, 0, 0, 0)
 	suspend fun refundQuota(
 		qqUid: Long,
@@ -107,15 +118,20 @@ interface LLMQuotaStore {
 		weeklyAmount: Int,
 		paidAmount: Int,
 		referenceId: String,
-		kind: String = "refund"
+		kind: String = "refund",
+		groupId: Long? = null,
+		groupAmount: Int = 0,
 	): Boolean = true
 	suspend fun reserveUnits(
 		principal: LLMPrincipal, quotaKey: String, requestKey: String, limit: Int,
-		expiresAt: Long, units: Int, mode: String, provider: String, model: String, estimatedCost: java.math.BigDecimal
+		expiresAt: Long, units: Int, mode: String, provider: String, model: String, estimatedCost: java.math.BigDecimal,
+		groupId: Long? = null, groupLimit: Int = 0,
 	): LLMQuotaStoreDecision? =
 		reserve(quotaKey, requestKey, limit, expiresAt)
 
 	suspend fun settle(reservation: LLMQuotaReservation, usage: AiQuotaUsage): LLMQuotaView? = null
+	suspend fun settle(reservation: LLMQuotaReservation, usage: AiQuotaUsage, groupLimit: Int): LLMQuotaView? =
+		settle(reservation, usage)
 }
 
 /** The historical class name is retained for injection compatibility; all windows are weekly. */
@@ -127,15 +143,33 @@ open class LLMDailyQuotaService @Autowired constructor(
 	@Value("\${qapi.llm.quota-zone:Asia/Shanghai}") quotaZoneName: String = "Asia/Shanghai",
 	@Value("\${qapi.llm.promotion.multiplier:4}") configuredPromotionMultiplier: Int = 4,
 	@Value("\${qapi.llm.promotion.ends-at:2026-11-01T23:59:59+08:00}") configuredPromotionEndsAt: String = "2026-11-01T23:59:59+08:00",
+	@Value("\${qapi.llm.group-weekly-limit:500}") configuredGroupWeeklyLimit: Int = 500,
+	@Value("\${qapi.llm.pilot-quota-groups:none}") configuredPilotQuotaGroups: String = System.getenv("LLM_PILOT_QUOTA_GROUP_IDS") ?: "none",
 ) {
 	val weeklyLimit = configuredDailyLimit.coerceAtLeast(1)
 	val guestWeeklyLimit = configuredGuestDailyLimit.coerceAtLeast(1)
+	val groupWeeklyLimit = configuredGroupWeeklyLimit.coerceAtLeast(0)
+	private val pilotGroupsAcceptAll = configuredPilotQuotaGroups.trim() == "*"
+	private val pilotGroupIds: Set<Long> = if (pilotGroupsAcceptAll) emptySet() else {
+		configuredPilotQuotaGroups.split(',', '，', ';', '；', ' ')
+			.mapNotNull { it.trim().toLongOrNull() }
+			.toSet()
+	}
 	private val quotaZone = ZoneId.of(quotaZoneName)
 	private val promotionMultiplier = configuredPromotionMultiplier.coerceAtLeast(1)
 	private val promotionEndsAtExclusive = OffsetDateTime.parse(configuredPromotionEndsAt).toInstant().plusSeconds(1)
 
 	constructor(store: LLMQuotaStore, configuredDailyLimit: Int, quotaZoneName: String) :
 			this(store, configuredDailyLimit, 160, quotaZoneName)
+
+	fun isGroupQuotaEnabled(groupId: Long?): Boolean =
+		groupId != null && groupId > 0 && groupWeeklyLimit > 0 && (pilotGroupsAcceptAll || groupId in pilotGroupIds)
+
+	fun effectiveGroupLimit(groupId: Long?, now: Instant = Instant.now()): Int {
+		if (!isGroupQuotaEnabled(groupId)) return 0
+		val multiplier = if (promotionMultiplier > 1 && now.isBefore(promotionEndsAtExclusive)) promotionMultiplier else 1
+		return (groupWeeklyLimit.toLong() * multiplier).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+	}
 
 	fun effectiveLimit(hasAccount: Boolean, now: Instant = Instant.now()): Int {
 		val baseLimit = if (hasAccount) weeklyLimit else guestWeeklyLimit
@@ -149,7 +183,8 @@ open class LLMDailyQuotaService @Autowired constructor(
 	suspend fun reserve(
 		principal: LLMPrincipal, requestId: String = UUID.randomUUID().toString(),
 		now: Instant = Instant.now(), estimatedUnits: Int = 1, mode: String = "fast",
-		provider: String = "", model: String = "", estimatedCost: java.math.BigDecimal = COST_PER_UNIT
+		provider: String = "", model: String = "", estimatedCost: java.math.BigDecimal = COST_PER_UNIT,
+		groupId: Long? = null,
 	): LLMQuotaDecision {
 		require(principal.qqUid > 0 && estimatedUnits > 0)
 		val limit = effectiveLimit(principal.hasAccount, now)
@@ -160,6 +195,9 @@ open class LLMDailyQuotaService @Autowired constructor(
 			.joinToString("") { "%02x".format(it) }
 		// A QQ identity and request ID are shared across every entry point.
 		val requestKey = "llm:weekly-request:${principal.qqUid}:$digest"
+		val groupLimit = effectiveGroupLimit(groupId, now)
+		val enabledGroupId = if (isGroupQuotaEnabled(groupId)) groupId else null
+
 		val result = store.reserveUnits(
 			principal,
 			key,
@@ -170,18 +208,46 @@ open class LLMDailyQuotaService @Autowired constructor(
 			mode,
 			provider,
 			model,
-			estimatedCost
+			estimatedCost,
+			enabledGroupId,
+			groupLimit,
 		)
 			?: return LLMQuotaDecision(LLMQuotaStatus.UNAVAILABLE, view(0, limit, reset, 0))
-		val view = view(result.used, limit, reset, result.paidCredits)
+		val groupRemaining = if (result.groupLimit != null && result.groupUsed != null) {
+			(result.groupLimit - result.groupUsed).coerceAtLeast(0)
+		} else null
+		val view = view(
+			used = result.used,
+			limit = limit,
+			reset = reset,
+			paid = result.paidCredits,
+			groupLimit = result.groupLimit,
+			groupUsed = result.groupUsed,
+			groupRemaining = groupRemaining,
+		)
 		return LLMQuotaDecision(
 			result.status, view, if (result.status == LLMQuotaStatus.ACCEPTED)
-				LLMQuotaReservation(key, requestKey, reset, view, principal.qqUid, estimatedUnits) else null
+				LLMQuotaReservation(
+					quotaKey = key,
+					requestKey = requestKey,
+					expiresAtEpochSeconds = reset,
+					view = view,
+					qqUid = principal.qqUid,
+					reservedUnits = estimatedUnits,
+					groupId = enabledGroupId,
+				) else null
 		)
 	}
 
-	suspend fun snapshot(qqUid: Long, now: Instant = Instant.now()): LLMQuotaDecision = snapshot(qqUid, true, now)
-	suspend fun snapshot(qqUid: Long, hasAccount: Boolean, now: Instant = Instant.now()): LLMQuotaDecision {
+	suspend fun snapshot(qqUid: Long, now: Instant = Instant.now()): LLMQuotaDecision =
+		snapshot(qqUid, true, now, null)
+
+	suspend fun snapshot(
+		qqUid: Long,
+		hasAccount: Boolean,
+		now: Instant = Instant.now(),
+		groupId: Long? = null,
+	): LLMQuotaDecision {
 		require(qqUid > 0)
 		val limit = effectiveLimit(hasAccount, now)
 		val period = period(now)
@@ -192,14 +258,39 @@ open class LLMDailyQuotaService @Autowired constructor(
 				view(0, limit, reset, 0)
 			)
 			val paid = store.balance(qqUid)
-			LLMQuotaDecision(
-				if (used >= limit && paid <= 0) LLMQuotaStatus.EXCEEDED else LLMQuotaStatus.ACCEPTED,
-				view(used, limit, reset, paid)
+			val groupEnabled = isGroupQuotaEnabled(groupId)
+			val groupLimit = if (groupEnabled) effectiveGroupLimit(groupId, now) else null
+			val groupUsed = if (groupEnabled && groupId != null) {
+				store.groupUsed(groupId, period.toString()) ?: 0
+			} else null
+			val groupRemaining = if (groupLimit != null && groupUsed != null) {
+				(groupLimit - groupUsed).coerceAtLeast(0)
+			} else null
+
+			val isAccepted = if (groupRemaining != null && groupRemaining > 0) {
+				true
+			} else {
+				used < limit || paid > 0
+			}
+
+			val status = if (isAccepted) LLMQuotaStatus.ACCEPTED else LLMQuotaStatus.EXCEEDED
+			val view = view(
+				used = used,
+				limit = limit,
+				reset = reset,
+				paid = paid,
+				groupLimit = groupLimit,
+				groupUsed = groupUsed,
+				groupRemaining = groupRemaining,
 			)
+			LLMQuotaDecision(status, view)
 		} catch (_: Exception) {
 			LLMQuotaDecision(LLMQuotaStatus.UNAVAILABLE, view(0, limit, reset, 0))
 		}
 	}
+
+	suspend fun snapshot(qqUid: Long, groupId: Long?): LLMQuotaDecision =
+		snapshot(qqUid, hasAccount = true, now = Instant.now(), groupId = groupId)
 
 	suspend fun refundUsage(reservation: LLMQuotaReservation, usage: AiQuotaUsage?) =
 		store.refundUsage(reservation, usage)
@@ -215,10 +306,22 @@ open class LLMDailyQuotaService @Autowired constructor(
 		referenceId: String,
 		hasAccount: Boolean = true,
 		now: Instant = Instant.now(),
+		groupId: Long? = null,
 	): CreditDeductionResult {
 		val limit = effectiveLimit(hasAccount, now)
 		val p = period(now).toString()
-		return store.deductQuota(qqUid, p, limit, amount, referenceId, "image")
+		val groupLimit = effectiveGroupLimit(groupId, now)
+		val enabledGroupId = if (isGroupQuotaEnabled(groupId)) groupId else null
+		return store.deductQuota(
+			qqUid = qqUid,
+			period = p,
+			limit = limit,
+			amount = amount,
+			referenceId = referenceId,
+			kind = "image",
+			groupId = enabledGroupId,
+			groupLimit = groupLimit,
+		)
 	}
 	open suspend fun refundQuota(
 		qqUid: Long,
@@ -226,29 +329,63 @@ open class LLMDailyQuotaService @Autowired constructor(
 		paidAmount: Int,
 		referenceId: String,
 		now: Instant = Instant.now(),
+		groupId: Long? = null,
+		groupAmount: Int = 0,
 	): Boolean {
 		val p = period(now).toString()
-		return store.refundQuota(qqUid, p, weeklyAmount, paidAmount, referenceId, "refund")
+		return store.refundQuota(
+			qqUid = qqUid,
+			period = p,
+			weeklyAmount = weeklyAmount,
+			paidAmount = paidAmount,
+			referenceId = referenceId,
+			kind = "refund",
+			groupId = groupId,
+			groupAmount = groupAmount,
+		)
 	}
 	suspend fun reserveSubsidy(source: String, summary: LLMSummaryConfig, estimate: java.math.BigDecimal) =
 		store.reserveSubsidy(source, summary, estimate)
 
 	suspend fun settleSubsidy(id: String, cost: java.math.BigDecimal?) = store.settleSubsidy(id, cost)
 	suspend fun retain(reservation: LLMQuotaReservation, usage: AiQuotaUsage?) = store.retain(reservation, usage)
-	suspend fun settle(reservation: LLMQuotaReservation, usage: AiQuotaUsage): LLMQuotaView =
-		requireNotNull(
+	suspend fun settle(reservation: LLMQuotaReservation, usage: AiQuotaUsage): LLMQuotaView {
+		val groupLimit = reservation.view.groupLimit ?: effectiveGroupLimit(reservation.groupId)
+		return requireNotNull(
 			store.settle(
 				reservation,
-				usage
+				usage,
+				groupLimit,
 			)
 		) { "Quota settlement unavailable; reservation retained for reconciliation" }
+	}
 
 	fun period(now: Instant): LocalDate = now.atZone(quotaZone).toLocalDate()
 		.with(java.time.temporal.TemporalAdjusters.previousOrSame(java.time.DayOfWeek.MONDAY))
 
 	private fun quotaKey(uid: Long, period: LocalDate) = "llm:weekly:$period:$uid"
-	private fun view(used: Int, limit: Int, reset: Long, paid: Int) =
-		LLMQuotaView(limit, used.coerceAtLeast(0), limit - used.coerceAtLeast(0), reset, paid)
+	private fun view(
+		used: Int,
+		limit: Int,
+		reset: Long,
+		paid: Int,
+		chargedUnits: Int? = null,
+		groupLimit: Int? = null,
+		groupUsed: Int? = null,
+		groupRemaining: Int? = null,
+		groupChargedUnits: Int? = null,
+	) = LLMQuotaView(
+		limit = limit,
+		used = used.coerceAtLeast(0),
+		remaining = limit - used.coerceAtLeast(0),
+		resetAtEpochSeconds = reset,
+		paidCredits = paid,
+		chargedUnits = chargedUnits,
+		groupLimit = groupLimit,
+		groupUsed = groupUsed?.coerceAtLeast(0),
+		groupRemaining = groupRemaining,
+		groupChargedUnits = groupChargedUnits,
+	)
 
 	companion object {
 		val COST_PER_UNIT = java.math.BigDecimal("0.005")

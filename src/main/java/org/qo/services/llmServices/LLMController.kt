@@ -154,6 +154,30 @@ class LLMController(
 		return jsonResponse(result.body, HttpStatus.valueOf(result.status), result.quota)
 	}
 
+	@GetMapping("/v1/quota/bot", produces = [MediaType.APPLICATION_JSON_VALUE])
+	suspend fun botQuota(
+		@RequestHeader("token", required = false) token: String?,
+		@RequestHeader(HttpHeaders.AUTHORIZATION, required = false) authorization: String?,
+		@RequestHeader("X-QQ-UID", required = false) headerUid: Long?,
+		@RequestHeader("X-QQ-Group-ID", required = false) headerGroupId: Long?,
+		@RequestHeader("X-QQ-Name", required = false) qqName: String?,
+		@RequestParam("uid", required = false) paramUid: Long?,
+		@RequestParam("group_id", required = false) paramGroupId: Long?,
+	): ResponseEntity<String> {
+		val requestToken = AuthTokens.resolve(token, authorization)
+			?: return jsonResponse(
+				"""{"error":{"message":"缺少或无效的令牌","type":"invalid_token","code":"invalid_token"}}""",
+				HttpStatus.UNAUTHORIZED
+			)
+		val qqUid = headerUid ?: paramUid ?: return jsonResponse(
+			"""{"error":{"message":"缺少用户 UID","type":"missing_uid","code":"missing_uid"}}""",
+			HttpStatus.BAD_REQUEST
+		)
+		val qqGroupId = headerGroupId ?: paramGroupId
+		val result = llmServices.botQuotaStatus(requestToken, qqUid, qqGroupId, qqName)
+		return jsonResponse(result.body, HttpStatus.valueOf(result.status), result.quota)
+	}
+
 	@GetMapping("/v1/bot/active-response", produces = [MediaType.APPLICATION_JSON_VALUE])
 	suspend fun getBotActiveResponse(
 		@RequestHeader("token", required = false) token: String?,

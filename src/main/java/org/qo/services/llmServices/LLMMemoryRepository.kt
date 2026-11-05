@@ -8,6 +8,8 @@ import org.springframework.stereotype.Repository
 
 interface LLMMemoryRepository {
 	suspend fun findByGroup(groupId: Long): List<LLMMemoryRecord>
+	suspend fun findByUserGlobal(sourceUid: String): List<LLMMemoryRecord> =
+		findByGroup(0L).filter { it.sourceUid == sourceUid }
 	suspend fun findByIdentity(groupId: Long, subject: String, memoryKey: String): LLMMemoryRecord?
 	suspend fun insert(record: LLMMemoryRecord): Boolean
 	suspend fun update(record: LLMMemoryRecord)
@@ -35,12 +37,15 @@ class R2dbcLLMMemoryRepository(
 				category VARCHAR(40) NOT NULL,
 				source_uid VARCHAR(128) NULL,
 				source_name VARCHAR(160) NULL,
+				tier VARCHAR(20) NOT NULL DEFAULT 'semantic',
+				importance INT NOT NULL DEFAULT 3,
 				created_at BIGINT NOT NULL,
 				updated_at BIGINT NOT NULL,
 				expires_at BIGINT NULL,
 				UNIQUE KEY uk_llm_memory_identity (group_id, subject, memory_key),
 				INDEX idx_llm_memory_group_updated (group_id, updated_at),
-				INDEX idx_llm_memory_expires (expires_at)
+				INDEX idx_llm_memory_expires (expires_at),
+				INDEX idx_llm_memory_user_global (group_id, source_uid, updated_at)
 			)
 			""".trimIndent()
 		)
@@ -52,6 +57,12 @@ class R2dbcLLMMemoryRepository(
 			)
 			""".trimIndent()
 		)
+		runCatching {
+			database.execute("ALTER TABLE llm_memories ADD COLUMN tier VARCHAR(20) NOT NULL DEFAULT 'semantic'")
+		}
+		runCatching {
+			database.execute("ALTER TABLE llm_memories ADD COLUMN importance INT NOT NULL DEFAULT 3")
+		}
 	}
 
 	@PreDestroy
@@ -61,7 +72,7 @@ class R2dbcLLMMemoryRepository(
 		schema.await()
 		return database.all(
 			"""
-			SELECT id, group_id, subject, memory_key, fact, category, source_uid, source_name, created_at, updated_at, expires_at
+			SELECT id, group_id, subject, memory_key, fact, category, source_uid, source_name, tier, importance, created_at, updated_at, expires_at
 			FROM llm_memories
 			WHERE group_id = ?
 			ORDER BY updated_at DESC
@@ -71,11 +82,25 @@ class R2dbcLLMMemoryRepository(
 		)
 	}
 
+	override suspend fun findByUserGlobal(sourceUid: String): List<LLMMemoryRecord> {
+		schema.await()
+		return database.all(
+			"""
+			SELECT id, group_id, subject, memory_key, fact, category, source_uid, source_name, tier, importance, created_at, updated_at, expires_at
+			FROM llm_memories
+			WHERE group_id = 0 AND source_uid = ?
+			ORDER BY updated_at DESC
+			""".trimIndent(),
+			listOf(sourceUid),
+			::toMemoryRecord,
+		)
+	}
+
 	override suspend fun findByIdentity(groupId: Long, subject: String, memoryKey: String): LLMMemoryRecord? {
 		schema.await()
 		return database.one(
 			"""
-			SELECT id, group_id, subject, memory_key, fact, category, source_uid, source_name, created_at, updated_at, expires_at
+			SELECT id, group_id, subject, memory_key, fact, category, source_uid, source_name, tier, importance, created_at, updated_at, expires_at
 			FROM llm_memories
 			WHERE group_id = ? AND subject = ? AND memory_key = ?
 			LIMIT 1
@@ -90,8 +115,8 @@ class R2dbcLLMMemoryRepository(
 		return database.execute(
 			"""
 			INSERT IGNORE INTO llm_memories
-			(id, group_id, subject, memory_key, fact, category, source_uid, source_name, created_at, updated_at, expires_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			(id, group_id, subject, memory_key, fact, category, source_uid, source_name, tier, importance, created_at, updated_at, expires_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			""".trimIndent(),
 			record.bindings(),
 		) == 1L
@@ -102,7 +127,7 @@ class R2dbcLLMMemoryRepository(
 		database.execute(
 			"""
 			UPDATE llm_memories
-			SET fact = ?, category = ?, source_uid = ?, source_name = ?, updated_at = ?, expires_at = ?
+			SET fact = ?, category = ?, source_uid = ?, source_name = ?, tier = ?, importance = ?, updated_at = ?, expires_at = ?
 			WHERE id = ? AND group_id = ?
 			""".trimIndent(),
 			listOf(
@@ -110,6 +135,8 @@ class R2dbcLLMMemoryRepository(
 				record.category,
 				record.sourceUid,
 				record.sourceName,
+				record.tier,
+				record.importance,
 				record.updatedAt,
 				record.expiresAt,
 				record.id,
@@ -155,6 +182,8 @@ class R2dbcLLMMemoryRepository(
 		category,
 		sourceUid,
 		sourceName,
+		tier,
+		importance,
 		createdAt,
 		updatedAt,
 		expiresAt,
@@ -169,6 +198,8 @@ class R2dbcLLMMemoryRepository(
 		category = row.get("category", String::class.java)!!,
 		sourceUid = row.get("source_uid", String::class.java),
 		sourceName = row.get("source_name", String::class.java),
+		tier = runCatching { row.get("tier", String::class.java) }.getOrNull() ?: "semantic",
+		importance = runCatching { row.get("importance", Number::class.java)?.toInt() }.getOrNull() ?: 3,
 		createdAt = row.get("created_at", java.lang.Long::class.java)!!.toLong(),
 		updatedAt = row.get("updated_at", java.lang.Long::class.java)!!.toLong(),
 		expiresAt = row.get("expires_at", java.lang.Long::class.java)?.toLong(),

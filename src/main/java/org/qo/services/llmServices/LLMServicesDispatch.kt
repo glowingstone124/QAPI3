@@ -35,7 +35,7 @@ internal suspend fun LLMServices.dispatchStreamChat(
 	}
 	val request = normalizeRequest(body, true, requester, model, provider)
 	val requestId = insertAccessRecord(principal, request.preset, true, requester.groupName)
-	val quota = reserveQuota(principal, clientRequestId, request, provider)
+	val quota = reserveQuota(principal, clientRequestId, request, provider, requester.groupId)
 	quotaStreamFailure(quota, principal)?.let {
 		updateAccessRecord(requestId, "rejected", errorMessage = quotaErrorMessage(quota.status, principal))
 		return it
@@ -140,7 +140,7 @@ private suspend fun LLMServices.completeAuthenticatedChat(
 	}
 	val request = normalizeRequest(body, false, requester, model, provider)
 	val requestId = insertAccessRecord(principal, request.preset, false, requester.groupName)
-	val quota = reserveQuota(principal, clientRequestId, request, provider)
+	val quota = reserveQuota(principal, clientRequestId, request, provider, requester.groupId)
 	quotaFailure(quota, principal)?.let {
 		updateAccessRecord(requestId, "rejected", errorMessage = it.body.take(512))
 		return it

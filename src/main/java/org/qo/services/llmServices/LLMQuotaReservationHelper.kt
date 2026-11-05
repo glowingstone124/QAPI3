@@ -7,6 +7,7 @@ internal suspend fun LLMServices.reserveQuota(
 	clientRequestId: String?,
 	request: LLMServices.NormalizedRequest,
 	provider: LLMProvider,
+	groupId: Long? = null,
 ): LLMQuotaDecision {
 	val logger = org.slf4j.LoggerFactory.getLogger(LLMServices::class.java)
 	return try {
@@ -16,7 +17,7 @@ internal suspend fun LLMServices.reserveQuota(
 				"AI model pricing missing: provider={}, mode={}, model={}; configure models.{}.pricing in providers.json",
 				provider.name, request.preset, request.model, request.preset
 			)
-			return LLMQuotaDecision(LLMQuotaStatus.PRICING_UNAVAILABLE, dailyQuotaService.snapshot(principal.qqUid, principal.hasAccount).view)
+			return LLMQuotaDecision(LLMQuotaStatus.PRICING_UNAVAILABLE, dailyQuotaService.snapshot(principal.qqUid, principal.hasAccount, groupId = groupId).view)
 		}
 		val admissionCost = LLMDailyQuotaService.COST_PER_UNIT
 		dailyQuotaService.reserve(
@@ -26,7 +27,8 @@ internal suspend fun LLMServices.reserveQuota(
 			mode = request.preset,
 			provider = provider.name,
 			model = request.model,
-			estimatedCost = admissionCost
+			estimatedCost = admissionCost,
+			groupId = groupId,
 		)
 	} catch (error: Exception) {
 		if (error is kotlinx.coroutines.CancellationException) throw error
@@ -35,7 +37,7 @@ internal suspend fun LLMServices.reserveQuota(
 			"AI quota reservation failed: source={}, uid={}, provider={}, mode={}, error={}, sqlState={}, sqlCode={}",
 			principal.source.value, principal.qqUid, provider.name, request.preset, error.javaClass.simpleName, sqlError?.sqlState, sqlError?.errorCode
 		)
-		LLMQuotaDecision(LLMQuotaStatus.UNAVAILABLE, dailyQuotaService.snapshot(principal.qqUid, principal.hasAccount).view)
+		LLMQuotaDecision(LLMQuotaStatus.UNAVAILABLE, dailyQuotaService.snapshot(principal.qqUid, principal.hasAccount, groupId = groupId).view)
 	}
 }
 
@@ -48,7 +50,8 @@ internal fun LLMServices.quotaFailure(decision: LLMQuotaDecision, principal: LLM
 		LLMQuotaStatus.UNAVAILABLE -> 503 to "quota_unavailable"
 		LLMQuotaStatus.PRICING_UNAVAILABLE -> 503 to "pricing_unavailable"
 	}
-	return LLMNonStreamResult(status, errorJson(code, quotaErrorMessage(decision.status, principal)), decision.view)
+	val hasGroupQuota = decision.view.groupLimit != null
+	return LLMNonStreamResult(status, errorJson(code, quotaErrorMessage(decision.status, principal, hasGroupQuota)), decision.view)
 }
 
 internal fun LLMServices.quotaStreamFailure(decision: LLMQuotaDecision, principal: LLMPrincipal): LLMStreamResult? {
@@ -56,9 +59,15 @@ internal fun LLMServices.quotaStreamFailure(decision: LLMQuotaDecision, principa
 	return LLMStreamResult(failure.status, flowOfText(failure.body), failure.quota)
 }
 
-internal fun LLMServices.quotaErrorMessage(status: LLMQuotaStatus, principal: LLMPrincipal): String = when (status) {
+internal fun LLMServices.quotaErrorMessage(
+	status: LLMQuotaStatus,
+	principal: LLMPrincipal,
+	hasGroupQuota: Boolean = false,
+): String = when (status) {
 	LLMQuotaStatus.ACCEPTED -> ""
-	LLMQuotaStatus.EXCEEDED -> if (principal.hasAccount) {
+	LLMQuotaStatus.EXCEEDED -> if (hasGroupQuota) {
+		"本群共享额度与个人周额度、Paid Credits 均已用尽，可购买 Credits 继续使用"
+	} else if (principal.hasAccount) {
 		"本周额度和 Paid Credits 不足，可购买 Credits 继续使用"
 	} else {
 		val (guestLimit, accountLimit) = dailyQuotaService.weeklyLimits()
@@ -78,4 +87,8 @@ internal fun LLMServices.quotaJson(view: LLMQuotaView): String = JsonObject().ap
 	addProperty("paid_credits", view.paidCredits)
 	addProperty("period", "weekly")
 	view.chargedUnits?.let { addProperty("charged_units", it) }
+	view.groupLimit?.let { addProperty("group_limit", it) }
+	view.groupUsed?.let { addProperty("group_used", it) }
+	view.groupRemaining?.let { addProperty("group_remaining", it) }
+	view.groupChargedUnits?.let { addProperty("group_charged_units", it) }
 }.toString()

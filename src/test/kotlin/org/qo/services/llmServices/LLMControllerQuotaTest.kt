@@ -101,6 +101,63 @@ class LLMControllerQuotaTest {
     }
 
     @Test
+    fun `bot quota endpoint returns personal and group quota status`(): Unit = runBlocking {
+        val quota = LLMQuotaView(50, 10, 40, 1_800_000_000L, groupLimit = 500, groupUsed = 50, groupRemaining = 450)
+        Mockito.`when`(llmServices.botQuotaStatus(eq("server-token"), eq(12345L), eq(67890L), Mockito.isNull())).thenReturn(
+            LLMNonStreamResult(
+                200,
+                """{"limit":50,"used":10,"remaining":40,"reset_at":1800000000,"group_limit":500,"group_used":50,"group_remaining":450}""",
+                quota,
+            ),
+        )
+
+        webTestClient.get()
+            .uri("/qo/asking/v1/quota/bot")
+            .header("token", "server-token")
+            .header("X-QQ-UID", "12345")
+            .header("X-QQ-Group-ID", "67890")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.remaining").isEqualTo(40)
+            .jsonPath("$.group_limit").isEqualTo(500)
+            .jsonPath("$.group_used").isEqualTo(50)
+            .jsonPath("$.group_remaining").isEqualTo(450)
+    }
+
+    @Test
+    fun `bot quota endpoint supports query params fallback`(): Unit = runBlocking {
+        val quota = LLMQuotaView(50, 10, 40, 1_800_000_000L, groupLimit = 500, groupUsed = 50, groupRemaining = 450)
+        Mockito.`when`(llmServices.botQuotaStatus(eq("server-token"), eq(12345L), eq(67890L), Mockito.isNull())).thenReturn(
+            LLMNonStreamResult(
+                200,
+                """{"limit":50,"used":10,"remaining":40,"reset_at":1800000000,"group_limit":500,"group_used":50,"group_remaining":450}""",
+                quota,
+            ),
+        )
+
+        webTestClient.get()
+            .uri("/qo/asking/v1/quota/bot?uid=12345&group_id=67890")
+            .header("token", "server-token")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.remaining").isEqualTo(40)
+            .jsonPath("$.group_remaining").isEqualTo(450)
+    }
+
+    @Test
+    fun `bot quota endpoint returns missing_uid when UID is not provided`(): Unit = runBlocking {
+        webTestClient.get()
+            .uri("/qo/asking/v1/quota/bot")
+            .header("token", "server-token")
+            .exchange()
+            .expectStatus().isBadRequest
+            .expectBody()
+            .jsonPath("$.error.code").isEqualTo("missing_uid")
+    }
+
+    @Test
     fun `stream endpoint returns ServerSentEvent flow when successful`(): Unit = runBlocking {
         val quota = LLMQuotaView(50, 10, 40, 1_800_000_000L)
         Mockito.`when`(llmServices.modelPresetFromRequest("fast")).thenReturn("fast")

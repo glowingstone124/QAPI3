@@ -3,7 +3,6 @@ package org.qo.services.llmServices.tools
 import com.google.gson.JsonObject
 import org.qo.services.llmServices.LLMGroupChatPolicy
 import org.qo.services.llmServices.LLMMemberProfileService
-import org.qo.services.llmServices.LLMRememberProtocol
 import org.qo.services.llmServices.LLMToolContext
 import org.springframework.stereotype.Component
 
@@ -14,7 +13,7 @@ class UpsertMemberProfileTool(
 	override val id = "upsert_member_profile"
 	override val definition = ToolSupport.functionTool(
 		name = id,
-		description = "为当前提问者的 QQ uid 新增或更新一个画像字段。仅当当前消息使用 `/remember 内容` 协议时才可调用；普通群聊和自然语言中的临时称呼、格式、语气、文体或角色要求不得自动持久化。仅保存本人明确确认的稳定身份、群昵称、偏好，或根据这些已确认事实生成的不含推测的简短总结；禁止保存密码、令牌、住址等敏感信息。",
+		description = "为当前提问者的 QQ uid 新增或更新一个画像字段。在自然对话中当用户提及自身稳定身份、称呼偏好、兴趣爱好、习惯、技术栈或纠正先前的个人偏好时可主动调用。仅允许保存当前提问者本人明确表达的事实；禁止保存他人画像，禁止保存推测内容，禁止保存密码、Token、证件号等敏感信息。",
 		properties = linkedMapOf(
 			"qq_uid" to ToolSupport.property(type = "string", description = "画像所属 QQ 号。必须等于当前提问者 uid。"),
 			"field_key" to ToolSupport.property(type = "string", description = "属性键，例如 preferred_name、favorite_game、response_style、summary 或 group_nickname。"),
@@ -25,12 +24,6 @@ class UpsertMemberProfileTool(
 	)
 
 	override suspend fun execute(args: JsonObject, context: LLMToolContext): String {
-		if (LLMRememberProtocol.payload(context.currentMessage) == null) {
-			return ToolSupport.errorResult(
-				"persistence_consent_required",
-				"持久画像只能通过 `/remember 内容` 协议更新",
-			)
-		}
 		val currentUid = context.uid?.toLongOrNull()
 			?: return ToolSupport.errorResult("missing_uid", "缺少当前提问者 QQ uid")
 		val targetUid = args.stringArgument("qq_uid")?.toLongOrNull()
@@ -42,6 +35,9 @@ class UpsertMemberProfileTool(
 		val value = args.stringArgument("value").orEmpty()
 		if (fieldKey.isBlank() || value.isBlank()) {
 			return ToolSupport.errorResult("bad_arguments", "field_key 和 value 不能为空")
+		}
+		if (isSensitive(fieldKey, value)) {
+			return ToolSupport.errorResult("sensitive_information_rejected", "禁止保存密码、密钥、身份证号或银行卡号等敏感信息")
 		}
 		val category = LLMGroupChatPolicy.EXPLICIT_USER_PROFILE_CATEGORY
 		val requestedScope = args.stringArgument("scope")?.lowercase()
@@ -71,5 +67,23 @@ class UpsertMemberProfileTool(
 			addProperty("profile_id", mutation.profile.profileId)
 			add("field", ToolSupport.gson.toJsonTree(mutation.field))
 		}
+	}
+
+	private fun isSensitive(fieldKey: String, value: String): Boolean {
+		val keyLower = fieldKey.lowercase()
+		if (listOf("password", "passwd", "token", "secret", "auth", "credential", "id_card", "idcard", "id_number", "idnumber").any { keyLower.contains(it) }) {
+			return true
+		}
+		val valLower = value.lowercase()
+		if (Regex("""\b(password|token|bearer|secret)\s*[:=]\s*\S+""", RegexOption.IGNORE_CASE).containsMatchIn(valLower)) {
+			return true
+		}
+		if (Regex("""\b\d{17}[\dXx]\b""").containsMatchIn(value)) {
+			return true
+		}
+		if (Regex("""\b\d{16,19}\b""").containsMatchIn(value)) {
+			return true
+		}
+		return false
 	}
 }

@@ -58,6 +58,54 @@ class GetUserQuotaToolTest {
 	}
 
 	@Test
+	fun `tool returns group quota fields when executed in group context`() = runBlocking {
+		val store = InMemoryQuotaStore()
+		val quotaService = LLMDailyQuotaService(
+			store, 50, 20, "Asia/Shanghai",
+			configuredPromotionMultiplier = 1,
+			configuredGroupWeeklyLimit = 500,
+			configuredPilotQuotaGroups = "*",
+		)
+		val tool = GetUserQuotaTool(quotaService)
+
+		val context = LLMToolContext(groupId = 946085440L, uid = "123456", name = "tester")
+		val resultJson = tool.execute(JsonObject(), context)
+		val result = JsonParser.parseString(resultJson).asJsonObject
+
+		assertEquals("get_user_quota", result.get("tool").asString)
+		assertEquals(123456L, result.get("uid").asLong)
+		assertEquals(20, result.get("limit").asInt)
+		assertEquals(0, result.get("used").asInt)
+		assertEquals(20, result.get("remaining").asInt)
+		assertTrue(result.has("group_limit"))
+		assertEquals(500, result.get("group_limit").asInt)
+		assertEquals(0, result.get("group_used").asInt)
+		assertEquals(500, result.get("group_remaining").asInt)
+	}
+
+	@Test
+	fun `tool omits group quota fields when executed in private context`() = runBlocking {
+		val store = InMemoryQuotaStore()
+		val quotaService = LLMDailyQuotaService(
+			store, 50, 20, "Asia/Shanghai",
+			configuredPromotionMultiplier = 1,
+			configuredGroupWeeklyLimit = 500,
+			configuredPilotQuotaGroups = "*",
+		)
+		val tool = GetUserQuotaTool(quotaService)
+
+		val context = LLMToolContext(groupId = null, uid = "123456", name = "tester")
+		val resultJson = tool.execute(JsonObject(), context)
+		val result = JsonParser.parseString(resultJson).asJsonObject
+
+		assertEquals("get_user_quota", result.get("tool").asString)
+		assertEquals(123456L, result.get("uid").asLong)
+		assertFalse(result.has("group_limit"))
+		assertFalse(result.has("group_used"))
+		assertFalse(result.has("group_remaining"))
+	}
+
+	@Test
 	fun `tool returns missing_uid error when context has no uid and args is empty`() = runBlocking {
 		val quotaService = LLMDailyQuotaService(InMemoryQuotaStore(), 50, 20, "Asia/Shanghai", configuredPromotionMultiplier = 1)
 		val tool = GetUserQuotaTool(quotaService)

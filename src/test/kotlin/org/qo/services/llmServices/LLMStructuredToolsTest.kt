@@ -29,21 +29,17 @@ class LLMStructuredToolsTest {
 
 	@Test
 	fun `group tools reject missing context before parsing arguments or accessing storage`(): Unit = runBlocking {
-		val memory = Mockito.mock(LLMMemoryService::class.java)
 		val history = Mockito.mock(LLMChatHistoryService::class.java)
-		val tools = listOf(AddMemoryTool(memory), SearchMemoryTool(memory), ForgetMemoryTool(memory), SearchChatHistoryTool(history))
-		for (tool in tools) {
-			val result = execute(tool, """{"query":{},"subject":{},"memory_id":{}}""", context.copy(groupId = null))
-			assertEquals("missing_group", result.get("error").asString)
-		}
-		Mockito.verifyNoInteractions(memory, history)
+		val result = execute(SearchChatHistoryTool(history), """{"query":{},"subject":{},"memory_id":{}}""", context.copy(groupId = null))
+		assertEquals("missing_group", result.get("error").asString)
+		Mockito.verifyNoInteractions(history)
 	}
 
 	@Test
 	fun `memory aliases retain null precedence and trimmed primitive arguments`(): Unit = runBlocking {
 		val memory = Mockito.mock(LLMMemoryService::class.java)
-		val record = LLMMemoryRecord("memory-1", 7, "11", "key", "<note>", "custom", "42", "Alice", 1, 1, null)
-		Mockito.`when`(memory.upsertMemory(7, "11", "key", "<note>", " custom ", "42", "Alice", null))
+		val record = LLMMemoryRecord("memory-1", 7, "11", "key", "<note>", "custom", "42", "Alice", 1, 1, null, "semantic", 3)
+		Mockito.`when`(memory.upsertMemory(7, "11", "key", "<note>", " custom ", "42", "Alice", null, null, 3))
 			.thenReturn(MemoryMutation(record, true))
 		val tool = AddMemoryTool(memory)
 		val args = """{"subject":11,"memory_key":" key ","fact":null,"data":" <note> ","category":" custom "}"""
@@ -57,15 +53,16 @@ class LLMStructuredToolsTest {
 		assertTrue(saved.get("saved").asBoolean)
 		assertTrue(saved.get("created").asBoolean)
 		assertEquals(7, saved.get("group_id").asInt)
+		assertEquals("group", saved.get("scope").asString)
 		assertEquals("memory-1", saved.getAsJsonObject("memory").get("id").asString)
 		assertTrue(raw.contains("<note>"))
-		Mockito.verify(memory).upsertMemory(7, "11", "key", "<note>", " custom ", "42", "Alice", null)
+		Mockito.verify(memory).upsertMemory(7, "11", "key", "<note>", " custom ", "42", "Alice", null, null, 3)
 	}
 
 	@Test
 	fun `memory search always uses the current group and keeps numeric query coercion`(): Unit = runBlocking {
 		val memory = Mockito.mock(LLMMemoryService::class.java)
-		Mockito.`when`(memory.search(7, "123", 8)).thenReturn(emptyList())
+		Mockito.`when`(memory.search(7, "123", 8, "42", null)).thenReturn(emptyList())
 
 		val result = execute(SearchMemoryTool(memory), """{"query":123,"group_id":999}""")
 
@@ -73,7 +70,7 @@ class LLMStructuredToolsTest {
 		assertEquals(7, result.get("group_id").asInt)
 		assertEquals(0, result.get("returned").asInt)
 		assertEquals(0, result.getAsJsonArray("memories").size())
-		Mockito.verify(memory).search(7, "123", 8)
+		Mockito.verify(memory).search(7, "123", 8, "42", null)
 	}
 
 	@Test
@@ -82,15 +79,25 @@ class LLMStructuredToolsTest {
 		val read = GetMemberProfileTool(profiles)
 		val upsert = UpsertMemberProfileTool(profiles)
 		val forget = ForgetMemberProfileFieldTool(profiles)
-		assertEquals("persistence_consent_required", execute(upsert, "{}", context.copy(uid = null, currentMessage = "叫我 Alice")).get("error").asString)
+		assertEquals("missing_uid", execute(upsert, "{}", context.copy(uid = null, currentMessage = "叫我 Alice")).get("error").asString)
 		for (tool in listOf(read, upsert, forget)) {
 			assertEquals("forbidden_target", execute(tool, """{"qq_uid":" 99 "}""").get("error").asString)
 		}
+		val sensitive = """{"qq_uid":42,"field_key":"password","value":"secret123"}"""
+		assertEquals("sensitive_information_rejected", execute(upsert, sensitive).get("error").asString)
+
 		val nickname = """{"qq_uid":42,"field_key":" group_nickname ","value":" Alice ","scope":null}"""
 		assertEquals("missing_group", execute(upsert, nickname, context.copy(groupId = null)).get("error").asString)
 		assertEquals("missing_group", execute(forget, nickname, context.copy(groupId = null)).get("error").asString)
 		assertEquals("bad_arguments", execute(upsert, nickname.replace("null", "\"global\"")).get("error").asString)
-		Mockito.verifyNoInteractions(profiles)
+
+		val header = LLMStoredMemberProfileHeader(42L, "prof-1", 1L, 1L)
+		val field = LLMMemberProfileField("f1", 42L, 0L, "favorite_game", "Minecraft", LLMGroupChatPolicy.EXPLICIT_USER_PROFILE_CATEGORY, "42", "Alice", 1L, 1L)
+		Mockito.`when`(profiles.upsertField(42L, "favorite_game", "Minecraft", LLMGroupChatPolicy.EXPLICIT_USER_PROFILE_CATEGORY, null, "42", "Alice"))
+			.thenReturn(MemberProfileMutation(header, field, created = true, changed = true))
+		val validNaturalUpsert = execute(upsert, """{"qq_uid":42,"field_key":"favorite_game","value":"Minecraft"}""", context.copy(currentMessage = "我最近常玩 Minecraft"))
+		assertTrue(validNaturalUpsert.get("saved").asBoolean)
+		assertTrue(validNaturalUpsert.get("created").asBoolean)
 
 		val result = execute(read, """{"qq_uid":null}""")
 		assertEquals(42, result.get("qq_uid").asInt)

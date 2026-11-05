@@ -175,6 +175,23 @@ class LLMServices(
 		return LLMNonStreamResult(200, quotaJson(quota.view), quota.view)
 	}
 
+	suspend fun botQuotaStatus(token: String, qqUid: Long, qqGroupId: Long?, qqName: String?): LLMNonStreamResult {
+		if (!authenticateServerToken(token)) {
+			return LLMNonStreamResult(401, errorJson("invalid_token", "Bot token 验证失败"))
+		}
+		val principal = qqPrincipal(qqUid, qqName)
+			?: return LLMNonStreamResult(403, errorJson("blocked_user", "该用户暂时不能使用此功能"))
+		val quota = dailyQuotaService.snapshot(principal.qqUid, hasAccount = principal.hasAccount, groupId = qqGroupId)
+		if (quota.status == LLMQuotaStatus.UNAVAILABLE) {
+			return LLMNonStreamResult(
+				503,
+				errorJson("quota_unavailable", "额度服务暂时不可用，请稍后重试"),
+				quota.view,
+			)
+		}
+		return LLMNonStreamResult(200, quotaJson(quota.view), quota.view)
+	}
+
 	fun buildPromptRequest(prompt: String, stream: Boolean = true, model: String): String {
 		val provider = providers.current().forMode(model)
 		return JsonObject().apply {

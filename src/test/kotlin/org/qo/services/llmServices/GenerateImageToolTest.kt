@@ -397,6 +397,111 @@ class GenerateImageToolTest {
 	}
 
 	@Test
+	fun `successful image generation in private chat pushes user_id to bot`() = runBlocking {
+		val httpClient = HttpClient.newBuilder()
+			.connectTimeout(Duration.ofSeconds(5))
+			.build()
+
+		val config = LLMImageGenerationConfig(
+			endpointUrl = "http://127.0.0.1:$serverPort/v1/images/generations",
+			apiToken = "test-sk-key-12345",
+			model = "gpt-image-2.5",
+			creditsCost = 25,
+			enabled = true,
+			qbotEndpoint = "http://127.0.0.1:$serverPort",
+			qbotToken = "qbot-test-token",
+		)
+		val fakeQuota = FakeQuotaService(availableWeeklyUnits = 50, currentCredits = 50)
+		val tool = GenerateImageTool(config = config, quotaService = fakeQuota, httpClient = httpClient)
+
+		val args = JsonObject().apply {
+			addProperty("prompt", "画一只在雨中漫步的小猫，水彩风格")
+		}
+
+		val context = LLMToolContext(groupId = null, uid = "10001", name = "tester", source = "qq")
+		val result = tool.execute(args, context)
+		val resultObj = JsonParser.parseString(result).asJsonObject
+
+		assertEquals("generate_image", resultObj.get("tool").asString)
+		assertEquals("success", resultObj.get("status").asString)
+		assertTrue(resultObj.get("message").asString.contains("当前 QQ 私聊"))
+
+		// Verify request forwarded to qbot /action/send_image with user_id instead of group_id
+		assertEquals("qbot-test-token", lastBotAuthHeader.get())
+		assertNotNull(lastBotRequestBody.get())
+		val sentToBot = JsonParser.parseString(lastBotRequestBody.get()).asJsonObject
+		assertEquals(10001L, sentToBot.get("user_id").asLong)
+		assertEquals(null, sentToBot.get("group_id"))
+		assertTrue(sentToBot.get("image").asString.startsWith("base64://"))
+	}
+
+	@Test
+	fun `image generation in group deducts from group units first`() = runBlocking {
+		val httpClient = HttpClient.newBuilder()
+			.connectTimeout(Duration.ofSeconds(5))
+			.build()
+
+		val config = LLMImageGenerationConfig(
+			endpointUrl = "http://127.0.0.1:$serverPort/v1/images/generations",
+			apiToken = "test-sk-key-12345",
+			model = "gpt-image-2.5",
+			creditsCost = 25,
+			enabled = true,
+		)
+		val fakeQuota = FakeQuotaService(availableGroupUnits = 25, availableWeeklyUnits = 50, currentCredits = 100)
+		val tool = GenerateImageTool(config = config, quotaService = fakeQuota, httpClient = httpClient)
+
+		val args = JsonObject().apply {
+			addProperty("prompt", "画一只群吉祥物，Q版风格")
+		}
+		val context = LLMToolContext(groupId = 946085440L, uid = "10001", name = "tester", source = "qq")
+		val result = tool.execute(args, context)
+		val resultObj = JsonParser.parseString(result).asJsonObject
+
+		assertEquals("success", resultObj.get("status").asString)
+		assertEquals(25, resultObj.get("credits_consumed").asInt)
+		assertEquals(25, resultObj.get("group_units_deducted").asInt)
+		assertEquals(0, resultObj.get("weekly_units_deducted").asInt)
+		assertEquals(0, resultObj.get("paid_credits_deducted").asInt)
+		assertEquals(0, fakeQuota.availableGroupUnits)
+		assertEquals(50, fakeQuota.availableWeeklyUnits)
+		assertEquals(100, fakeQuota.currentCredits)
+	}
+
+	@Test
+	fun `split deduction consumes group first then weekly then paid credits`() = runBlocking {
+		val httpClient = HttpClient.newBuilder()
+			.connectTimeout(Duration.ofSeconds(5))
+			.build()
+
+		val config = LLMImageGenerationConfig(
+			endpointUrl = "http://127.0.0.1:$serverPort/v1/images/generations",
+			apiToken = "test-sk-key-12345",
+			model = "gpt-image-2.5",
+			creditsCost = 25,
+			enabled = true,
+		)
+		val fakeQuota = FakeQuotaService(availableGroupUnits = 10, availableWeeklyUnits = 10, currentCredits = 50)
+		val tool = GenerateImageTool(config = config, quotaService = fakeQuota, httpClient = httpClient)
+
+		val args = JsonObject().apply {
+			addProperty("prompt", "画一只猫")
+		}
+		val context = LLMToolContext(groupId = 946085440L, uid = "10001", name = "tester", source = "qq")
+		val result = tool.execute(args, context)
+		val resultObj = JsonParser.parseString(result).asJsonObject
+
+		assertEquals("success", resultObj.get("status").asString)
+		assertEquals(25, resultObj.get("credits_consumed").asInt)
+		assertEquals(10, resultObj.get("group_units_deducted").asInt)
+		assertEquals(10, resultObj.get("weekly_units_deducted").asInt)
+		assertEquals(5, resultObj.get("paid_credits_deducted").asInt)
+		assertEquals(0, fakeQuota.availableGroupUnits)
+		assertEquals(0, fakeQuota.availableWeeklyUnits)
+		assertEquals(45, fakeQuota.currentCredits)
+	}
+
+	@Test
 	fun `spring can instantiate GenerateImageTool via autowiring without conflict`() {
 		val context = org.springframework.context.annotation.AnnotationConfigApplicationContext()
 		context.beanFactory.registerSingleton("reloadableLLMProvider", org.mockito.Mockito.mock(ReloadableLLMProvider::class.java))
@@ -410,16 +515,19 @@ class GenerateImageToolTest {
 	}
 
 	private class FakeQuotaService(
+		var availableGroupUnits: Int = 0,
 		var availableWeeklyUnits: Int = 0,
 		var currentCredits: Int = 100,
 	) : LLMDailyQuotaService(store = StubQuotaStore(), configuredDailyLimit = 120) {
+		var deductedGroupAmount: Int = 0
 		var deductedWeeklyAmount: Int = 0
 		var deductedPaidAmount: Int = 0
+		var refundedGroupAmount: Int = 0
 		var refundedWeeklyAmount: Int = 0
 		var refundedPaidAmount: Int = 0
 
-		val deductedAmount: Int get() = deductedWeeklyAmount + deductedPaidAmount
-		val refundedAmount: Int get() = refundedWeeklyAmount + refundedPaidAmount
+		val deductedAmount: Int get() = deductedGroupAmount + deductedWeeklyAmount + deductedPaidAmount
+		val refundedAmount: Int get() = refundedGroupAmount + refundedWeeklyAmount + refundedPaidAmount
 
 		override suspend fun deductQuota(
 			qqUid: Long,
@@ -427,18 +535,24 @@ class GenerateImageToolTest {
 			referenceId: String,
 			hasAccount: Boolean,
 			now: java.time.Instant,
+			groupId: Long?,
 		): CreditDeductionResult {
-			val weeklyDeduct = minOf(amount, availableWeeklyUnits)
-			val paidDeduct = amount - weeklyDeduct
+			val groupDeduct = if (groupId != null) minOf(amount, availableGroupUnits) else 0
+			val remAfterGroup = amount - groupDeduct
+			val weeklyDeduct = minOf(remAfterGroup, availableWeeklyUnits)
+			val paidDeduct = remAfterGroup - weeklyDeduct
 			if (currentCredits < paidDeduct) {
 				return CreditDeductionResult(
 					success = false,
 					remainingCredits = currentCredits,
 					weeklyDeducted = 0,
 					paidDeducted = 0,
+					groupDeducted = 0,
 					error = "账户剩余额度不足（剩余免费额度：${availableWeeklyUnits} 点，Paid Credits：${currentCredits} 点，本次生成图片需要：${amount} 点）。请充值点数或等待下周免费额度重置。"
 				)
 			}
+			availableGroupUnits -= groupDeduct
+			deductedGroupAmount += groupDeduct
 			availableWeeklyUnits -= weeklyDeduct
 			deductedWeeklyAmount += weeklyDeduct
 			currentCredits -= paidDeduct
@@ -448,6 +562,7 @@ class GenerateImageToolTest {
 				remainingCredits = currentCredits,
 				weeklyDeducted = weeklyDeduct,
 				paidDeducted = paidDeduct,
+				groupDeducted = groupDeduct,
 			)
 		}
 
@@ -457,7 +572,11 @@ class GenerateImageToolTest {
 			paidAmount: Int,
 			referenceId: String,
 			now: java.time.Instant,
+			groupId: Long?,
+			groupAmount: Int,
 		): Boolean {
+			availableGroupUnits += groupAmount
+			refundedGroupAmount += groupAmount
 			availableWeeklyUnits += weeklyAmount
 			refundedWeeklyAmount += weeklyAmount
 			currentCredits += paidAmount
