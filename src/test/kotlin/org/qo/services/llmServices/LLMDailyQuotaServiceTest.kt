@@ -11,17 +11,17 @@ import kotlin.test.assertTrue
 
 class LLMDailyQuotaServiceTest {
     @Test
-    fun `QQ default is eighty units and QO upgrade retains usage within one hundred twenty units`(): Unit = runBlocking {
-        val service = LLMDailyQuotaService(InMemoryQuotaStore(),120,80,"Asia/Shanghai",configuredPromotionMultiplier=1)
+    fun `QQ default is one hundred sixty units and QO upgrade retains usage within two hundred forty units`(): Unit = runBlocking {
+        val service = LLMDailyQuotaService(InMemoryQuotaStore(),240,160,"Asia/Shanghai",configuredPromotionMultiplier=1)
         val now = Instant.parse("2026-09-13T04:00:00Z")
         val guest = principal(LLMSource.QQ).copy(hasAccount=false)
         repeat(40) { service.reserve(guest,"guest-$it",now) }
-        assertEquals(80,service.snapshot(guest.qqUid,false,now).view.limit)
-        assertEquals(40,service.snapshot(guest.qqUid,false,now).view.remaining)
+        assertEquals(160,service.snapshot(guest.qqUid,false,now).view.limit)
+        assertEquals(120,service.snapshot(guest.qqUid,false,now).view.remaining)
         val registered = service.snapshot(guest.qqUid,true,now).view
-        assertEquals(120,registered.limit)
+        assertEquals(240,registered.limit)
         assertEquals(40,registered.used)
-        assertEquals(80,registered.remaining)
+        assertEquals(200,registered.remaining)
     }
 
     @Test

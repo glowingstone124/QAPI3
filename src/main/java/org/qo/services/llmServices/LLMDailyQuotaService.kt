@@ -122,8 +122,8 @@ interface LLMQuotaStore {
 @Service
 open class LLMDailyQuotaService @Autowired constructor(
 	private val store: LLMQuotaStore,
-	@Value("\${qapi.llm.weekly-limit:120}") configuredDailyLimit: Int,
-	@Value("\${qapi.llm.guest-weekly-limit:80}") configuredGuestDailyLimit: Int = 80,
+	@Value("\${qapi.llm.weekly-limit:240}") configuredDailyLimit: Int,
+	@Value("\${qapi.llm.guest-weekly-limit:160}") configuredGuestDailyLimit: Int = 160,
 	@Value("\${qapi.llm.quota-zone:Asia/Shanghai}") quotaZoneName: String = "Asia/Shanghai",
 	@Value("\${qapi.llm.promotion.multiplier:4}") configuredPromotionMultiplier: Int = 4,
 	@Value("\${qapi.llm.promotion.ends-at:2026-11-01T23:59:59+08:00}") configuredPromotionEndsAt: String = "2026-11-01T23:59:59+08:00",
@@ -135,7 +135,7 @@ open class LLMDailyQuotaService @Autowired constructor(
 	private val promotionEndsAtExclusive = OffsetDateTime.parse(configuredPromotionEndsAt).toInstant().plusSeconds(1)
 
 	constructor(store: LLMQuotaStore, configuredDailyLimit: Int, quotaZoneName: String) :
-			this(store, configuredDailyLimit, 80, quotaZoneName)
+			this(store, configuredDailyLimit, 160, quotaZoneName)
 
 	fun effectiveLimit(hasAccount: Boolean, now: Instant = Instant.now()): Int {
 		val baseLimit = if (hasAccount) weeklyLimit else guestWeeklyLimit
