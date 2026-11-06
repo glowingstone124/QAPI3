@@ -7,7 +7,6 @@
     "model": "gpt-image-2.6-sunburst",
     "size": "1024x1024",
     "quality": "auto",
-    "complexity": "high",
     "creditsCost": 25,
     "enabled": true
   },

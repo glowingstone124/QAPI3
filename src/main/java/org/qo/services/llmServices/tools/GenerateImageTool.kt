@@ -9,6 +9,7 @@ import org.qo.services.llmServices.CreditDeductionResult
 import org.qo.services.llmServices.LLMDailyQuotaService
 import org.qo.services.llmServices.LLMImageGenerationConfig
 import org.qo.services.llmServices.LLMToolContext
+import org.qo.services.llmServices.LLMToolFailureLog
 import org.qo.services.llmServices.ReloadableLLMProvider
 import org.qo.services.llmServices.normalizeImageGenerationModel
 import org.qo.services.llmServices.supportsImageGenerationComplexity
@@ -31,6 +32,7 @@ class GenerateImageTool @Autowired constructor(
 		.build()
 
 	internal var userORM: UserORM = UserORM()
+	internal var failureLog = LLMToolFailureLog()
 
 	private var staticConfig: LLMImageGenerationConfig? = null
 
@@ -83,13 +85,6 @@ class GenerateImageTool @Autowired constructor(
 					description = "可选，视觉细节质量，可选 auto, low, medium, high, xhigh, max，默认 auto。",
 				),
 			)
-			val configuredModel = resolveConfig()?.model
-			if (configuredModel != null && supportsImageGenerationComplexity(configuredModel)) {
-				properties["complexity"] = ToolSupport.property(
-					type = "string",
-					description = "可选，仅 GPT Image 2.6 支持；规划复杂度 low, medium, high。控制场景规划，不影响 quality。",
-				)
-			}
 			return ToolSupport.functionTool(
 				name = id,
 				description = """
@@ -129,9 +124,9 @@ class GenerateImageTool @Autowired constructor(
 		val size = args.stringArgument("size")?.takeIf { it.isNotBlank() } ?: config.size
 		val quality = args.stringArgument("quality")?.takeIf { it.isNotBlank() } ?: config.quality
 		val model = normalizeImageGenerationModel(config.model)
-		val complexity = args.stringArgument("complexity")
-			?.takeIf { it.isNotBlank() }
-			?: config.complexity?.trim()?.takeIf { it.isNotBlank() }
+		// Relays may route to an image backend without complexity support. Only the
+		// operator can opt in; a generated tool argument must not enable this field.
+		val complexity = config.complexity?.trim()?.takeIf { it.isNotBlank() }
 		val normalizedComplexity = complexity?.lowercase(java.util.Locale.ROOT)
 		if (normalizedComplexity != null && normalizedComplexity !in setOf("low", "medium", "high")) {
 			return ToolSupport.errorResult("invalid_argument", "complexity 必须是 low、medium 或 high。")
@@ -218,9 +213,28 @@ class GenerateImageTool @Autowired constructor(
 				JsonParser.parseString(errBody).asJsonObject
 					.getAsJsonObject("error")?.get("message")?.asString
 			}.getOrNull() ?: errBody.take(300)
+			val diagnostic = JsonObject().apply {
+				addProperty("endpoint", runCatching {
+					val uri = URI.create(apiUrl)
+					URI(uri.scheme, null, uri.host, uri.port, uri.path, null, null).toString()
+				}.getOrDefault("<invalid endpoint>"))
+				addProperty("http_status", imageResponse.statusCode())
+				imageResponse.headers().firstValue("x-request-id").orElse(null)
+					?.let { addProperty("request_id", it) }
+				add("parameters", requestPayload.deepCopy().apply { remove("prompt") })
+			}
+			failureLog.record(
+				context = context,
+				stage = "image_generation",
+				error = "generation_failed",
+				message = parsedMsg,
+				tool = id,
+				model = model,
+				details = linkedMapOf("image_request" to diagnostic.toString(), "upstream_response" to errBody),
+			)
 			return ToolSupport.errorResult(
 				"generation_failed",
-				"OpenAI 图片生成失败 (HTTP ${imageResponse.statusCode()}): $parsedMsg"
+				"图片生成上游失败 (HTTP ${imageResponse.statusCode()}, model=$model): $parsedMsg"
 			)
 		}
 

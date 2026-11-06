@@ -9,17 +9,22 @@ import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.io.TempDir
 import org.qo.services.llmServices.tools.GenerateImageTool
 import java.net.InetSocketAddress
 import java.net.http.HttpClient
 import java.nio.charset.StandardCharsets
+import java.nio.file.Files
+import java.nio.file.Path
 import java.time.Duration
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 class GenerateImageToolTest {
+	@TempDir lateinit var tempDir: Path
 
 	private lateinit var mockServer: HttpServer
 	private var serverPort: Int = 0
@@ -39,6 +44,7 @@ class GenerateImageToolTest {
 			if (body.contains("trigger_error")) {
 				val errResponse = """{"error":{"message":"Safety check triggered","type":"invalid_request_error"}}"""
 				val bytes = errResponse.toByteArray(StandardCharsets.UTF_8)
+				exchange.responseHeaders.set("x-request-id", "mock-image-400")
 				exchange.sendResponseHeaders(400, bytes.size.toLong())
 				exchange.responseBody.write(bytes)
 				exchange.close()
@@ -92,7 +98,7 @@ class GenerateImageToolTest {
 	}
 
 	@Test
-	fun `tool definition specifies gpt-image-2-5 schema and 25 credits cost`() {
+	fun `tool definition specifies image schema and 25 credits cost`() {
 		val tool = GenerateImageTool()
 		assertEquals("generate_image", tool.id)
 		val definition = tool.definition
@@ -100,7 +106,7 @@ class GenerateImageToolTest {
 		val func = definition.getAsJsonObject("function")
 		assertEquals("generate_image", func.get("name").asString)
 		val desc = func.get("description").asString
-		assertTrue(desc.contains("GPT-Image-2.5"))
+		assertTrue(desc.contains("GPT Image 2.6"))
 		assertTrue(desc.contains("25"))
 		val params = func.getAsJsonObject("parameters")
 		val required = params.getAsJsonArray("required")
@@ -110,6 +116,45 @@ class GenerateImageToolTest {
 		assertTrue(props.has("prompt"))
 		assertTrue(props.has("size"))
 		assertTrue(props.has("quality"))
+	}
+
+	@Test
+	fun `flare does not let generated tool arguments opt into complexity`() = runBlocking {
+		val tool = GenerateImageTool(LLMImageGenerationConfig(
+			endpointUrl = "http://127.0.0.1:$serverPort/v1/images/generations",
+			apiToken = "test-key",
+			model = "gpt-image-2.6-flare",
+			creditsCost = 0,
+		))
+		val properties = tool.definition.getAsJsonObject("function")
+			.getAsJsonObject("parameters").getAsJsonObject("properties")
+		assertFalse(properties.has("complexity"))
+		val result = tool.execute(JsonObject().apply {
+			addProperty("prompt", "cat")
+			addProperty("complexity", "medium")
+		}, LLMToolContext(groupId = null, uid = "10001", name = "tester", source = "qq"))
+		assertEquals("success", JsonParser.parseString(result).asJsonObject.get("status").asString)
+		val sent = JsonParser.parseString(lastOpenAiRequestBody.get()).asJsonObject
+		assertEquals("gpt-image-2.6-flare", sent.get("model").asString)
+		assertEquals("auto", sent.get("quality").asString)
+		assertFalse(sent.has("complexity"))
+	}
+
+	@Test
+	fun `complexity is controlled by provider configuration`() = runBlocking {
+		val tool = GenerateImageTool(LLMImageGenerationConfig(
+			endpointUrl = "http://127.0.0.1:$serverPort/v1/images/generations",
+			apiToken = "test-key",
+			model = "gpt-image-2.6-flare",
+			complexity = "high",
+			creditsCost = 0,
+		))
+		tool.execute(JsonObject().apply {
+			addProperty("prompt", "cat")
+			addProperty("complexity", "medium")
+		}, LLMToolContext(groupId = null, uid = "10001", name = "tester", source = "qq"))
+		val sent = JsonParser.parseString(lastOpenAiRequestBody.get()).asJsonObject
+		assertEquals("high", sent.get("complexity").asString)
 	}
 
 	@Test
@@ -239,7 +284,7 @@ class GenerateImageToolTest {
 			.build()
 
 		val config = LLMImageGenerationConfig(
-			endpointUrl = "http://127.0.0.1:$serverPort/v1/images/generations",
+			endpointUrl = "http://127.0.0.1:$serverPort/v1/images/generations?token=private-query-token",
 			apiToken = "test-sk-key-12345",
 			model = "gpt-image-2.5",
 			creditsCost = 25,
@@ -249,9 +294,11 @@ class GenerateImageToolTest {
 		)
 		val fakeQuota = FakeQuotaService(currentCredits = 50)
 		val tool = GenerateImageTool(config = config, quotaService = fakeQuota, httpClient = httpClient)
+		val logPath = tempDir.resolve("image-failure.log")
+		tool.failureLog = LLMToolFailureLog(logPath)
 
 		val args = JsonObject().apply {
-			addProperty("prompt", "trigger_error")
+			addProperty("prompt", "trigger_error private image prompt")
 		}
 
 		val context = LLMToolContext(groupId = 946085440L, uid = "10001", name = "tester", source = "qq")
@@ -265,6 +312,15 @@ class GenerateImageToolTest {
 		assertEquals(25, fakeQuota.deductedAmount)
 		assertEquals(25, fakeQuota.refundedAmount)
 		assertEquals(50, fakeQuota.currentCredits)
+		val saved = Files.readString(logPath)
+		assertTrue(saved.contains("\"stage\": \"image_generation\""))
+		assertTrue(saved.contains("\"http_status\": 400"))
+		assertTrue(saved.contains("mock-image-400"))
+		assertTrue(saved.contains("\"quality\": \"auto\""))
+		assertTrue(saved.contains("Safety check triggered"))
+		assertFalse(saved.contains("test-sk-key-12345"))
+		assertFalse(saved.contains("private-query-token"))
+		assertFalse(saved.contains("private image prompt"))
 	}
 
 	@Test
@@ -381,6 +437,7 @@ class GenerateImageToolTest {
 		// 10 weekly units available, 30 paid credits
 		val fakeQuota = FakeQuotaService(availableWeeklyUnits = 10, currentCredits = 30)
 		val tool = GenerateImageTool(config = config, quotaService = fakeQuota, httpClient = httpClient)
+		tool.failureLog = LLMToolFailureLog(tempDir.resolve("split-image-failure.log"))
 
 		val args = JsonObject().apply {
 			addProperty("prompt", "trigger_error")

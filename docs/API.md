@@ -488,6 +488,10 @@ Responses 路径的非流式与 SSE 请求均可调用：
 
 ### LLM 配置
 
+`imageGeneration` 单独配置图片生成端点、token、模型、尺寸和质量。`complexity` 是可选的服务端配置，省略时出站请求不包含此字段；对话模型的工具参数不会启用或覆盖它。使用第三方转发端点时，应先确认该端点实际支持此参数再配置。
+
+图片端点返回非 2xx 时，`data/llm/toolcall-failure.log` 会记录 `stage=image_generation`、图片模型、端点、实际发送的尺寸/质量/复杂度、HTTP 状态、上游 request ID（若响应头包含）和错误响应；此诊断不包含请求提示词、认证头或端点的查询参数。借此可以区分图片端点失败与主对话模型在工具调用前的失败。
+
 provider 配置文件默认为 `data/llm/providers.json`，可由 `LLM_PROVIDERS_FILE` 覆盖；通过 `LLM_PROVIDER` 选择 provider。每个 provider 必须声明三个端点，每个模型必须显式配置名称和协议：
 
 - `chatCompletionsUrl`
