@@ -25,6 +25,20 @@ enum class LLMProtocol(val wireValue: String, val endpointKey: String) {
 	}
 }
 
+internal fun normalizeImageGenerationModel(model: String): String {
+	val trimmed = model.trim()
+	return when (trimmed.lowercase(Locale.ROOT)) {
+		"gpt-image-2.6" -> "gpt-image-2.6-sunburst"
+		else -> trimmed
+	}
+}
+
+internal fun supportsImageGenerationComplexity(model: String): Boolean =
+	normalizeImageGenerationModel(model).lowercase(Locale.ROOT) in setOf(
+		"gpt-image-2.6-flare",
+		"gpt-image-2.6-sunburst",
+	)
+
 data class LLMModelConfig(
 	val model: String,
 	val protocol: LLMProtocol,
@@ -77,9 +91,10 @@ data class LLMCompactConfig(
 data class LLMImageGenerationConfig(
 	val endpointUrl: String = "https://api.openai.com/v1/images/generations",
 	val apiToken: String = "",
-	val model: String = "gpt-image-2.5",
+	val model: String = "gpt-image-2.6-sunburst",
 	val size: String = "1024x1024",
 	val quality: String = "auto",
+	val complexity: String? = null,
 	val creditsCost: Int = 25,
 	val enabled: Boolean = true,
 	val qbotEndpoint: String? = null,
@@ -386,9 +401,12 @@ data class LLMProvider(
 			val token = readTokenValue(obj, "token", "tokenFile")
 			val endpointUrl = obj.get("endpointUrl")?.asString?.trim()?.takeIf { it.isNotBlank() }
 				?: "https://api.openai.com/v1/images/generations"
-			val model = obj.get("model")?.asString?.trim()?.takeIf { it.isNotBlank() } ?: "gpt-image-2.5"
+			val model = normalizeImageGenerationModel(
+				obj.get("model")?.asString?.trim()?.takeIf { it.isNotBlank() } ?: "gpt-image-2.6-sunburst"
+			)
 			val size = obj.get("size")?.asString?.trim()?.takeIf { it.isNotBlank() } ?: "1024x1024"
 			val quality = obj.get("quality")?.asString?.trim()?.takeIf { it.isNotBlank() } ?: "auto"
+			val complexity = obj.get("complexity")?.asString?.trim()?.takeIf { it.isNotBlank() }
 			val creditsCost = readInt(obj, "creditsCost", 25)
 			val enabled = readBoolean(obj, "enabled", true)
 			val qbotEndpoint = obj.get("qbotEndpoint")?.asString?.trim()?.takeIf { it.isNotBlank() }
@@ -400,6 +418,7 @@ data class LLMProvider(
 				model = model,
 				size = size,
 				quality = quality,
+				complexity = complexity,
 				creditsCost = creditsCost,
 				enabled = enabled,
 				qbotEndpoint = qbotEndpoint,

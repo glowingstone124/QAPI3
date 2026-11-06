@@ -10,6 +10,8 @@ import org.qo.services.llmServices.LLMDailyQuotaService
 import org.qo.services.llmServices.LLMImageGenerationConfig
 import org.qo.services.llmServices.LLMToolContext
 import org.qo.services.llmServices.ReloadableLLMProvider
+import org.qo.services.llmServices.normalizeImageGenerationModel
+import org.qo.services.llmServices.supportsImageGenerationComplexity
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.stereotype.Component
 import java.net.URI
@@ -65,30 +67,41 @@ class GenerateImageTool @Autowired constructor(
 
 	override val id = "generate_image"
 
-	override val definition = ToolSupport.functionTool(
-		name = id,
-		description = """
-			使用 OpenAI 最新 GPT-Image-2.5 模型生成图片。
-			单次调用图片消耗 25 点额度（优先扣除每周免费额度，不足部分扣除 Paid Credits）。当前仅对 QQ 用户开放。
-			当用户要求画图、作画、绘制插图、设计视觉图片或需要图像展示时自主调用该工具。
-			prompt 参数应当详细描述画面内容，包括画面主体、风格类型（如写实、插画、二次元、赛博朋克等）、色彩基调、光影效果、构图视角等。如用户输入的是中文或简短需求，请将其扩展为生动详细的高质量提示词以达到最佳生成效果。
-		""".trimIndent(),
-		properties = linkedMapOf(
-			"prompt" to ToolSupport.property(
-				type = "string",
-				description = "生成图片的详细提示词。请详细描述主体、风格、光影、构图与细节。",
-			),
-			"size" to ToolSupport.property(
-				type = "string",
-				description = "可选，图片分辨率尺寸，如 1024x1024, 1536x1024, 1024x1536 等，默认 1024x1024。",
-			),
-			"quality" to ToolSupport.property(
-				type = "string",
-				description = "可选，生成质量，可选 auto, low, medium, high, xhigh, max，默认 auto。",
-			),
-		),
-		required = listOf("prompt"),
-	)
+	override val definition: JsonObject
+		get() {
+			val properties = linkedMapOf(
+				"prompt" to ToolSupport.property(
+					type = "string",
+					description = "生成图片的详细提示词。请详细描述主体、风格、光影、构图与细节。",
+				),
+				"size" to ToolSupport.property(
+					type = "string",
+					description = "可选，图片分辨率尺寸，如 1024x1024, 1536x1024, 1024x1536 等，默认 1024x1024。",
+				),
+				"quality" to ToolSupport.property(
+					type = "string",
+					description = "可选，视觉细节质量，可选 auto, low, medium, high, xhigh, max，默认 auto。",
+				),
+			)
+			val configuredModel = resolveConfig()?.model
+			if (configuredModel != null && supportsImageGenerationComplexity(configuredModel)) {
+				properties["complexity"] = ToolSupport.property(
+					type = "string",
+					description = "可选，仅 GPT Image 2.6 支持；规划复杂度 low, medium, high。控制场景规划，不影响 quality。",
+				)
+			}
+			return ToolSupport.functionTool(
+				name = id,
+				description = """
+					使用 OpenAI GPT Image 2.6 Flare 或 Sunburst 生成图片；简写模型名 gpt-image-2.6 会映射为 Sunburst，也兼容 GPT-Image-2.5。
+					单次调用图片消耗 25 点额度（优先扣除每周免费额度，不足部分扣除 Paid Credits）。当前仅对 QQ 用户开放。
+					当用户要求画图、作画、绘制插图、设计视觉图片或需要图像展示时自主调用该工具。
+					prompt 参数应当详细描述画面内容，包括画面主体、风格类型（如写实、插画、二次元、赛博朋克等）、色彩基调、光影效果、构图视角等。如用户输入的是中文或简短需求，请将其扩展为生动详细的高质量提示词以达到最佳生成效果。
+				""".trimIndent(),
+				properties = properties,
+				required = listOf("prompt"),
+			)
+		}
 
 	override suspend fun execute(args: JsonObject, context: LLMToolContext): String {
 		if (context.source != "qq") {
@@ -110,6 +123,23 @@ class GenerateImageTool @Autowired constructor(
 			return ToolSupport.errorResult(
 				"not_configured",
 				"图片生成功能未在 providers.json 中配置有效的 OpenAI API Key 或未启用。"
+			)
+		}
+
+		val size = args.stringArgument("size")?.takeIf { it.isNotBlank() } ?: config.size
+		val quality = args.stringArgument("quality")?.takeIf { it.isNotBlank() } ?: config.quality
+		val model = normalizeImageGenerationModel(config.model)
+		val complexity = args.stringArgument("complexity")
+			?.takeIf { it.isNotBlank() }
+			?: config.complexity?.trim()?.takeIf { it.isNotBlank() }
+		val normalizedComplexity = complexity?.lowercase(java.util.Locale.ROOT)
+		if (normalizedComplexity != null && normalizedComplexity !in setOf("low", "medium", "high")) {
+			return ToolSupport.errorResult("invalid_argument", "complexity 必须是 low、medium 或 high。")
+		}
+		if (normalizedComplexity != null && !supportsImageGenerationComplexity(model)) {
+			return ToolSupport.errorResult(
+				"unsupported_argument",
+				"complexity 仅适用于 gpt-image-2.6-flare 或 gpt-image-2.6-sunburst；请更新图片模型配置。"
 			)
 		}
 
@@ -150,16 +180,14 @@ class GenerateImageTool @Autowired constructor(
 			}
 		}
 
-		val size = args.stringArgument("size")?.takeIf { it.isNotBlank() } ?: config.size
-		val quality = args.stringArgument("quality")?.takeIf { it.isNotBlank() } ?: config.quality
 		val apiUrl = config.endpointUrl
-		val model = config.model
 
 		val requestPayload = JsonObject().apply {
 			addProperty("model", model)
 			addProperty("prompt", prompt)
 			addProperty("size", size)
 			addProperty("quality", quality)
+			if (normalizedComplexity != null) addProperty("complexity", normalizedComplexity)
 			addProperty("n", 1)
 		}
 
