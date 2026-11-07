@@ -190,6 +190,34 @@ class LLMDispatchTest {
 	}
 
 	@Test
+	fun `fallback retries unknown provider and model routing errors with the backup model`() = runBlocking {
+		val modelErrors = listOf(
+			"""{"error":{"message":"unknown provider for model gemini-flash-lite-latest","type":"invalid_request_error"}}""" to HttpStatusCode.BadRequest,
+			"""{"error":{"message":"The model gemini-flash-lite-latest does not exist","code":"model_not_found"}}""" to HttpStatusCode.NotFound,
+			"""{"error":{"message":"无可用渠道","code":"no_available_channel"}}""" to HttpStatusCode.BadRequest,
+		)
+		for ((errorBody, statusCode) in modelErrors) fixture().use { f ->
+			val original = f.service.providers.current()
+			val backup = original.copy(
+				name = "backup",
+				chatCompletionsUrl = "https://backup.example/chat",
+				models = original.models.mapValues { (_, value) -> value.copy(model = "backup-model") },
+				fastModel = "backup-model",
+			)
+			f.configure(original.copy(fallbackProviders = listOf(backup)))
+			f.responseHandler = { number ->
+				if (number == 1) errorBody to statusCode
+				else completion("backup answer") to HttpStatusCode.OK
+			}
+			val result = f.dispatch(LLMSource.QQ, body)
+			assertEquals(200, result.status)
+			assertEquals(2, f.requests)
+			assertEquals("backup answer", f.history().single()[2])
+			assertEquals("backup", f.usedProviders.last())
+		}
+	}
+
+	@Test
 	fun `streaming failover buffers content until backup succeeds`() = runBlocking {
 		fixture().use { f ->
 			val original = f.service.providers.current()

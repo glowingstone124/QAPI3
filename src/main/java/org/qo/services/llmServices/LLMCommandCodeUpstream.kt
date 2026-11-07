@@ -18,6 +18,7 @@ import io.ktor.utils.io.readUTF8Line
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
+import java.util.Locale
 import java.util.UUID
 
 internal data class CommandCodeUpdate(val text: String = "", val reasoning: String = "", val phase: String? = null)
@@ -180,6 +181,28 @@ internal fun shouldFallbackCommandCode(status: Int, body: String, round: Int, te
 	round == 0 && !textEmitted && status in 500..599 &&
 			!body.contains("tool_round_limit")
 
+internal fun isModelOrRoutingFailure(status: Int, body: String): Boolean {
+	if (status == 404) return true
+	if (status == 400 || status == 422) {
+		val lower = body.lowercase(Locale.ROOT)
+		return lower.contains("unknown provider") ||
+			lower.contains("model_not_found") ||
+			lower.contains("model not found") ||
+			lower.contains("does not exist") ||
+			lower.contains("unsupported model") ||
+			lower.contains("is not supported") ||
+			lower.contains("not supported for generatecontent") ||
+			lower.contains("invalid model") ||
+			lower.contains("invalid_model") ||
+			lower.contains("no available channel") ||
+			lower.contains("no available provider") ||
+			lower.contains("no endpoints found") ||
+			body.contains("无可用渠道") ||
+			body.contains("未配置渠道")
+	}
+	return false
+}
+
 internal fun LLMServices.commandCodeFallbackRequest(
 	request: LLMServices.NormalizedRequest,
 	fallback: LLMProvider
@@ -241,7 +264,7 @@ internal suspend fun LLMServices.completeWithFallback(
 			if (empty) withUsage(errorJson("empty_upstream_response", "LLM 上游未返回有效回复"), parseUsage(body)) else body,
 			activeRequest, candidate)
 		last = outcome
-		val retryable = empty || status == 408 || status == 429 || status in 500..599
+		val retryable = empty || status == 408 || status == 429 || status in 500..599 || isModelOrRoutingFailure(status, body)
 		if (!retryable || state.toolExecuted || index == candidates.lastIndex) return outcome
 		println("[LLM] provider ${candidate.name} returned $status; trying next provider")
 	}
