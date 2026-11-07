@@ -85,7 +85,6 @@ class AuthorityNeededServicesImpl @Autowired constructor(
 					addProperty("profile_id", "")
 					addProperty("account_type", "guest")
 					addProperty("clientId", clientId)
-					addProperty("score", 0)
 					addProperty("frozen", false)
 				}.toString()
 			}
@@ -96,7 +95,6 @@ class AuthorityNeededServicesImpl @Autowired constructor(
 				addProperty("profile_id", boundAccount.profile_id)
 				addProperty("account_type", "qo")
 				addProperty("clientId", clientId)
-				addProperty("score", boundAccount.score)
 				addProperty("frozen", boundAccount.frozen)
 			}.toString()
 		}
@@ -113,7 +111,6 @@ class AuthorityNeededServicesImpl @Autowired constructor(
 			addProperty("invite_cnt", userInfo.invite)
 			addProperty("account_type", "qo")
 			addProperty("clientId", clientId)
-			addProperty("score", userInfo.score)
 			addProperty("frozen", userInfo.frozen)
 			add("statistics", playerStatisticsService.getPlayerStatistics(accountName!!).toJson())
 		}
