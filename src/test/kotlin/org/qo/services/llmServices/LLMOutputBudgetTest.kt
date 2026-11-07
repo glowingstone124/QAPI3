@@ -62,6 +62,17 @@ class LLMOutputBudgetTest {
         }
     }
 
+    @Test fun `ordinary Google requests omit optional output caps`() = runBlocking {
+        for (mode in listOf("fast", "thinking")) {
+            val normalized = normalize(LLMProtocol.GOOGLE, mode)
+            val outgoing = wire(normalized, LLMProtocol.GOOGLE)
+            val config = outgoing.getAsJsonObject("generationConfig")
+            if (config != null) {
+                assertFalse(config.has("maxOutputTokens"), "Google $mode unexpectedly sets maxOutputTokens")
+            }
+        }
+    }
+
     @Test fun `caller output limits survive normalization and protocol conversion`() = runBlocking {
         for (protocol in LLMProtocol.entries) {
             // Chat Completions forwards its native token-limit fields unchanged.
@@ -76,6 +87,7 @@ class LLMOutputBudgetTest {
                         LLMProtocol.RESPONSES -> outgoing.get("max_output_tokens")
                         LLMProtocol.ANTHROPIC -> outgoing.get("max_tokens")
                         LLMProtocol.COMMANDCODE -> outgoing.getAsJsonObject("params").get("max_tokens")
+                        LLMProtocol.GOOGLE -> outgoing.getAsJsonObject("generationConfig").get("maxOutputTokens")
                     }
                     assertEquals(32768, actual.asInt, "$protocol $mode $key")
                 }

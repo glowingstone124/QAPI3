@@ -381,7 +381,7 @@ Web、QQ Bot 和 Minecraft 在认证后归一到同一个 QQ UID，共享 Weekly
 - `fast`
 - `thinking`
 
-`stream=false` 返回 JSON；`stream=true` 返回 SSE。每个预设通过 provider `models.<preset>.protocol` 显式选择 `responses`、`chat-completions` 或 `anthropic`。Responses 路径把 `reasoning_effort` 转为 `reasoning.effort`；Anthropic 路径按模型 `thinkingMode` 转为 thinking budget 或 `output_config.effort`，并保持对外 Chat Completion 格式。三个协议的交互请求均启用上游 Web Search；Anthropic 支持 `pause_turn` 续接、搜索与本地工具混用，并返回来源链接。上游需要支持对应搜索功能且账户已启用；Anthropic 搜索失败会返回错误，不会悄悄移除搜索继续请求。工具调用、群上下文、记忆、历史检索和 RAG 在 Responses 路径中均可用；工具轮次会完整回传上游 output item，以保留模型需要的 reasoning 上下文。
+`stream=false` 返回 JSON；`stream=true` 返回 SSE。每个预设通过 provider `models.<preset>.protocol` 显式选择 `responses`、`chat-completions`、`anthropic` 或 `google`（兼容 `gemini`）。Responses 路径把 `reasoning_effort` 转为 `reasoning.effort`；Anthropic 路径按模型 `thinkingMode` 转为 thinking budget 或 `output_config.effort`；Google 路径在 Gemini 3+ 模型上按档位映射为 `thinkingLevel`（`MINIMAL`/`LOW`/`MEDIUM`/`HIGH`），在 Gemini 2.5 模型上映射为 `thinkingBudget`，并保持对外 Chat Completion 格式。所有协议的交互请求均支持启用上游 Web Search；Google 协议支持内置 `googleSearch` 与函数工具混用，并将 `groundingChunks` 来源链接自动拼接到回复末尾；Anthropic 支持 `pause_turn` 续接、搜索与本地工具混用，并返回来源链接。上游需要支持对应搜索功能且账户已启用；Anthropic 搜索失败会返回错误，不会悄悄移除搜索继续请求。工具调用、群上下文、记忆、历史检索和 RAG 在各协议中均可用；工具轮次会完整回传上游 output item，以保留模型需要的 reasoning 上下文。
 
 `reasoning_effort` 支持 `none`、`low`、`medium`、`high`、`xhigh`、`max`，也可传 Responses 形式的 `{"reasoning":{"effort":"high"}}`，两者不可同时出现。后端按档位决定最终强度：Fast 关闭，Thinking 默认 medium，显式 high/max 提升到 high，不按请求内容分类。QQ Bot 入口始终关闭思考，管理员切换档位也不改变。
 
@@ -399,9 +399,9 @@ Web 流式请求会校验 `Origin`，允许来源由 `qapi.llm.web-allowed-origi
 
 Web Chat 可设置 `tool_execution:"client"`，同时提交 `tools`（OpenAI function JSON Schema）与 `tool_choice:"auto"|"none"`。客户端工具名称不由 QAPI 的服务端工具白名单判定；QAPI 只校验 function 定义格式、重复名称、最多 64 个定义和 32 KiB 请求大小，然后原样转发。此模式通过独立的单轮上游转发路径运行，**不调用服务端工具执行器**，不注入搜索工具；所有编辑、填充、截图及 IndexedDB 保存均由 Web 客户端决定是否执行。
 
-响应保留标准 `message.tool_calls` 的调用 ID、函数名和参数。SSE 先发送状态，待上游完整完成后发送 completion JSON，再发送额度及 `[DONE]`。浏览器仅在完整成功后执行，并在下一请求中提交配对的 `assistant.tool_calls` 与 `role:"tool",tool_call_id,content`。工具结果 `content` 为 JSON 字符串；图片用随后带调用 ID 的 `user` 多模态消息携带，兼容四种上游协议。服务端校验调用/结果配对，超大上下文直接拒绝，不拆散工具链。
+响应保留标准 `message.tool_calls` 的调用 ID、函数名和参数。SSE 先发送状态，待上游完整完成后发送 completion JSON，再发送额度及 `[DONE]`。浏览器仅在完整成功后执行，并在下一请求中提交配对的 `assistant.tool_calls` 与 `role:"tool",tool_call_id,content`。工具结果 `content` 为 JSON 字符串；图片用随后带调用 ID 的 `user` 多模态消息携带，兼容各上游协议。服务端校验调用/结果配对，超大上下文直接拒绝，不拆散工具链。
 
-每个请求只做一轮模型推理，客户端负责自动续接及上限，沿用正常计费和限流。为避免向浏览器泄露或依赖签名思维，客户端工具模式的 Anthropic 路径关闭 extended thinking，名为 DeepSeek 的 Chat Completions provider 关闭 thinking。普通聊天的工具和思考流程不受影响。需要与 Kotshi 对应版本一起部署。
+每个请求只做一轮模型推理，客户端负责自动续接及上限，沿用正常计费和限流。为避免向浏览器泄露或依赖签名思维，客户端工具模式的 Anthropic 路径关闭 extended thinking，名为 DeepSeek 的 Chat Completions provider 关闭 thinking；Google 路径在无状态历史续接时自动注入 `skip_thought_signature_validator` 哨兵签名（并保留不超过 `medium` 的单步推理预算），且将 `tool_choice="none"` 映射为 `functionCallingConfig.mode="NONE"`。普通聊天的工具和思考流程不受影响。需要与 Kotshi 对应版本一起部署。
 
 ### Bot 对话
 
@@ -492,16 +492,17 @@ Responses 路径的非流式与 SSE 请求均可调用：
 
 图片端点返回非 2xx 时，`data/llm/toolcall-failure.log` 会记录 `stage=image_generation`、图片模型、端点、实际发送的尺寸/质量/复杂度、HTTP 状态、上游 request ID（若响应头包含）和错误响应；此诊断不包含请求提示词、认证头或端点的查询参数。借此可以区分图片端点失败与主对话模型在工具调用前的失败。
 
-provider 配置文件默认为 `data/llm/providers.json`，可由 `LLM_PROVIDERS_FILE` 覆盖；通过 `LLM_PROVIDER` 选择 provider。每个 provider 必须声明三个端点，每个模型必须显式配置名称和协议：
+provider 配置文件默认为 `data/llm/providers.json`，可由 `LLM_PROVIDERS_FILE` 覆盖；通过 `LLM_PROVIDER` 选择 provider。每个 provider 必须声明端点，每个模型必须显式配置名称和协议：
 
 - `chatCompletionsUrl`
 - `responsesUrl`
 - `anthropicUrl`（兼容拼写 `antrophicUrl`）
+- `googleUrl`（可选，未配置时默认 `unavailable`，当模型协议选用 `google` / `gemini` 时生效）
 - `token` 或 `tokenFile`
 - `contextWindow`
 - `models.<preset>.model`（上游模型名，任意预设名，至少需配置 `fast` 和 `thinking`）
-- `models.<preset>.protocol`（`responses` / `chat-completions` / `anthropic`，无默认值；兼容 `antrophic`）
-- `models.<preset>.thinkingMode`（Anthropic 可选：`enabled` / `adaptive` / `disabled`，默认 `enabled`）
+- `models.<preset>.protocol`（`responses` / `chat-completions` / `anthropic` / `google`，无默认值；兼容 `antrophic`、`gemini`）
+- `models.<preset>.thinkingMode`（Anthropic / Google 可选：`enabled` / `adaptive` / `disabled`，默认 `enabled`）
 - `balanceUrl`（可选）
 - `summary.provider`
 - `summary.model`

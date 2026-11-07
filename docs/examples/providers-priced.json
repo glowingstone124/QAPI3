@@ -175,6 +175,50 @@
         "keepTurns": 4,
         "maxSummaryChars": 8000
       }
+    },
+    "google": {
+      "chatCompletionsUrl": "unavailable",
+      "responsesUrl": "unavailable",
+      "anthropicUrl": "unavailable",
+      "googleUrl": "https://generativelanguage.googleapis.com/v1beta",
+      "tokenFile": "data/llm/google.token",
+      "contextWindow": 1048576,
+      "models": {
+        "fast": {
+          "model": "gemini-3.8-flash",
+          "protocol": "google",
+          "thinkingMode": "adaptive",
+          "pricing": {
+            "inputCnyPerMillion": 0.7,
+            "outputCnyPerMillion": 2.8,
+            "cachedInputCnyPerMillion": 0.175,
+            "callCostCny": 0
+          }
+        },
+        "thinking": {
+          "model": "gemini-2.5-pro",
+          "protocol": "google",
+          "thinkingMode": "enabled",
+          "pricing": {
+            "inputCnyPerMillion": 8.75,
+            "outputCnyPerMillion": 35.0,
+            "cachedInputCnyPerMillion": 2.19,
+            "callCostCny": 0
+          }
+        }
+      },
+      "summary": {
+        "provider": "google",
+        "model": "fast",
+        "contextWindow": 65536
+      },
+      "compact": {
+        "enabled": true,
+        "triggerTurns": 12,
+        "triggerPercent": 70,
+        "keepTurns": 4,
+        "maxSummaryChars": 8000
+      }
     }
   }
 }

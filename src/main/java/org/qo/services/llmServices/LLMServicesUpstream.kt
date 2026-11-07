@@ -46,6 +46,9 @@ internal suspend fun LLMServices.completeWithOptionalTools(
 	if (provider.protocol(request.preset) == LLMProtocol.ANTHROPIC) {
 		return completeWithAnthropicApi(request, requester, source, provider)
 	}
+	if (provider.protocol(request.preset) == LLMProtocol.GOOGLE) {
+		return completeWithGoogleApi(request, requester, source, provider)
+	}
 	if (provider.supportsResponses(request.preset)) {
 		return completeWithResponsesApi(request, requester, source, provider)
 	}
@@ -218,6 +221,27 @@ internal suspend fun runSummaryUpstream(
 				)
 			),
 			maxToolRounds = 0,
+			executeTool = { error("Summary requests cannot execute local tools") },
+			onRequest = onRequest,
+		)
+	}
+	if (summary.protocol == LLMProtocol.GOOGLE) {
+		return runGoogleUpstream(
+			client = client,
+			endpointUrl = summary.endpointUrl,
+			apiToken = summary.apiToken,
+			model = summary.model,
+			request = LLMAdapterRegistry.forProtocol(LLMProtocol.GOOGLE).adapt(
+				LLMAdapterRequest(
+					chat,
+					JsonArray(),
+					LLMReasoningEffort.NONE,
+					webSearch = false,
+					thinkingMode = summary.thinkingMode,
+				)
+			),
+			maxToolRounds = 0,
+			stream = false,
 			executeTool = { error("Summary requests cannot execute local tools") },
 			onRequest = onRequest,
 		)

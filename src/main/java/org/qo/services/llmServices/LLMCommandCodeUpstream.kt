@@ -515,5 +515,6 @@ private fun LLMServices.streamCommandCodeFallback(
 	LLMProtocol.CHAT_COMPLETIONS -> streamFromUpstream(request, requester, requestId, source, provider, reservation)
 	LLMProtocol.RESPONSES -> streamFromResponses(request, requester, requestId, source, provider, reservation)
 	LLMProtocol.ANTHROPIC -> streamFromAnthropic(request, requester, requestId, source, provider, reservation)
+	LLMProtocol.GOOGLE -> streamFromGoogle(request, requester, requestId, source, provider, reservation)
 	LLMProtocol.COMMANDCODE -> streamFromCommandCode(request, requester, requestId, source, provider, reservation)
 }

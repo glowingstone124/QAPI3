@@ -234,6 +234,12 @@ internal suspend fun runClientToolUpstream(
 				getAsJsonObject("tool_choice")?.addProperty("disable_parallel_tool_use", false)
 			}
 
+			LLMProtocol.GOOGLE -> if (!allowTools) {
+				add("toolConfig", JsonObject().apply {
+					add("functionCallingConfig", JsonObject().apply { addProperty("mode", "NONE") })
+				})
+			}
+
 			LLMProtocol.CHAT_COMPLETIONS -> {
 				// This protocol carries effort in the body, including a reduced retry effort.
 				if (get("reasoning_effort")?.asString.let { it != null && it != "none" })
@@ -257,11 +263,18 @@ internal suspend fun runClientToolUpstream(
 		requestTimeoutMillis = CLIENT_TOOL_TIMEOUT_MILLIS
 	)
 	onRequest(outgoing.toString())
-	val response = client.post(url) {
+	val targetUrl = if (protocol == LLMProtocol.GOOGLE) {
+		buildGoogleEndpoint(url, chat.get("model")?.asString.orEmpty(), stream = false)
+	} else url
+	val response = client.post(targetUrl) {
 		timeout { requestTimeoutMillis = CLIENT_TOOL_TIMEOUT_MILLIS; socketTimeoutMillis = CLIENT_TOOL_TIMEOUT_MILLIS }
-		if (protocol == LLMProtocol.ANTHROPIC) {
-			header("x-api-key", token); header("anthropic-version", "2023-06-01")
-		} else header(HttpHeaders.Authorization, "Bearer $token")
+		when (protocol) {
+			LLMProtocol.ANTHROPIC -> {
+				header("x-api-key", token); header("anthropic-version", "2023-06-01")
+			}
+			LLMProtocol.GOOGLE -> applyGoogleAuthHeaders(this, token)
+			else -> header(HttpHeaders.Authorization, "Bearer $token")
+		}
 		contentType(ContentType.Application.Json); setBody(outgoing.toString())
 	}
 	val text = response.bodyAsText()
@@ -286,6 +299,17 @@ internal suspend fun runClientToolUpstream(
 			) { "Anthropic 请求未完整完成" }
 			if (root.get("stop_reason")?.asString == "max_tokens") truncatedClientCompletion(root)
 			else LLMAnthropicAdapter.toChatCompletion(root)
+		}
+
+		LLMProtocol.GOOGLE -> {
+			val root = JsonParser.parseString(text).asJsonObject
+			LLMGoogleAdapter.blockError(root)?.let { throw IllegalArgumentException(it) }
+			val candidate = root.getAsJsonArray("candidates")?.firstOrNull()?.asJsonObject
+				?: throw IllegalArgumentException("Google 请求未返回候选结果")
+			val completion = LLMGoogleAdapter.toChatCompletion(root, chat.get("model")?.asString)
+			if (candidate.get("finishReason")?.asString == "MAX_TOKENS") {
+				truncatedClientCompletion(JsonParser.parseString(completion).asJsonObject)
+			} else completion
 		}
 
 		else -> text

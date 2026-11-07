@@ -47,6 +47,7 @@ internal suspend fun LLMServices.dispatchStreamChat(
 	else if (request.clientTools != null) streamClientTools(request, activeRequester, requestId, provider, reservation) else when (provider.protocol(request.preset)) {
 		LLMProtocol.RESPONSES -> streamFromResponses(request, activeRequester, requestId, "stream", provider, reservation)
 		LLMProtocol.ANTHROPIC -> streamFromAnthropic(request, activeRequester, requestId, "stream", provider, reservation)
+		LLMProtocol.GOOGLE -> streamFromGoogle(request, activeRequester, requestId, "stream", provider, reservation)
 		LLMProtocol.CHAT_COMPLETIONS -> streamFromUpstream(request, activeRequester, requestId, "stream", provider, reservation)
 		LLMProtocol.COMMANDCODE -> streamFromCommandCode(request, activeRequester, requestId, "stream", provider, reservation)
 	}

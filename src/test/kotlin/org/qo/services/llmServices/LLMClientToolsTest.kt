@@ -31,7 +31,7 @@ class LLMClientToolsTest {
         assertFalse(request.has("tool_execution"))
         val names = definitions.map { it.asJsonObject.getAsJsonObject("function").get("name").asString }
         assertTrue(names.containsAll(listOf("compose_pattern", "build_roof", "verify_stage", "query_blocks", "save_blueprint", "list_blueprints", "place_blueprint")))
-        for (protocol in listOf(LLMProtocol.CHAT_COMPLETIONS, LLMProtocol.RESPONSES, LLMProtocol.ANTHROPIC, LLMProtocol.COMMANDCODE)) {
+        for (protocol in listOf(LLMProtocol.CHAT_COMPLETIONS, LLMProtocol.RESPONSES, LLMProtocol.ANTHROPIC, LLMProtocol.COMMANDCODE, LLMProtocol.GOOGLE)) {
             val adapted = LLMAdapterRegistry.forProtocol(protocol).adapt(LLMAdapterRequest(
                 chat = clientToolStepChat(request), functionTools = definitions, reasoningEffort = LLMReasoningEffort.NONE, webSearch = false,
             ))
@@ -187,12 +187,13 @@ class LLMClientToolsTest {
     }
 
     @Test fun `non commandcode builder requests override the shared short timeout`() = runBlocking {
-        for (protocol in listOf(LLMProtocol.CHAT_COMPLETIONS, LLMProtocol.RESPONSES, LLMProtocol.ANTHROPIC)) {
+        for (protocol in listOf(LLMProtocol.CHAT_COMPLETIONS, LLMProtocol.RESPONSES, LLMProtocol.ANTHROPIC, LLMProtocol.GOOGLE)) {
             val engine = MockEngine {
                 delay(100)
                 val response = when (protocol) {
                     LLMProtocol.RESPONSES -> """{"id":"resp_1","status":"completed","output":[],"usage":{"input_tokens":1,"output_tokens":1}}"""
                     LLMProtocol.ANTHROPIC -> """{"type":"message","role":"assistant","content":[{"type":"text","text":"done"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}"""
+                    LLMProtocol.GOOGLE -> """{"candidates":[{"content":{"role":"model","parts":[{"text":"done"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":1,"totalTokenCount":2}}"""
                     else -> """{"choices":[{"message":{"role":"assistant","content":"done"},"finish_reason":"stop"}]}"""
                 }
                 respond(response, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
@@ -288,11 +289,19 @@ class LLMClientToolsTest {
             val engine=MockEngine { request ->
                 requests++
                 val outgoing=obj((request.body as TextContent).text)
-                val definitions=if(protocol==LLMProtocol.COMMANDCODE) outgoing.getAsJsonObject("params").getAsJsonArray("tools") else outgoing.getAsJsonArray("tools")
+                val definitions = when (protocol) {
+                    LLMProtocol.COMMANDCODE -> outgoing.getAsJsonObject("params").getAsJsonArray("tools")
+                    LLMProtocol.GOOGLE -> outgoing.getAsJsonArray("tools")[0].asJsonObject.getAsJsonArray("functionDeclarations")
+                    else -> outgoing.getAsJsonArray("tools")
+                }
                 assertEquals(1,definitions.size())
                 assertFalse(outgoing.toString().contains("web_search"))
                 if (protocol == LLMProtocol.RESPONSES) assertEquals(true,outgoing.get("parallel_tool_calls").asBoolean)
                 if (protocol == LLMProtocol.ANTHROPIC) assertEquals(false,outgoing.getAsJsonObject("tool_choice").get("disable_parallel_tool_use").asBoolean)
+                if (protocol == LLMProtocol.GOOGLE) {
+                    assertTrue(request.url.toString().contains("/models/test:generateContent"))
+                    assertEquals("AUTO", outgoing.getAsJsonObject("toolConfig").getAsJsonObject("functionCallingConfig").get("mode").asString)
+                }
                 val response=when(protocol) {
                     LLMProtocol.CHAT_COMPLETIONS -> """{"choices":[{"message":{"role":"assistant","content":null,"tool_calls":[$nativeCall]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":2,"completion_tokens":3}}"""
                     LLMProtocol.RESPONSES -> """{"status":"completed","output":[{"type":"function_call","call_id":"call_1","name":"fill","arguments":"{\"revision\":0}"}],"usage":{"input_tokens":2,"output_tokens":3}}"""
@@ -300,6 +309,7 @@ class LLMClientToolsTest {
                     LLMProtocol.COMMANDCODE -> """{"type":"tool-call","toolCallId":"call_1","toolName":"fill","input":{"revision":0}}
 {"type":"finish","finishReason":"tool-calls","totalUsage":{"inputTokens":2,"outputTokens":3}}
 """
+                    LLMProtocol.GOOGLE -> """{"candidates":[{"content":{"role":"model","parts":[{"functionCall":{"id":"call_1","name":"fill","args":{"revision":0}}}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":2,"candidatesTokenCount":3,"totalTokenCount":5}}"""
                 }
                 respond(response,HttpStatusCode.OK,headersOf(HttpHeaders.ContentType,"application/json"))
             }
@@ -340,7 +350,7 @@ class LLMClientToolsTest {
     }
 
     @Test fun `anthropic and responses truncation enter the same safe retry loop`() = runBlocking {
-        for (protocol in listOf(LLMProtocol.ANTHROPIC, LLMProtocol.RESPONSES)) {
+        for (protocol in listOf(LLMProtocol.ANTHROPIC, LLMProtocol.RESPONSES, LLMProtocol.GOOGLE)) {
             var requests = 0
             val engine = MockEngine {
                 requests++
@@ -348,9 +358,13 @@ class LLMClientToolsTest {
                     LLMProtocol.ANTHROPIC -> if (requests == 1)
                         """{"type":"message","stop_reason":"max_tokens","content":[{"type":"tool_use","id":"partial","name":"fill","input":{"revision":0}}],"usage":{"input_tokens":4,"output_tokens":32768}}"""
                     else """{"type":"message","stop_reason":"tool_use","content":[{"type":"tool_use","id":"call_1","name":"fill","input":{"revision":0}}],"usage":{"input_tokens":5,"output_tokens":10}}"""
-                    else -> if (requests == 1)
+                    LLMProtocol.RESPONSES -> if (requests == 1)
                         """{"status":"incomplete","error":null,"output":[{"type":"function_call","call_id":"partial","name":"fill","arguments":"{\"revision\":"}],"usage":{"input_tokens":4,"output_tokens":32768}}"""
                     else """{"status":"completed","error":null,"output":[{"type":"function_call","call_id":"call_1","name":"fill","arguments":"{\"revision\":0}"}],"usage":{"input_tokens":5,"output_tokens":10}}"""
+                    LLMProtocol.GOOGLE -> if (requests == 1)
+                        """{"candidates":[{"content":{"role":"model","parts":[{"text":""}]},"finishReason":"MAX_TOKENS"}],"usageMetadata":{"promptTokenCount":4,"candidatesTokenCount":32768,"totalTokenCount":32772}}"""
+                    else """{"candidates":[{"content":{"role":"model","parts":[{"functionCall":{"id":"call_1","name":"fill","args":{"revision":0}}}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":5,"candidatesTokenCount":10,"totalTokenCount":15}}"""
+                    else -> error("unexpected protocol: $protocol")
                 }
                 respond(response,HttpStatusCode.OK,headersOf(HttpHeaders.ContentType,"application/json"))
             }
@@ -376,6 +390,20 @@ class LLMClientToolsTest {
         }
         HttpClient(engine).use { client ->
             assertEquals(200,runClientToolUpstream(client,"https://model.example/api","token",LLMProtocol.ANTHROPIC,chat().apply { addProperty("tool_choice","none") },tools,LLMReasoningEffort.HIGH).first)
+        }
+    }
+
+    @Test fun `final google turn retains schemas but disables further tool selection`() = runBlocking {
+        val engine = MockEngine { request ->
+            val body = obj((request.body as TextContent).text)
+            assertEquals("NONE", body.getAsJsonObject("toolConfig").getAsJsonObject("functionCallingConfig").get("mode").asString)
+            assertEquals(1, body.getAsJsonArray("tools").size())
+            respond("""{"candidates":[{"content":{"role":"model","parts":[{"text":"done"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":2,"candidatesTokenCount":3,"totalTokenCount":5}}""",
+                HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
+        }
+        HttpClient(engine).use { client ->
+            assertEquals(200, runClientToolUpstream(client, "https://model.example/api", "token", LLMProtocol.GOOGLE,
+                chat().apply { addProperty("tool_choice", "none") }, tools, LLMReasoningEffort.HIGH).first)
         }
     }
 }

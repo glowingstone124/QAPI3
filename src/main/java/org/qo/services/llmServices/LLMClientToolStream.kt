@@ -24,7 +24,7 @@ internal suspend fun LLMServices.completeClientTools(
 		client, provider.endpoint(protocol), provider.apiToken, protocol,
 		chat, requireNotNull(request.clientTools), effort,
 		provider.contextWindow,
-		onRequest = { logUpstreamRequest(source, it, provider, protocol.wireValue); debugPrompt(source, it) },
+		onRequest = { logUpstreamRequest(source, it, provider, protocol.wireValue, request.model); debugPrompt(source, it) },
 		onCommandCodeUpdate = onCommandCodeUpdate
 	)
 	if (status !in 200..299) return status to body

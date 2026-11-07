@@ -203,7 +203,7 @@ QQ group messages are archived in the `llm_chat_history` table through `POST /qo
 
 Completed AI turns from Web, QQ, and Minecraft are written to `llm_conversation_turns` before the request finishes. The compact recent context and rolling summary are written to `llm_conversation_state`, so a QAPI restart or memory-cache eviction can resume a conversation. The full turn archive remains in SQL even after older turns are summarized; explicitly deleting a Web conversation removes its archive, resumable context, and stored images. Synced messages from nodes, Web chat, and system notices are written to `messages`; a normal shutdown flushes pending messages. Existing short `messages.message` columns are expanded on first use so long messages can be archived. `GET /qo/msglist/public` excludes system notices (`from=2`).
 - `LLM_TOOLS_ENABLED`: enable QAPI's other local function tools, default `true`; Web Search remains available when disabled.
-- Web Search calls the DuckDuckGo Lite search relay at `http://10.10.0.3:9123/search`, replacing the SearXNG service on that port. The relay implementation and deployment steps are in [docs/DUCKDUCKGO_SEARCH_SERVICE.md](docs/DUCKDUCKGO_SEARCH_SERVICE.md). QAPI sends `q` and gives the model up to eight results. Web conversations receive result URLs for citation. QQ and Minecraft conversations receive opaque result IDs instead of URLs and are instructed to answer without source attribution. `web_fetch` resolves a recent result from the same conversation, sends its URL internally to the Trafilatura service at `http://10.10.0.3:9124/fetch`, and returns up to 12,000 characters of page text without the URL for non-Web channels. Both tools work across Chat Completions, Responses, Anthropic, and Command Code. Chat Completions SSE waits for the tool rounds to finish before sending the final answer.
+- Web Search calls the DuckDuckGo Lite search relay at `http://10.10.0.3:9123/search`, replacing the SearXNG service on that port. The relay implementation and deployment steps are in [docs/DUCKDUCKGO_SEARCH_SERVICE.md](docs/DUCKDUCKGO_SEARCH_SERVICE.md). QAPI sends `q` and gives the model up to eight results. Web conversations receive result URLs for citation. QQ and Minecraft conversations receive opaque result IDs instead of URLs and are instructed to answer without source attribution. `web_fetch` resolves a recent result from the same conversation, sends its URL internally to the Trafilatura service at `http://10.10.0.3:9124/fetch`, and returns up to 12,000 characters of page text without the URL for non-Web channels. Both tools work across Chat Completions, Responses, Anthropic, Command Code, and Google. Chat Completions SSE waits for the tool rounds to finish before sending the final answer.
 - Trafilatura microservice interface and deployment checks: [docs/WEB_FETCH_SERVICE.md](docs/WEB_FETCH_SERVICE.md).
 - `LLM_PROVIDERS_FILE`: provider configuration JSON path, default `data/llm/providers.json`. The file is watched and the configuration (including referenced token files) is periodically reloaded; invalid updates keep the last valid provider.
 - `adminUids`: optional top-level array in the provider configuration listing QQ UIDs allowed to grant reset cards (default empty). It is reloaded together with the provider file; see [Reset cards](docs/RESET_CARDS.md).
@@ -221,7 +221,7 @@ Configure `fallbackProviders` as an ordered array of provider names, e.g. `"fall
 
 Command Code and the `enableCommandCode` switch are deprecated. The switch is ignored; remove it and the legacy `providers.commandcode` block. Existing explicitly configured `commandcode` protocol support remains for migration.
 
-Ordinary chat requests apply the mode/source reasoning-effort policy without forcing a Fast/Thinking output-token cap. Explicit caller token limits are preserved. Chat Completions and Responses requests omit the output limit when none is supplied; Anthropic and Command Code retain their protocol adapter defaults. Builder client-tool steps and internal summaries use separate output budgets.
+Ordinary chat requests apply the mode/source reasoning-effort policy without forcing a Fast/Thinking output-token cap. Explicit caller token limits are preserved. Chat Completions, Responses, and Google requests omit the output limit when none is supplied; Anthropic and Command Code retain their protocol adapter defaults. Builder client-tool steps and internal summaries use separate output budgets.
 
 Provider configuration example (`data/llm/providers.json`; replace example URLs and model IDs with those supported by your upstream):
 
@@ -233,6 +233,7 @@ Provider configuration example (`data/llm/providers.json`; replace example URLs 
       "chatCompletionsUrl": "https://gateway.example/v1/chat/completions",
       "responsesUrl": "https://gateway.example/v1/responses",
       "anthropicUrl": "https://gateway.example/v1/messages",
+      "googleUrl": "https://gateway.example/v1beta",
       "tokenFile": "LLMAPITOKEN",
       "contextWindow": 524288,
       "models": {
@@ -248,6 +249,10 @@ Provider configuration example (`data/llm/providers.json`; replace example URLs 
           "model": "provider-claude-model",
           "protocol": "anthropic",
           "thinkingMode": "adaptive"
+        },
+        "gemini": {
+          "model": "gemini-3.8-flash",
+          "protocol": "google"
         }
       },
       "summary": {
@@ -297,12 +302,14 @@ Every provider must declare all three endpoint fields, even when unused. Set an 
 endpoint to the literal `"unavaliable"` (`"unavailable"` is also accepted). Endpoints are used exactly
 as configured; QAPI never derives one endpoint from another or falls back to a different protocol.
 Every `models.<preset>` entry must explicitly declare `model` and `protocol`, with protocol one of
-`responses`, `chat-completions`, or `anthropic`. A model selecting an unavailable endpoint makes
-the configuration invalid. All providers are validated, including inactive ones.
+`responses`, `chat-completions`, `anthropic`, or `google` (alias `gemini`). A model selecting an unavailable endpoint makes
+the configuration invalid. All providers are validated, including inactive ones. `googleUrl` is optional until a model selects `protocol: "google"`; when omitted, it defaults to `"unavailable"`.
 
 For migration, replace string model entries with these objects, remove `responsesModels`, and
-add `anthropicUrl`. There is no implicit protocol default. The spelling aliases `antrophicUrl`
+add `anthropicUrl` and optional `googleUrl`. There is no implicit protocol default. The spelling aliases `antrophicUrl`
 and protocol `antrophic` are accepted. `balanceUrl` is optional.
+
+Google requests use `x-goog-api-key` (or `Authorization: Bearer` for OAuth `ya29.` tokens), format tool schemas with `parametersJsonSchema`, and preserve `thoughtSignature` across tool continuation turns. Gemini 3+ models map thinking effort to `thinkingLevel` (`MINIMAL`, `LOW`, `MEDIUM`, `HIGH`), while Gemini 2.5 models map to `thinkingBudget`.
 
 Anthropic requests use `x-api-key` and `anthropic-version: 2023-06-01`. Optional per-model
 `thinkingMode` is `enabled` (default; manual token budget), `adaptive` (effort-based thinking),

@@ -23,7 +23,11 @@ class LLMSummaryUpstreamTest {
             val endpoint = "https://summary.example/${protocol.wireValue}"
             val config = LLMSummaryConfig("summary", endpoint, "summary-token", "summary-test", 8192, protocol, "enabled")
             val engine = MockEngine { httpRequest ->
-                assertEquals(endpoint, httpRequest.url.toString())
+                if (protocol == LLMProtocol.GOOGLE) {
+                    assertEquals("https://summary.example/google/models/summary-test:generateContent", httpRequest.url.toString())
+                } else {
+                    assertEquals(endpoint, httpRequest.url.toString())
+                }
                 val body = JsonParser.parseString((httpRequest.body as TextContent).text).asJsonObject
                 assertFalse(body.has("tools"))
                 assertFalse(body.has("web_search_options"))
@@ -59,6 +63,15 @@ class LLMSummaryUpstreamTest {
                         respond("""{"type":"text-delta","text":"summary"}
 {"type":"finish","finishReason":"stop","totalUsage":{"inputTokens":3,"outputTokens":2}}
 """, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/x-ndjson"))
+                    }
+                    LLMProtocol.GOOGLE -> {
+                        assertEquals("summary-token", httpRequest.headers["x-goog-api-key"])
+                        assertEquals(null, httpRequest.headers[HttpHeaders.Authorization])
+                        assertTrue(body.has("contents"))
+                        assertTrue(body.has("systemInstruction"))
+                        assertEquals(1200, body.getAsJsonObject("generationConfig").get("maxOutputTokens").asInt)
+                        respond("""{"candidates":[{"content":{"role":"model","parts":[{"text":"summary"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":3,"candidatesTokenCount":2,"totalTokenCount":5}}""",
+                            HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
                     }
                 }
             }

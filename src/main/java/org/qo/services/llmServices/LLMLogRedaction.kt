@@ -11,11 +11,11 @@ internal object LLMLogRedaction {
 	private val gson = GsonBuilder().disableHtmlEscaping().serializeNulls().setPrettyPrinting().create()
 	private val sensitiveKeys = setOf(
 		"authorization", "api_key", "apikey", "api_token", "apitoken", "access_token", "refresh_token",
-		"token", "password", "client_secret", "cookie", "set-cookie", "x-api-key",
+		"token", "password", "client_secret", "cookie", "set-cookie", "x-api-key", "x-goog-api-key",
 	)
 	private val bearerPattern = Regex("""(?i)\bBearer\s+[a-zA-Z0-9._~+/=-]+""")
 	private val dataPattern = Regex("""data:[a-zA-Z0-9.+/-]+;base64,[a-zA-Z0-9+/=_-]+""")
-	private val secretPattern = Regex("""(?i)("(?:authorization|api_key|apikey|api_token|apitoken|access_token|refresh_token|token|password|client_secret|cookie|set-cookie|x-api-key)"\s*:\s*)"(?:\\.|[^"\\])*"""")
+	private val secretPattern = Regex("""(?i)("(?:authorization|api_key|apikey|api_token|apitoken|access_token|refresh_token|token|password|client_secret|cookie|set-cookie|x-api-key|x-goog-api-key)"\s*:\s*)"(?:\\.|[^"\\])*"""")
 
 	fun formatBody(body: String, parseJson: Boolean = true): String {
 		val json = if (parseJson) runCatching { JsonParser.parseString(body) }.getOrNull() else null

@@ -11,6 +11,7 @@ enum class LLMProtocol(val wireValue: String, val endpointKey: String) {
 	CHAT_COMPLETIONS("chat-completions", "chatCompletionsUrl"),
 	RESPONSES("responses", "responsesUrl"),
 	ANTHROPIC("anthropic", "anthropicUrl"),
+	GOOGLE("google", "googleUrl"),
 	@Deprecated("Command Code is deprecated")
 	COMMANDCODE("commandcode", "commandCodeUrl");
 
@@ -19,6 +20,7 @@ enum class LLMProtocol(val wireValue: String, val endpointKey: String) {
 			"chat-completions", "chat_completions" -> CHAT_COMPLETIONS
 			"responses" -> RESPONSES
 			"anthropic", "antrophic" -> ANTHROPIC
+			"google", "gemini" -> GOOGLE
 			"commandcode", "command-code" -> COMMANDCODE
 			else -> throw IllegalArgumentException("Unknown LLM protocol '$value'")
 		}
@@ -121,6 +123,7 @@ data class LLMProvider(
 	val fallback: LLMProvider? = null,
 	val fallbackProviders: List<LLMProvider> = emptyList(),
 	val imageGeneration: LLMImageGenerationConfig? = null,
+	val googleUrl: String = "unavailable",
 ) {
 	fun forMode(mode: String): LLMProvider = when {
 		fallback != null && !models.containsKey(mode.lowercase(Locale.ROOT)) -> fallback.forMode(mode)
@@ -151,6 +154,7 @@ data class LLMProvider(
 		LLMProtocol.CHAT_COMPLETIONS -> chatCompletionsUrl
 		LLMProtocol.RESPONSES -> responsesUrl
 		LLMProtocol.ANTHROPIC -> anthropicUrl
+		LLMProtocol.GOOGLE -> googleUrl
 		LLMProtocol.COMMANDCODE -> commandCodeUrl
 	}.also { require(!isUnavailable(it)) { "${protocol.wireValue} endpoint is unavailable for provider '$name'" } }
 
@@ -245,6 +249,7 @@ data class LLMProvider(
 				chatCompletionsUrl = readEndpoint(configured, selectedName, LLMProtocol.CHAT_COMPLETIONS),
 				responsesUrl = readEndpoint(configured, selectedName, LLMProtocol.RESPONSES),
 				anthropicUrl = readEndpoint(configured, selectedName, LLMProtocol.ANTHROPIC),
+				googleUrl = readEndpoint(configured, selectedName, LLMProtocol.GOOGLE),
 				commandCodeUrl = readEndpoint(configured, selectedName, LLMProtocol.COMMANDCODE),
 				apiToken = token,
 				models = models,
@@ -323,7 +328,7 @@ data class LLMProvider(
 			val value = (configured.get(protocol.endpointKey)
 				?: if (protocol == LLMProtocol.ANTHROPIC) configured.get("antrophicUrl") else null)
 				?.asString?.trim()
-				?: if (protocol == LLMProtocol.COMMANDCODE) "unavailable" else
+				?: if (protocol in setOf(LLMProtocol.GOOGLE, LLMProtocol.COMMANDCODE)) "unavailable" else
 					throw IllegalArgumentException("${protocol.endpointKey} not defined in provider '$providerName'")
 			if (!isUnavailable(value)) {
 				val uri = runCatching { URI(value) }.getOrNull()

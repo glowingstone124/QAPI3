@@ -309,10 +309,15 @@ class LLMServices(
 		if (!debugPrompt) {
 			return
 		}
-		val redacted = body.replace(
-			Regex("""data:image/[a-zA-Z0-9.+-]+;base64,[a-zA-Z0-9+/=_-]+"""),
-			"data:image/<redacted>;base64,<redacted>",
-		)
+		val redacted = body
+			.replace(
+				Regex("""data:image/[a-zA-Z0-9.+-]+;base64,[a-zA-Z0-9+/=_-]+"""),
+				"data:image/<redacted>;base64,<redacted>",
+			)
+			.replace(
+				Regex("""("inlineData"\s*:\s*\{\s*"mimeType"\s*:\s*"[^"]+"\s*,\s*"data"\s*:\s*")[a-zA-Z0-9+/=_-]+(")"""),
+				"$1<redacted>$2",
+			)
 		val clipped = if (redacted.length > debugPromptMaxChars) {
 			redacted.take(debugPromptMaxChars) + "\n...<clipped ${redacted.length - debugPromptMaxChars} chars>"
 		} else {
@@ -323,8 +328,14 @@ class LLMServices(
 		println("===== END LLM REQUEST BODY [$source] =====")
 	}
 
-	internal fun logUpstreamRequest(source: String, body: String, provider: LLMProvider, api: String) {
-		val model = runCatching {
+	internal fun logUpstreamRequest(
+		source: String,
+		body: String,
+		provider: LLMProvider,
+		api: String,
+		modelOverride: String? = null,
+	) {
+		val model = modelOverride?.takeIf { it.isNotBlank() } ?: runCatching {
 			JsonParser.parseString(body).asJsonObject.let { request ->
 				request.get("model")?.asString ?: request.getAsJsonObject("params")?.get("model")?.asString
 			}

@@ -89,6 +89,21 @@ class LLMProviderProtocolTest {
         assertEquals("https://api.commandcode.ai/alpha/generate", loaded.endpoint(LLMProtocol.COMMANDCODE))
     }
 
+    @Test fun `google endpoint is optional until a model selects it`() {
+        val root = configuration()
+        assertEquals("unavailable", load(root).googleUrl)
+        provider(root).getAsJsonObject("models").getAsJsonObject("fast").addProperty("protocol", "google")
+        assertFailsWith<IllegalArgumentException> { load(root) }
+        provider(root).addProperty("googleUrl", "https://generativelanguage.googleapis.com/v1beta")
+        val loaded = load(root)
+        assertEquals(LLMProtocol.GOOGLE, loaded.protocol("fast"))
+        assertEquals("https://generativelanguage.googleapis.com/v1beta", loaded.endpoint(LLMProtocol.GOOGLE))
+
+        provider(root).getAsJsonObject("models").getAsJsonObject("fast").addProperty("protocol", "gemini")
+        val loadedGemini = load(root)
+        assertEquals(LLMProtocol.GOOGLE, loadedGemini.protocol("fast"))
+    }
+
     @Test fun `deprecated root commandcode switch is ignored`() {
         val root = configuration()
         root.addProperty("enableCommandCode", true)

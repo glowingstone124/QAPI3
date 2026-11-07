@@ -29,6 +29,7 @@ internal object LLMAdapterRegistry {
 		LLMWebSearchAdapter,
 		LLMResponsesAdapter,
 		LLMAnthropicAdapter,
+		LLMGoogleAdapter,
 		LLMCommandCodeAdapter,
 	).also { registered ->
 		val protocols = registered.map(LLMAdapter::protocol)
